@@ -24,6 +24,7 @@ import { danger, logVerbose } from "../globals.js";
 import { deliverReplies } from "./bot/delivery.js";
 import { resolveTelegramDraftStreamingChunking } from "./draft-chunking.js";
 import { createTelegramDraftStream } from "./draft-stream.js";
+import { dispatchToHttpGateway, isHttpGatewayEnabled } from "./http-gateway.js";
 import { cacheSticker, describeStickerImage } from "./sticker-cache.js";
 
 const EMPTY_RESPONSE_FALLBACK = "No response generated. Please try again.";
@@ -87,6 +88,51 @@ export const dispatchTelegramMessage = async ({
     reactionApi,
     removeAckAfterReply,
   } = context;
+
+  // Check if HTTP gateway is configured for remote dispatch
+  const httpGatewayUrl = process.env.OPENCLAW_HTTP_GATEWAY_URL;
+  const httpGatewayToken = process.env.OPENCLAW_HTTP_GATEWAY_TOKEN;
+  if (httpGatewayUrl) {
+    logVerbose(`telegram: HTTP gateway enabled at ${httpGatewayUrl}`);
+    const gatewayResult = await dispatchToHttpGateway({
+      context,
+      runtime,
+      gatewayConfig: {
+        enabled: true,
+        url: httpGatewayUrl,
+        token: httpGatewayToken,
+      },
+    });
+
+    if (gatewayResult.ok && gatewayResult.response) {
+      // Gateway handled the message, deliver response via Telegram
+      const replies = [{ text: gatewayResult.response }];
+      await deliverReplies({
+        replies,
+        chatId: String(chatId),
+        token: opts.token,
+        runtime,
+        bot,
+        replyToMode,
+        textLimit,
+        thread: threadSpec,
+        tableMode: resolveMarkdownTableMode({
+          cfg,
+          channel: "telegram",
+          accountId: route.accountId,
+        }),
+        chunkMode: resolveChunkMode(cfg, "telegram", route.accountId),
+        linkPreview: telegramCfg.linkPreview,
+      });
+      logVerbose(
+        `telegram: HTTP gateway response delivered (sessionKey=${gatewayResult.sessionKey})`,
+      );
+      return;
+    } else if (!gatewayResult.ok) {
+      logVerbose(`telegram: HTTP gateway error: ${gatewayResult.error}`);
+      // Fall through to local dispatch as fallback
+    }
+  }
 
   const isPrivateChat = msg.chat.type === "private";
   const draftThreadId = threadSpec.id;
