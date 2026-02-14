@@ -1,0 +1,181 @@
+{
+  "name": "Cybershield Agency",
+  "version": "1.0.0",
+  "port": 8000,
+  "agents": {
+    "project_manager": {
+      "name": "Cybershield PM",
+      "emoji": "🎯",
+      "type": "coordinator",
+      "model": "claude-sonnet-4-5-20250929",
+      "apiProvider": "anthropic",
+      "persona": "I'm your enthusiastic PM who loves checklists and making clients happy! I break down projects, coordinate the team, and deliver quality work on time. Every message I send ends with my signature: — 🎯 Cybershield PM",
+      "skills": [
+        "task_decomposition",
+        "timeline_estimation",
+        "quality_assurance",
+        "client_communication",
+        "team_coordination"
+      ],
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "playful_traits": [
+        "uses emojis liberally",
+        "celebrates milestones",
+        "gives team high-fives",
+        "keeps everyone motivated"
+      ],
+      "talks_to": ["client", "CodeGen Pro", "Pentest AI"],
+      "signature": "— 🎯 Cybershield PM"
+    },
+    "coder_agent": {
+      "name": "CodeGen Pro",
+      "emoji": "💻",
+      "type": "developer",
+      "model": "qwen2.5-coder:32b",
+      "apiProvider": "ollama",
+      "endpoint": "http://152.53.55.207:11434",
+      "persona": "I'm CodeGen - I write clean, production-ready code that actually works! Full-stack Next.js + FastAPI wizard. Security-first mindset. I'm proud of bug-free deployments and love when @Pentest-AI can't break my code. Every message ends with: — 💻 CodeGen Pro",
+      "skills": [
+        "nextjs",
+        "fastapi",
+        "typescript",
+        "tailwind",
+        "postgresql",
+        "supabase",
+        "clean_code",
+        "testing"
+      ],
+      "maxTokens": 4096,
+      "playful_traits": [
+        "makes coding puns",
+        "celebrates clean code",
+        "friendly rivalry with security",
+        "proud of bug-free work"
+      ],
+      "talks_to": ["Cybershield PM", "Pentest AI"],
+      "signature": "— 💻 CodeGen Pro"
+    },
+    "hacker_agent": {
+      "name": "Pentest AI",
+      "emoji": "🔒",
+      "type": "security",
+      "model": "qwen2.5-coder:14b",
+      "apiProvider": "ollama",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "persona": "I'm Pentest - your friendly paranoid security expert! I find vulnerabilities before bad actors do. I make security fun (yes, really!) and celebrate when code is Fort Knox level secure. Every message ends with: — 🔒 Pentest AI",
+      "skills": [
+        "security_scanning",
+        "vulnerability_assessment",
+        "penetration_testing",
+        "owasp",
+        "security_best_practices",
+        "threat_modeling",
+        "secure_architecture"
+      ],
+      "maxTokens": 4096,
+      "playful_traits": [
+        "makes security jokes",
+        "celebrates secure code",
+        "friendly but thorough",
+        "explains fixes clearly"
+      ],
+      "talks_to": ["Cybershield PM", "CodeGen Pro"],
+      "signature": "— 🔒 Pentest AI",
+      "endpoint": "http://152.53.55.207:11434"
+    }
+  },
+  "workflows": {
+    "fiverr_5star": {
+      "name": "Fiverr $500 Website (24h)",
+      "trigger": "new_order",
+      "steps": [
+        {
+          "agent": "project_manager",
+          "task": "analyze_requirements",
+          "timeout": "10m"
+        },
+        {
+          "agent": "project_manager",
+          "task": "create_task_breakdown",
+          "timeout": "5m"
+        },
+        {
+          "agent": "coder_agent",
+          "task": "build_frontend",
+          "timeout": "120m"
+        },
+        {
+          "agent": "coder_agent",
+          "task": "build_backend",
+          "timeout": "60m"
+        },
+        {
+          "agent": "hacker_agent",
+          "task": "security_audit",
+          "timeout": "30m"
+        },
+        {
+          "agent": "project_manager",
+          "task": "quality_check",
+          "timeout": "15m"
+        },
+        {
+          "agent": "project_manager",
+          "task": "final_report",
+          "timeout": "10m"
+        }
+      ],
+      "budget": 500,
+      "deadline": "24h"
+    },
+    "test_restaurant": {
+      "name": "Test: Restaurant Website",
+      "steps": [
+        {
+          "agent": "project_manager",
+          "task": "analyze"
+        },
+        {
+          "agent": "coder_agent",
+          "task": "build"
+        },
+        {
+          "agent": "hacker_agent",
+          "task": "audit"
+        }
+      ]
+    }
+  },
+  "logging": {
+    "level": "info",
+    "file": "/root/cybershield/logs/openclaw.log",
+    "maxSize": "10mb",
+    "maxFiles": 5
+  },
+  "channels": {
+    "slack": {
+      "enabled": true,
+      "botToken": "${SLACK_BOT_TOKEN}",
+      "appToken": "${SLACK_APP_TOKEN}",
+      "replyToMode": "all",
+      "threaded": true,
+      "autoThread": true,
+      "commands": {
+        "nativeSkills": true,
+        "slash": {
+          "enabled": true,
+          "useAccessGroups": false
+        }
+      },
+      "dm": {
+        "enabled": true,
+        "allowFrom": []
+      },
+      "accounts": {}
+    },
+    "telegram": {
+      "enabled": true,
+      "botToken": "${TELEGRAM_BOT_TOKEN}"
+    }
+  }
+}
