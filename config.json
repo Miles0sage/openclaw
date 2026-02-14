@@ -43,7 +43,22 @@
         "postgresql",
         "supabase",
         "clean_code",
-        "testing"
+        "testing",
+        "repository_scanning",
+        "git_automation",
+        "code_analysis"
+      ],
+      "tools": [
+        {
+          "name": "read_repo",
+          "description": "Clone and analyze GitHub repositories",
+          "capabilities": ["git_clone", "file_read", "git_log"]
+        },
+        {
+          "name": "generate_summary",
+          "description": "Create project summaries from repo analysis",
+          "capabilities": ["tech_stack_detection", "architecture_diagram", "commit_analysis"]
+        }
       ],
       "maxTokens": 4096,
       "playful_traits": [
