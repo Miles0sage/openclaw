@@ -13,8 +13,15 @@ ENABLE_TELEGRAM = "true"
 ENABLE_OPENAI = "true"
 ENABLE_BRAVE_SEARCH = "true"
 
+# Gateway configuration
+OPENCLAW_GATEWAY = "http://152.53.55.207:18789"
+
 # Set secrets via: wrangler secret put SECRET_NAME
-# Secrets configured:
+# Required secrets:
+# - OPENCLAW_TOKEN (authentication token for worker)
+# - ANTHROPIC_API_KEY (if needed by gateway)
+# - GITHUB_TOKEN (optional, for GitHub integrations)
+# Existing secrets:
 # - SLACK_BOT_TOKEN
 # - OPENAI_API_KEY
 # - GITHUB_PAT
