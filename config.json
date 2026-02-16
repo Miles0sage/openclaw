@@ -266,6 +266,22 @@
     "telegram": {
       "enabled": true,
       "botToken": "${TELEGRAM_BOT_TOKEN}"
+    },
+    "discord": {
+      "enabled": true,
+      "botToken": "${DISCORD_BOT_TOKEN}",
+      "intents": ["GUILDS", "GUILD_MESSAGES", "DIRECT_MESSAGES", "MESSAGE_CONTENT"],
+      "status": {
+        "status": "online",
+        "activities": [
+          {
+            "name": "OpenClaw agents",
+            "type": "WATCHING"
+          }
+        ]
+      },
+      "autoReply": true,
+      "embedColor": "3498db"
     }
   }
 }
