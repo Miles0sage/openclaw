@@ -1,0 +1,627 @@
+🦞 OpenClaw Gateway starting on port 18789...
+   Protocol: OpenClaw v3
+   WebSocket: ws://0.0.0.0:18789/ws
+INFO:     Started server process [812613]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:18789 (Press CTRL+C to quit)
+INFO:     47.215.132.182:0 - "WebSocket /" [accepted]
+2026-02-09 11:53:10,356 - openclaw_gateway - INFO - [WS] New connection: 84874a54-4400-4964-a097-cd58c9c46a74
+INFO:     connection open
+INFO:     47.215.132.182:0 - "WebSocket /" [accepted]
+2026-02-09 11:53:11,366 - openclaw_gateway - INFO - [WS] New connection: 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73
+INFO:     connection open
+2026-02-09 11:53:12,198 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - First message type: req, method: connect
+2026-02-09 11:53:12,198 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Request ab3469e6-c044-401c-a402-836d6d0bb953: connect
+2026-02-09 11:53:12,199 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Responded to connect request
+2026-02-09 11:53:12,303 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Request 6e9b0710-c078-4ba5-ab34-61f077dedb23: agent.identity.get
+2026-02-09 11:53:12,303 - openclaw_gateway - INFO - Handling method: agent.identity.get
+2026-02-09 11:53:12,304 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Responded to agent.identity.get
+2026-02-09 11:53:12,304 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Request 1671c684-b93f-43be-9c2a-8df0a2c15c31: agents.list
+2026-02-09 11:53:12,304 - openclaw_gateway - INFO - Handling method: agents.list
+2026-02-09 11:53:12,304 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Responded to agents.list
+2026-02-09 11:53:12,304 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Request d631eea8-b500-4eb3-8d46-4ef6dde01af9: node.list
+2026-02-09 11:53:12,304 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:53:12,304 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Responded to node.list
+2026-02-09 11:53:12,304 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Request 2c655e49-c6e0-46d1-aabc-cc1ccc88c8d2: device.pair.list
+2026-02-09 11:53:12,304 - openclaw_gateway - INFO - Handling method: device.pair.list
+2026-02-09 11:53:12,304 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Responded to device.pair.list
+2026-02-09 11:53:12,305 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Request 85a8f17b-062f-472d-9822-676d8ade155e: chat.history
+2026-02-09 11:53:12,305 - openclaw_gateway - INFO - Handling method: chat.history
+2026-02-09 11:53:12,305 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Responded to chat.history
+2026-02-09 11:53:12,305 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Request 602e7b55-288b-40f4-b9a6-c57d4a63b390: sessions.list
+2026-02-09 11:53:12,305 - openclaw_gateway - INFO - Handling method: sessions.list
+2026-02-09 11:53:12,305 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Responded to sessions.list
+2026-02-09 11:53:13,142 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Request 3bb8cf34-6aeb-4f6a-82d5-649eacb7495d: node.list
+2026-02-09 11:53:13,143 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:53:13,143 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Responded to node.list
+2026-02-09 11:53:13,148 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - First message type: req, method: connect
+2026-02-09 11:53:13,148 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request a9f5f7b0-e2e2-4692-a413-2a5937e952c4: connect
+2026-02-09 11:53:13,148 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to connect request
+2026-02-09 11:53:13,245 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 483fd232-0eff-4f4f-b77b-d798821de944: agent.identity.get
+2026-02-09 11:53:13,245 - openclaw_gateway - INFO - Handling method: agent.identity.get
+2026-02-09 11:53:13,245 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to agent.identity.get
+2026-02-09 11:53:13,251 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request ad5d1b45-a9e1-4aba-8221-38d2a28b2c27: agents.list
+2026-02-09 11:53:13,251 - openclaw_gateway - INFO - Handling method: agents.list
+2026-02-09 11:53:13,252 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to agents.list
+2026-02-09 11:53:13,252 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 4472c175-14d3-4663-a1fb-81731a6ce86a: node.list
+2026-02-09 11:53:13,252 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:53:13,252 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 11:53:13,252 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request d7d36898-9d70-40a7-a314-db6b0b1306b6: device.pair.list
+2026-02-09 11:53:13,252 - openclaw_gateway - INFO - Handling method: device.pair.list
+2026-02-09 11:53:13,252 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to device.pair.list
+2026-02-09 11:53:13,252 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request a497475b-d800-4356-9f49-c382d8946c6c: chat.history
+2026-02-09 11:53:13,252 - openclaw_gateway - INFO - Handling method: chat.history
+2026-02-09 11:53:13,252 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to chat.history
+2026-02-09 11:53:13,252 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request e8673451-d61b-4a1a-a05b-42bd06be024a: sessions.list
+2026-02-09 11:53:13,252 - openclaw_gateway - INFO - Handling method: sessions.list
+2026-02-09 11:53:13,253 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to sessions.list
+INFO:     127.0.0.1:42542 - "GET / HTTP/1.1" 200 OK
+2026-02-09 11:53:17,169 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 2e262247-e9af-427a-befa-3807a7a371a6: node.list
+2026-02-09 11:53:17,169 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:53:17,169 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 11:53:18,154 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Request 32de2667-ca37-4e4c-a0f1-4147b2870899: node.list
+2026-02-09 11:53:18,155 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:53:18,155 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Responded to node.list
+2026-02-09 11:54:13,758 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Request 95be9c5c-8a05-4026-a84a-75824eb78cd2: node.list
+2026-02-09 11:54:13,759 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:54:13,759 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Responded to node.list
+2026-02-09 11:54:15,273 - openclaw_gateway - ERROR - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Error: WebSocketDisconnect: (1001, '')
+2026-02-09 11:54:15,274 - openclaw_gateway - INFO - [WS] 84874a54-4400-4964-a097-cd58c9c46a74 - Disconnected
+INFO:     connection closed
+INFO:     47.215.132.182:0 - "WebSocket /" [accepted]
+2026-02-09 11:54:16,020 - openclaw_gateway - INFO - [WS] New connection: fd15cb00-298c-491d-a6c5-104627659e84
+INFO:     connection open
+2026-02-09 11:54:16,933 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - First message type: req, method: connect
+2026-02-09 11:54:16,933 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request c6f5444f-4670-4172-b44c-29cada4ac8f9: connect
+2026-02-09 11:54:16,934 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to connect request
+2026-02-09 11:54:17,039 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 1ea1eb1b-4595-407c-a876-740e58d0c09e: agent.identity.get
+2026-02-09 11:54:17,039 - openclaw_gateway - INFO - Handling method: agent.identity.get
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to agent.identity.get
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 31293db1-d3d4-40af-b6f3-2fcd7f1d118a: agents.list
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - Handling method: agents.list
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to agents.list
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 5d7ef895-ad39-4d5d-83c1-00c7e1078d4f: node.list
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 01b6ab89-3e1d-4a01-80c8-d9fdef04f7d6: device.pair.list
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - Handling method: device.pair.list
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to device.pair.list
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request aceb75dc-ae91-47e0-afc6-86762f3e7c03: chat.history
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - Handling method: chat.history
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to chat.history
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 7f572c42-8d51-41d9-b7a2-d5303d110be4: sessions.list
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - Handling method: sessions.list
+2026-02-09 11:54:17,040 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to sessions.list
+2026-02-09 11:54:17,133 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 7f5924f1-1dd1-4419-bd85-31f8a2800edf: node.list
+2026-02-09 11:54:17,133 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:54:17,133 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 11:54:20,463 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request d9034d21-a9a5-4b9b-b75a-9a86d4c351b8: chat.send
+2026-02-09 11:54:20,464 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Ack chat.send: 3fb40330-d985-4a61-8365-c83205d492d1
+2026-02-09 11:54:24,313 - httpx - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-02-09 11:54:24,326 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Sent chat.final event for 3fb40330-d985-4a61-8365-c83205d492d1
+2026-02-09 11:54:24,326 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 27b84180-58c2-451f-9615-7e7210c28edf: node.list
+2026-02-09 11:54:24,326 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:54:24,327 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:54:24,432 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request ead13d35-19b5-44e6-a4d1-60e459aac6ca: chat.history
+2026-02-09 11:54:24,432 - openclaw_gateway - INFO - Handling method: chat.history
+2026-02-09 11:54:24,432 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to chat.history
+2026-02-09 11:54:25,781 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 01949ffb-d86a-4908-9c2f-899d2df5e0cf: node.list
+2026-02-09 11:54:25,781 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:54:25,782 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:54:31,136 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 9cfed5ad-9d61-4495-ac6a-35bd9f66f9ad: node.list
+2026-02-09 11:54:31,136 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:54:31,136 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:54:36,142 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 7d3140e3-3f55-412f-85fb-3a64dd916d6b: node.list
+2026-02-09 11:54:36,142 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:54:36,143 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:54:41,143 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 86673704-4c97-454a-bbea-3086eb883eec: node.list
+2026-02-09 11:54:41,143 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:54:41,143 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:54:46,157 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 97fe8d66-8bc6-4e6a-a26d-b6bb5a4d3a5d: node.list
+2026-02-09 11:54:46,157 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:54:46,157 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:54:51,145 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request e4bee765-bbe5-43be-9331-3b4681baacb7: node.list
+2026-02-09 11:54:51,145 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:54:51,145 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:54:56,148 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 1967fef0-2a31-43a9-9b94-b265e1d276fd: node.list
+2026-02-09 11:54:56,148 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:54:56,148 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:55:00,764 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request e142969a-2dd5-4385-bfc5-ea35bc2ca10c: node.list
+2026-02-09 11:55:00,764 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:55:00,764 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:55:05,761 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 7e0eae9d-a65d-43e4-8f6b-3b12579ab9be: node.list
+2026-02-09 11:55:05,762 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:55:05,762 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:55:07,094 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 64a39356-0363-4841-be2c-7036fb914c55: chat.send
+2026-02-09 11:55:07,094 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Ack chat.send: 94cad2f6-ceb1-4e47-82c3-53dd51cc874c
+2026-02-09 11:55:13,718 - httpx - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-02-09 11:55:13,720 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Sent chat.final event for 94cad2f6-ceb1-4e47-82c3-53dd51cc874c
+2026-02-09 11:55:13,722 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request a59061b8-ff84-4d9c-9c78-5fc4b445648a: node.list
+2026-02-09 11:55:13,722 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:55:13,722 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:55:13,825 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 5371946f-7fe5-4c18-823c-76bf109fb1aa: chat.history
+2026-02-09 11:55:13,825 - openclaw_gateway - INFO - Handling method: chat.history
+2026-02-09 11:55:13,826 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to chat.history
+2026-02-09 11:55:15,767 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request a1d15e80-dcd2-4b94-8231-3252f3bd292a: node.list
+2026-02-09 11:55:15,767 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:55:15,767 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:55:17,148 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 5e10e83b-9672-4ead-a327-378e05b049fc: node.list
+2026-02-09 11:55:17,149 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:55:17,149 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 11:55:20,761 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 3162edaa-79ff-4e72-88f0-7309cad23bd4: node.list
+2026-02-09 11:55:20,762 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:55:20,762 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:55:25,781 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 6708414a-adf4-40ea-a618-76517dfed4b5: node.list
+2026-02-09 11:55:25,781 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:55:25,781 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:55:30,791 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 923a42de-87bf-4928-8c82-42f36c057444: node.list
+2026-02-09 11:55:30,791 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:55:30,791 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:55:36,151 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 82522aa8-c229-4f99-8718-e601d0342171: node.list
+2026-02-09 11:55:36,151 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:55:36,152 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:55:41,149 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 77bddf5c-73ea-4968-be1d-d14003584084: node.list
+2026-02-09 11:55:41,149 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:55:41,150 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:55:46,145 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 0a1e8ec7-79b7-4dcf-962e-bd5769d5772c: node.list
+2026-02-09 11:55:46,145 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:55:46,146 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:55:51,141 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 28eb9d0e-2b76-497d-9e11-8b84dd024543: node.list
+2026-02-09 11:55:51,141 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:55:51,142 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:55:56,152 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 49bd0ac8-a96c-4abe-8532-5f16d311dc01: node.list
+2026-02-09 11:55:56,152 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:55:56,152 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:56:01,148 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 643a6ae6-ae96-45a4-8ed7-4d0280b0d359: node.list
+2026-02-09 11:56:01,148 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:56:01,149 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:56:06,151 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 4b8fe9d0-adbb-427a-8da3-0b0d46c305a2: node.list
+2026-02-09 11:56:06,151 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:56:06,151 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:56:11,142 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 53f4599e-3894-41ed-b047-512cd23d78db: node.list
+2026-02-09 11:56:11,142 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:56:11,143 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:56:16,139 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 24307494-eb55-44b5-a9a6-f5130e0f61f8: node.list
+2026-02-09 11:56:16,139 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:56:16,140 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:56:17,155 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request f494d625-205a-487e-a510-71c0619d67c5: node.list
+2026-02-09 11:56:17,156 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:56:17,156 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 11:56:21,135 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request dd178119-cb6a-4d98-b581-bed2c11c10f7: node.list
+2026-02-09 11:56:21,135 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:56:21,136 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:56:26,147 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 2514bb84-ee3c-4964-8adc-66557b36e623: node.list
+2026-02-09 11:56:26,148 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:56:26,148 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:57:17,158 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 2959665e-dded-44b0-b609-49c478b87576: node.list
+2026-02-09 11:57:17,158 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:57:17,158 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 11:57:17,232 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 1f47bf52-b121-4ab1-89bd-559d66c6573a: node.list
+2026-02-09 11:57:17,233 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:57:17,233 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:58:17,145 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request f0203ece-00ab-4e05-bb82-82890b2a4b9c: node.list
+2026-02-09 11:58:17,146 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:58:17,148 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 11:58:17,158 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request be5ea822-261a-419c-a60b-285edafe9928: node.list
+2026-02-09 11:58:17,158 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:58:17,160 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 11:59:17,151 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 767364e0-bfa8-4197-aac9-e51c1c3c1dbf: node.list
+2026-02-09 11:59:17,152 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:59:17,152 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 11:59:17,161 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 61706241-6f5e-457a-91f4-6959787b4d09: node.list
+2026-02-09 11:59:17,161 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 11:59:17,161 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:00:17,142 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 63881066-29e5-4651-a9f3-d81f919a315f: node.list
+2026-02-09 12:00:17,142 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:00:17,143 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:00:17,143 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 54e0896a-61db-4536-92ad-e168a68447be: node.list
+2026-02-09 12:00:17,143 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:00:17,143 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:01:17,144 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 74c06d31-2b61-4da5-a43d-5db4dda6a376: node.list
+2026-02-09 12:01:17,145 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:01:17,145 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:01:17,164 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request d46107b0-d270-4987-85f2-9380a172982a: node.list
+2026-02-09 12:01:17,164 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:01:17,165 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:02:17,151 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request da64f74c-dedb-44e8-bc6a-156643446144: node.list
+2026-02-09 12:02:17,151 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:02:17,152 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:02:17,171 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request bfe74e5e-1fc2-49c2-a24f-24f6d4c6aa07: node.list
+2026-02-09 12:02:17,171 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:02:17,171 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:03:17,154 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 96b63ac3-8b70-4f58-b47b-5f794b2d17fc: node.list
+2026-02-09 12:03:17,154 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:03:17,154 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:03:17,174 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 2f99ab50-341a-46a2-8da2-537edf1dc73d: node.list
+2026-02-09 12:03:17,174 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:03:17,174 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:04:17,141 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 36b4bf32-173a-4e09-91cb-a1aa64982d03: node.list
+2026-02-09 12:04:17,141 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:04:17,142 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:04:17,208 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 53c18143-fe33-4e70-ab6a-5b0c10275b8d: node.list
+2026-02-09 12:04:17,209 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:04:17,209 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:05:17,157 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 588b0491-86b5-4147-b075-4158bd7d2133: node.list
+2026-02-09 12:05:17,157 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:05:17,158 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:05:17,158 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 7322784c-0a60-48c5-aea1-700b09d0f2dd: node.list
+2026-02-09 12:05:17,158 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:05:17,158 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:06:17,157 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request cb3d7aaf-3a5b-4778-bfe8-b351c0fafb4e: node.list
+2026-02-09 12:06:17,158 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:06:17,158 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:06:17,173 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request c49299f2-c95f-40d8-a0e7-fa9f0c84f2ef: node.list
+2026-02-09 12:06:17,173 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:06:17,174 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:07:17,153 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 9da4e80d-3313-4056-be0a-e55fa81e0068: node.list
+2026-02-09 12:07:17,153 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:07:17,154 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:07:17,166 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 6ed40a88-36f7-4f43-b3be-cfaff91ae237: node.list
+2026-02-09 12:07:17,166 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:07:17,167 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:08:17,157 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 7c6f8498-5e8f-4ef9-b1ac-aa8ee9381171: node.list
+2026-02-09 12:08:17,157 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:08:17,157 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:08:17,170 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 366ced58-9fc2-4ec5-be7f-8afc2957657e: node.list
+2026-02-09 12:08:17,170 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:08:17,170 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:09:17,150 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request fcc583b3-bdb2-40fb-b7e0-47c0a1d30b64: node.list
+2026-02-09 12:09:17,150 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:09:17,151 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:09:17,165 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request b11332a6-873b-4ac4-9022-1394e4edc4a6: node.list
+2026-02-09 12:09:17,165 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:09:17,166 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:10:17,159 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 7aa01d77-8e7e-4206-9eb7-56e3159c56a1: node.list
+2026-02-09 12:10:17,160 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:10:17,160 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:10:17,164 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request e7362a69-521e-4c5b-9cb1-dd5099e6d22d: node.list
+2026-02-09 12:10:17,164 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:10:17,164 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:11:17,160 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request b3b80456-5304-4742-b963-0a9743220e5d: node.list
+2026-02-09 12:11:17,160 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:11:17,161 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:11:17,182 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 2b04c6db-bcb3-45d4-b5fe-8d68a7a4cc80: node.list
+2026-02-09 12:11:17,182 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:11:17,183 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:12:17,151 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 1688d594-c70c-4892-8795-e8ce45a5fcfb: node.list
+2026-02-09 12:12:17,152 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:12:17,152 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:12:17,163 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request bdf6a1eb-5f70-48a7-8adc-4fc2df65bf19: node.list
+2026-02-09 12:12:17,163 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:12:17,163 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:13:17,160 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request c388a6e1-db78-4720-9167-4db5e99f2567: node.list
+2026-02-09 12:13:17,160 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:13:17,160 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:13:17,191 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 458707a1-e003-4a16-80d5-29ad2f3e3120: node.list
+2026-02-09 12:13:17,191 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:13:17,192 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:14:17,160 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 570280e0-728a-464e-a3a1-66f3a19c767e: node.list
+2026-02-09 12:14:17,160 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:14:17,160 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:14:17,185 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 5e79417a-b7c2-4bf2-903f-06024a19de91: node.list
+2026-02-09 12:14:17,185 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:14:17,186 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:15:17,153 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 7e787f72-42cf-436b-8824-3a69d2a9535a: node.list
+2026-02-09 12:15:17,153 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:15:17,154 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:15:17,165 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 609360c5-7367-450b-81aa-e0fd09434118: node.list
+2026-02-09 12:15:17,166 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:15:17,166 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:15:42,534 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 516fc8ae-83e9-4bd9-b105-b9ab464164d4: node.list
+2026-02-09 12:15:42,534 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:15:42,534 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:15:46,153 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 5ce1523a-3e6d-47bf-b838-873794e0cae2: node.list
+2026-02-09 12:15:46,153 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:15:46,153 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:15:51,159 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request b8bfb4c8-8237-4e61-a4dc-eb1ee1a41a3e: node.list
+2026-02-09 12:15:51,159 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:15:51,159 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:15:56,146 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request fab9d4c1-4456-4097-a490-1cea2a74ccc3: node.list
+2026-02-09 12:15:56,147 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:15:56,147 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:16:01,157 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request e680c86a-ed34-4f36-9866-5dbe45173e15: node.list
+2026-02-09 12:16:01,158 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:16:01,158 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:16:06,142 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 6aa809eb-b892-4117-8df6-2907f8d03837: node.list
+2026-02-09 12:16:06,143 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:16:06,143 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:16:11,143 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 00d464b9-d70e-460d-97f3-b2c4df202075: node.list
+2026-02-09 12:16:11,143 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:16:11,144 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:16:16,163 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 57c5e550-bd4c-4e67-afa6-dc0ccc1cd85c: node.list
+2026-02-09 12:16:16,163 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:16:16,163 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:16:17,167 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 1b6c2922-018c-4de8-b7fb-ee60e414b7e7: node.list
+2026-02-09 12:16:17,167 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:16:17,168 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:16:21,147 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 328718c1-ffa4-4545-be50-df1ab5a51302: node.list
+2026-02-09 12:16:21,147 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:16:21,147 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:16:26,146 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request b4940ff4-0b1f-4105-8ea0-e0d9dd06a2e1: node.list
+2026-02-09 12:16:26,146 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:16:26,147 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:16:31,149 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 43c559c5-f428-4dd0-9e33-6437e49a6bed: node.list
+2026-02-09 12:16:31,149 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:16:31,150 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:16:36,153 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request bf2b3d4c-4c4d-46f8-95bd-e2fc662adfed: node.list
+2026-02-09 12:16:36,153 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:16:36,154 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:16:41,156 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 8e0845fd-c0a4-484c-b3ce-052e96db5650: node.list
+2026-02-09 12:16:41,156 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:16:41,157 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:17:17,156 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 7853ab7a-6f42-49ca-8f0e-0a6db2abece6: node.list
+2026-02-09 12:17:17,156 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:17:17,157 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:17:17,172 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 659009e2-23cd-4bba-a382-aa37f9eab073: node.list
+2026-02-09 12:17:17,172 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:17:17,173 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:18:17,158 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 11b703ca-99ce-4b98-98bd-1e52bf8eac93: node.list
+2026-02-09 12:18:17,159 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:18:17,159 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:18:17,172 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request bf4de26f-a0c9-49ce-9f56-d8bd5fc4faf4: node.list
+2026-02-09 12:18:17,173 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:18:17,173 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:19:17,177 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 076250db-5432-444b-b437-806ba00b96c6: node.list
+2026-02-09 12:19:17,177 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:19:17,177 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:19:17,193 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request c2abe7b7-4832-44d4-b3b4-51381269fa35: node.list
+2026-02-09 12:19:17,193 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:19:17,194 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:20:17,166 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 79647d4c-f7e1-4f0f-b41c-665d3a4fc86d: node.list
+2026-02-09 12:20:17,166 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:20:17,166 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:20:17,193 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 15b7d41f-dd29-4b7a-9e96-44afa9f62e05: node.list
+2026-02-09 12:20:17,193 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:20:17,193 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:20:48,052 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 93fb3c9b-22ea-4f09-b30a-36f9d77937b8: node.list
+2026-02-09 12:20:48,052 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:20:48,052 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:20:51,159 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 56ff2318-6d19-4ce5-b9ad-97122ab6bd49: node.list
+2026-02-09 12:20:51,159 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:20:51,159 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:20:56,156 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 1fb6fc76-6dd2-45e3-a173-3c682831c14d: node.list
+2026-02-09 12:20:56,156 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:20:56,156 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:21:01,159 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 396eda2a-899f-499d-a5b6-a7bd9ccbf302: node.list
+2026-02-09 12:21:01,159 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:21:01,159 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:21:06,152 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 8694ec5f-a108-4d55-a80a-dced6d587a8f: node.list
+2026-02-09 12:21:06,152 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:21:06,152 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:21:11,156 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 159580ff-432b-43d3-9856-ab87bf01a38b: node.list
+2026-02-09 12:21:11,156 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:21:11,157 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:21:16,153 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 806bf960-9ee3-40ad-b021-c5653d1f9da4: node.list
+2026-02-09 12:21:16,153 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:21:16,154 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:21:17,169 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 7bd51e58-3d37-411f-8954-0faad7e59c14: node.list
+2026-02-09 12:21:17,169 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:21:17,170 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:21:21,152 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 46ebf55d-b7d5-4a96-8d7d-6c18b50e3e92: node.list
+2026-02-09 12:21:21,153 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:21:21,153 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:21:26,150 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 98d2347e-b60f-4983-8b77-86c98de1df20: node.list
+2026-02-09 12:21:26,150 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:21:26,151 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:21:31,159 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 93b3833b-8ce2-4dae-b342-c3dbadb62978: node.list
+2026-02-09 12:21:31,159 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:21:31,159 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:21:36,159 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request f024be2a-e120-4017-b1c6-687dc390e236: node.list
+2026-02-09 12:21:36,159 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:21:36,159 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:21:41,156 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 8e993006-fa54-4f2a-b368-46f1cee7f6eb: node.list
+2026-02-09 12:21:41,156 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:21:41,157 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:21:46,150 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 8a499cff-ca07-4c60-85b0-60a5abaa3b42: node.list
+2026-02-09 12:21:46,150 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:21:46,150 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:22:17,159 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 44f5d256-3987-4744-a5a4-fdd2e3caf5ac: node.list
+2026-02-09 12:22:17,160 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:22:17,160 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:22:17,173 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 9108fcdb-aef4-455a-bf2b-d1cbe2ca589b: node.list
+2026-02-09 12:22:17,173 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:22:17,174 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:23:17,169 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 97fdfe23-b32b-4cbe-b9ea-51128cb583da: node.list
+2026-02-09 12:23:17,169 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:23:17,170 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:23:17,182 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request ac8d7b59-1698-43ef-92d9-770946facaa8: node.list
+2026-02-09 12:23:17,182 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:23:17,182 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:24:17,166 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 8d5f99a0-3f0b-49e1-8503-c1123e7f15d1: node.list
+2026-02-09 12:24:17,166 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:24:17,167 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:24:17,185 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 209fe3fa-973f-489f-b296-2887c2afe90c: node.list
+2026-02-09 12:24:17,185 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:24:17,186 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:25:17,185 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request b4f9de34-6367-492e-be9b-da5a8dbc3b8c: node.list
+2026-02-09 12:25:17,186 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:25:17,186 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:25:17,205 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request b39ee7cb-d2a6-4ffc-9721-c517e592c0ac: node.list
+2026-02-09 12:25:17,205 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:25:17,205 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:25:56,036 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request a29a38fd-71e9-4381-8d2b-a801b543b6ca: node.list
+2026-02-09 12:25:56,036 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:25:56,036 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:26:01,159 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 57866c46-85f8-453f-89ef-6fc372ea0fe3: node.list
+2026-02-09 12:26:01,159 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:26:01,160 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:26:05,789 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 25f0b6c7-6a19-40ae-b0af-bd8e4e77e8ea: node.list
+2026-02-09 12:26:05,789 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:26:05,790 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:26:10,414 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request b10e9362-aeb2-40dc-9501-69ded9c44d27: chat.send
+2026-02-09 12:26:10,414 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Ack chat.send: 6689758c-428e-49b1-b28a-4a31c260b16a
+2026-02-09 12:26:17,003 - httpx - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-02-09 12:26:17,009 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Sent chat.final event for 6689758c-428e-49b1-b28a-4a31c260b16a
+2026-02-09 12:26:17,009 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request ccd1a623-50a9-4688-8a2a-903d0a70d92d: node.list
+2026-02-09 12:26:17,009 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:26:17,009 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:26:17,114 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request f1f3330b-da76-4be9-be50-54d91939a807: chat.history
+2026-02-09 12:26:17,115 - openclaw_gateway - INFO - Handling method: chat.history
+2026-02-09 12:26:17,115 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to chat.history
+2026-02-09 12:26:17,163 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 0b674717-ff73-41c8-b7d2-db06f86fea38: node.list
+2026-02-09 12:26:17,164 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:26:17,164 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:26:20,777 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 43cc0652-fa4e-4385-a83a-6d6d0ee23b37: node.list
+2026-02-09 12:26:20,777 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:26:20,778 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:26:25,776 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 16f4b564-a325-44af-8334-03a6cd59a717: node.list
+2026-02-09 12:26:25,777 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:26:25,777 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:26:30,785 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 01bcf78c-3027-4e92-a76c-1dcf71d98369: node.list
+2026-02-09 12:26:30,785 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:26:30,785 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:26:32,786 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 0f77401e-e13f-479f-8392-f4bdb74a204f: chat.send
+2026-02-09 12:26:32,786 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Ack chat.send: 69d442f7-44fc-4e52-a244-4a9791aa326c
+2026-02-09 12:26:38,189 - httpx - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-02-09 12:26:38,191 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Sent chat.final event for 69d442f7-44fc-4e52-a244-4a9791aa326c
+2026-02-09 12:26:38,192 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 28eba989-84b3-41a5-9b64-adecdbf39796: node.list
+2026-02-09 12:26:38,192 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:26:38,192 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:26:38,298 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 0d435443-26e9-416d-b59b-f61764318503: chat.history
+2026-02-09 12:26:38,298 - openclaw_gateway - INFO - Handling method: chat.history
+2026-02-09 12:26:38,299 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to chat.history
+2026-02-09 12:26:40,781 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request f8d3a917-8f7c-412e-94bd-24b2ce0e9e4f: node.list
+2026-02-09 12:26:40,781 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:26:40,782 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:26:45,775 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request c86b5574-1e9b-4d9f-9825-49f30d61946f: node.list
+2026-02-09 12:26:45,775 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:26:45,776 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:26:50,782 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request bcb7033f-ec28-47e6-b826-6338713bb739: node.list
+2026-02-09 12:26:50,782 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:26:50,783 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:26:55,785 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 92ea3e83-c146-4f18-b3a2-6c22772fe44d: node.list
+2026-02-09 12:26:55,785 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:26:55,786 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:27:00,788 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 4986b969-32a8-42a9-9d8a-3f24410df329: node.list
+2026-02-09 12:27:00,788 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:27:00,788 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:27:05,791 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 8763be1a-3618-460a-8628-f864cc8f3898: node.list
+2026-02-09 12:27:05,791 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:27:05,791 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:27:10,791 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request c79b3ee7-6403-4fd6-aa79-22bd52909772: node.list
+2026-02-09 12:27:10,791 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:27:10,791 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:27:15,794 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 897ee245-840e-4fc9-a839-9bfbe06aad13: node.list
+2026-02-09 12:27:15,794 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:27:15,795 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:27:17,173 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 020a6afe-bdd6-4eb0-a901-6b1d888b55c0: node.list
+2026-02-09 12:27:17,173 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:27:17,173 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:27:20,798 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 20fb5c32-2b22-4dbb-9fca-3c29a231c5ae: node.list
+2026-02-09 12:27:20,798 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:27:20,799 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:27:25,779 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 8d7584bc-4029-4b4a-ba72-2554b850c237: node.list
+2026-02-09 12:27:25,779 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:27:25,779 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:27:30,785 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request dfe7914b-59ac-4040-bd34-0d8bbe984873: node.list
+2026-02-09 12:27:30,785 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:27:30,785 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:27:35,792 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 3b23d484-b57d-4e5c-bc2d-a6ee593892d3: node.list
+2026-02-09 12:27:35,792 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:27:35,792 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:27:40,775 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request bc1c8347-354f-4bb3-95dc-ffbc7e58bada: node.list
+2026-02-09 12:27:40,775 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:27:40,776 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:27:45,795 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 2b5a2836-3664-4b55-82a4-c72475397a43: node.list
+2026-02-09 12:27:45,795 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:27:45,795 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:27:50,789 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request ea1c2252-97f0-40b0-8311-6996349ac2ca: node.list
+2026-02-09 12:27:50,789 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:27:50,790 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:27:55,793 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 723c27ac-5db9-4f0b-8bd1-2c4d420a4bca: node.list
+2026-02-09 12:27:55,793 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:27:55,794 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:28:00,791 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 68e26345-d56c-4603-8e0f-85b60a7b4eb9: node.list
+2026-02-09 12:28:00,791 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:28:00,792 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:28:05,789 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request d8fdf82f-e4ff-4245-9d4f-1a222ff08e09: node.list
+2026-02-09 12:28:05,789 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:28:05,789 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:28:10,782 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 5845cbbf-d4e0-4343-9ff3-adb5f503be74: node.list
+2026-02-09 12:28:10,782 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:28:10,783 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:28:15,778 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request b6171096-70b3-4f54-b741-50a3e6dd231e: node.list
+2026-02-09 12:28:15,779 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:28:15,779 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:28:17,161 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 6aa7c6cd-dc43-4bfe-8e78-e5944ffe8c41: node.list
+2026-02-09 12:28:17,161 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:28:17,161 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:28:20,785 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request b2da4e67-a8b3-47d8-bff5-0a605a0e6aaa: node.list
+2026-02-09 12:28:20,786 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:28:20,786 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:28:25,797 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 7af7f1bb-fb89-4c30-ab07-3f5d08c69821: node.list
+2026-02-09 12:28:25,797 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:28:25,797 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:28:30,788 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 2c18090b-c074-498e-a775-ad87df737d1f: node.list
+2026-02-09 12:28:30,788 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:28:30,788 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:28:35,776 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 2ab1b1de-f391-4c08-86f2-faedfdb7c4cd: node.list
+2026-02-09 12:28:35,776 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:28:35,776 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:28:40,782 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 393f742d-347d-4b90-8283-9ccf17ce8a69: node.list
+2026-02-09 12:28:40,782 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:28:40,782 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:28:45,783 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request d11625e4-08b9-41d9-b54b-ce7aa0b860c8: node.list
+2026-02-09 12:28:45,783 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:28:45,783 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:28:50,786 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 20f9f2c5-bca7-44e4-a8b5-dcd8d5f3807f: node.list
+2026-02-09 12:28:50,786 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:28:50,786 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:28:55,786 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 86a802cf-91a6-45fb-b939-3932e94acaeb: node.list
+2026-02-09 12:28:55,786 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:28:55,786 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:29:00,785 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 587cc380-7b87-4064-b1ad-734200935e9d: node.list
+2026-02-09 12:29:00,785 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:29:00,785 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:29:05,789 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 7cfcf089-4655-4471-b0b5-8971faea1a13: node.list
+2026-02-09 12:29:05,789 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:29:05,789 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:29:10,778 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request a522ce48-a38b-47e9-bf67-4f02197e7813: node.list
+2026-02-09 12:29:10,778 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:29:10,779 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:29:15,782 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request cce7eca4-2a6f-44bd-b2a3-04df0b123b1b: node.list
+2026-02-09 12:29:15,782 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:29:15,782 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:29:17,170 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request 7d34ff2e-290e-4171-9660-3d18e830aaa3: node.list
+2026-02-09 12:29:17,170 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:29:17,170 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list
+2026-02-09 12:29:20,786 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request ef884660-efff-43f6-9569-eb87a377a9af: node.list
+2026-02-09 12:29:20,786 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:29:20,786 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:29:25,789 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 02a64337-abf3-4b4b-8e98-127c97d60163: node.list
+2026-02-09 12:29:25,789 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:29:25,789 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:29:31,169 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 551a0243-faee-41d6-ae0a-269e0bd6f472: node.list
+2026-02-09 12:29:31,169 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:29:31,169 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:29:36,156 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request b897096e-33e4-4aea-bbfb-aede919a559c: node.list
+2026-02-09 12:29:36,156 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:29:36,157 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:29:41,166 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 20c9c882-7bd4-4df5-aa9f-86608b872bfd: node.list
+2026-02-09 12:29:41,167 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:29:41,167 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:29:46,167 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 05466efc-ed2d-4fb6-b26c-2278f0fb0bb3: node.list
+2026-02-09 12:29:46,167 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:29:46,167 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:29:51,166 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 7c569c64-2b46-4d9b-81de-d4f843063a75: node.list
+2026-02-09 12:29:51,166 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:29:51,166 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:29:56,157 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request ce59ff0c-c5c0-4353-bff9-d18870d7877f: node.list
+2026-02-09 12:29:56,157 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:29:56,157 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:30:01,169 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 08b66da1-9644-46c0-aecd-2fdfaf5e3fd3: node.list
+2026-02-09 12:30:01,169 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:30:01,169 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:30:06,172 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request f715a4cb-74bd-4b06-aaf0-846cb7023e81: node.list
+2026-02-09 12:30:06,172 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:30:06,173 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:30:11,163 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request 009f4664-8cf7-466d-b752-22ae10cfd3b8: node.list
+2026-02-09 12:30:11,163 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:30:11,163 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:30:16,153 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Request f04b4ac1-96ed-42ef-a881-445564832c71: node.list
+2026-02-09 12:30:16,154 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:30:16,154 - openclaw_gateway - INFO - [WS] fd15cb00-298c-491d-a6c5-104627659e84 - Responded to node.list
+2026-02-09 12:30:17,164 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Request f60e475c-a0e7-4135-af22-c2453c1d903e: node.list
+2026-02-09 12:30:17,164 - openclaw_gateway - INFO - Handling method: node.list
+2026-02-09 12:30:17,164 - openclaw_gateway - INFO - [WS] 21e00fc1-bcb6-4fda-af4a-997ad1aa5b73 - Responded to node.list

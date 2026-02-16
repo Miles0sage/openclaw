@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenClaw - Cybershield Agency</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell,
+          sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 20px;
+      }
+      .container {
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        width: 100%;
+        max-width: 1200px;
+        height: 90vh;
+        display: flex;
+        overflow: hidden;
+      }
+      .sidebar {
+        width: 300px;
+        background: #f7fafc;
+        border-right: 1px solid #e2e8f0;
+        padding: 20px;
+        overflow-y: auto;
+      }
+      .sidebar h2 {
+        font-size: 20px;
+        margin-bottom: 20px;
+        color: #2d3748;
+      }
+      .agent-card {
+        background: white;
+        border: 2px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 15px;
+        cursor: pointer;
+        transition: all 0.3s;
+      }
+      .agent-card:hover {
+        border-color: #667eea;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+      }
+      .agent-card.active {
+        border-color: #667eea;
+        background: #f0f4ff;
+      }
+      .agent-emoji {
+        font-size: 24px;
+        margin-bottom: 5px;
+      }
+      .agent-name {
+        font-weight: 600;
+        color: #2d3748;
+        margin-bottom: 5px;
+      }
+      .agent-model {
+        font-size: 12px;
+        color: #718096;
+      }
+      .agent-status {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        margin-top: 5px;
+      }
+      .status-idle {
+        background: #e6fffa;
+        color: #047857;
+      }
+      .status-thinking {
+        background: #fef3c7;
+        color: #92400e;
+      }
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+      .header {
+        background: white;
+        padding: 20px 30px;
+        border-bottom: 1px solid #e2e8f0;
+      }
+      .header h1 {
+        font-size: 24px;
+        color: #2d3748;
+      }
+      .header p {
+        color: #718096;
+        margin-top: 5px;
+      }
+      .chat-area {
+        flex: 1;
+        overflow-y: auto;
+        padding: 30px;
+        background: #f7fafc;
+      }
+      .message {
+        margin-bottom: 20px;
+        display: flex;
+        gap: 15px;
+      }
+      .message.user {
+        flex-direction: row-reverse;
+      }
+      .message-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        flex-shrink: 0;
+      }
+      .message.user .message-avatar {
+        background: #667eea;
+        color: white;
+      }
+      .message.agent .message-avatar {
+        background: #e2e8f0;
+      }
+      .message-content {
+        max-width: 70%;
+        background: white;
+        padding: 15px 20px;
+        border-radius: 15px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+      .message.user .message-content {
+        background: #667eea;
+        color: white;
+      }
+      .message-meta {
+        font-size: 11px;
+        color: #718096;
+        margin-top: 5px;
+      }
+      .input-area {
+        padding: 20px 30px;
+        background: white;
+        border-top: 1px solid #e2e8f0;
+        display: flex;
+        gap: 10px;
+      }
+      .input-area input {
+        flex: 1;
+        padding: 12px 20px;
+        border: 2px solid #e2e8f0;
+        border-radius: 25px;
+        font-size: 15px;
+        outline: none;
+      }
+      .input-area input:focus {
+        border-color: #667eea;
+      }
+      .input-area button {
+        padding: 12px 30px;
+        background: #667eea;
+        color: white;
+        border: none;
+        border-radius: 25px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+      }
+      .input-area button:hover {
+        background: #5568d3;
+        transform: translateY(-2px);
+      }
+      .input-area button:disabled {
+        background: #cbd5e0;
+        cursor: not-allowed;
+        transform: none;
+      }
+      .loading {
+        text-align: center;
+        padding: 20px;
+        color: #718096;
+      }
+      .error {
+        background: #fed7d7;
+        color: #9b2c2c;
+        padding: 10px 15px;
+        border-radius: 8px;
+        margin: 10px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="sidebar">
+        <h2>🦞 Agents</h2>
+        <div id="agents-list">
+          <div class="loading">Loading agents...</div>
+        </div>
+      </div>
+      <div class="main">
+        <div class="header">
+          <h1>Cybershield Agency</h1>
+          <p id="current-agent">Select an agent to start chatting</p>
+        </div>
+        <div class="chat-area" id="chat-area">
+          <div style="text-align: center; color: #718096; padding: 40px">
+            <div style="font-size: 48px; margin-bottom: 20px">👋</div>
+            <h2 style="color: #2d3748; margin-bottom: 10px">Welcome to OpenClaw</h2>
+            <p>Select an agent from the sidebar to start chatting</p>
+          </div>
+        </div>
+        <div class="input-area">
+          <input type="text" id="message-input" placeholder="Type your message..." disabled />
+          <button id="send-btn" disabled>Send</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Configuration
+      const GATEWAY_URL = "https://gateway-api.overseerclaw.uk";
+
+      let agents = [];
+      let currentAgent = null;
+      let chatHistory = [];
+
+      // Emoji map for agents
+      const agentEmojis = {
+        project_manager: "🎯",
+        coder_agent: "💻",
+        hacker_agent: "🔒",
+      };
+
+      // Load agents
+      async function loadAgents() {
+        try {
+          const response = await fetch(`${GATEWAY_URL}/api/agents`);
+          const data = await response.json();
+          agents = data.agents || [];
+          renderAgents();
+        } catch (error) {
+          document.getElementById("agents-list").innerHTML =
+            `<div class="error">Failed to load agents: ${error.message}</div>`;
+        }
+      }
+
+      // Render agents list
+      function renderAgents() {
+        const agentsList = document.getElementById("agents-list");
+        if (agents.length === 0) {
+          agentsList.innerHTML = '<div class="error">No agents found</div>';
+          return;
+        }
+
+        agentsList.innerHTML = agents
+          .map(
+            (agent) => `
+                <div class="agent-card" onclick="selectAgent('${agent.id}')">
+                    <div class="agent-emoji">${agentEmojis[agent.id] || "🤖"}</div>
+                    <div class="agent-name">${agent.name}</div>
+                    <div class="agent-model">${agent.model}</div>
+                    <span class="agent-status status-${agent.status}">${agent.status}</span>
+                </div>
+            `,
+          )
+          .join("");
+      }
+
+      // Select agent
+      function selectAgent(agentId) {
+        currentAgent = agents.find((a) => a.id === agentId);
+        document.getElementById("current-agent").textContent =
+          `Chatting with ${currentAgent.name} (${currentAgent.provider})`;
+
+        // Update active state
+        document.querySelectorAll(".agent-card").forEach((card, index) => {
+          card.classList.toggle("active", agents[index].id === agentId);
+        });
+
+        // Enable input
+        document.getElementById("message-input").disabled = false;
+        document.getElementById("send-btn").disabled = false;
+        document.getElementById("message-input").focus();
+
+        // Clear chat
+        chatHistory = [];
+        renderChat();
+      }
+
+      // Send message
+      async function sendMessage() {
+        const input = document.getElementById("message-input");
+        const message = input.value.trim();
+        if (!message || !currentAgent) return;
+
+        // Add user message
+        chatHistory.push({
+          role: "user",
+          content: message,
+          timestamp: new Date(),
+        });
+        input.value = "";
+        renderChat();
+
+        // Disable input while processing
+        input.disabled = true;
+        document.getElementById("send-btn").disabled = true;
+
+        try {
+          const response = await fetch(`${GATEWAY_URL}/api/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: message,
+              agent_id: currentAgent.id,
+            }),
+          });
+
+          const data = await response.json();
+
+          // Add agent response
+          chatHistory.push({
+            role: "agent",
+            content: data.response,
+            agent: currentAgent.name,
+            tokens: data.tokens,
+            timestamp: new Date(),
+          });
+          renderChat();
+        } catch (error) {
+          chatHistory.push({
+            role: "error",
+            content: `Error: ${error.message}`,
+            timestamp: new Date(),
+          });
+          renderChat();
+        }
+
+        // Re-enable input
+        input.disabled = false;
+        document.getElementById("send-btn").disabled = false;
+        input.focus();
+      }
+
+      // Render chat
+      function renderChat() {
+        const chatArea = document.getElementById("chat-area");
+        if (chatHistory.length === 0) {
+          chatArea.innerHTML = `
+                    <div style="text-align: center; color: #718096; padding: 40px;">
+                        <div style="font-size: 48px; margin-bottom: 20px;">${agentEmojis[currentAgent.id]}</div>
+                        <h2 style="color: #2d3748; margin-bottom: 10px;">${currentAgent.name}</h2>
+                        <p>Start a conversation!</p>
+                    </div>
+                `;
+          return;
+        }
+
+        chatArea.innerHTML = chatHistory
+          .map((msg) => {
+            if (msg.role === "user") {
+              return `
+                        <div class="message user">
+                            <div class="message-avatar">👤</div>
+                            <div class="message-content">
+                                ${msg.content}
+                                <div class="message-meta">${formatTime(msg.timestamp)}</div>
+                            </div>
+                        </div>
+                    `;
+            } else if (msg.role === "agent") {
+              return `
+                        <div class="message agent">
+                            <div class="message-avatar">${agentEmojis[currentAgent.id]}</div>
+                            <div class="message-content">
+                                ${msg.content}
+                                <div class="message-meta">
+                                    ${msg.agent} • ${msg.tokens} tokens • ${formatTime(msg.timestamp)}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+            } else {
+              return `
+                        <div class="message agent">
+                            <div class="message-content" style="background: #fed7d7; color: #9b2c2c;">
+                                ${msg.content}
+                            </div>
+                        </div>
+                    `;
+            }
+          })
+          .join("");
+
+        // Scroll to bottom
+        chatArea.scrollTop = chatArea.scrollHeight;
+      }
+
+      // Format time
+      function formatTime(date) {
+        return date.toLocaleTimeString("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      }
+
+      // Event listeners
+      document.getElementById("send-btn").addEventListener("click", sendMessage);
+      document.getElementById("message-input").addEventListener("keypress", (e) => {
+        if (e.key === "Enter") sendMessage();
+      });
+
+      // Initialize
+      loadAgents();
+    </script>
+  </body>
+</html>
