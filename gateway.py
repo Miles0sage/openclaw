@@ -19,9 +19,22 @@ import anthropic
 import requests
 from dotenv import load_dotenv
 import logging
+from datetime import datetime
 
 # Import orchestrator
 from orchestrator import Orchestrator, AgentRole, Message as OrchMessage, MessageAudience
+
+# Import cost tracker
+from cost_tracker import log_cost_event, get_cost_metrics, get_cost_summary, get_cost_log_path
+
+# Import complexity classifier (intelligent router)
+from complexity_classifier import (
+    classify as classify_query,
+    ClassificationResult,
+    MODEL_PRICING,
+    MODEL_ALIASES,
+    MODEL_RATE_LIMITS,
+)
 
 load_dotenv()
 
@@ -221,6 +234,21 @@ Remember: You ARE {name}. Stay in character!"""
     # Minimal system prompt for Ollama (to avoid timeouts)
     ollama_suffix = f"\n\nSign your response with: {signature}"
 
+    # === INTELLIGENT ROUTING ===
+    # If provider is Anthropic and routing is enabled, use complexity classifier
+    # to select optimal model (Haiku/Sonnet/Opus) for cost savings
+    router_enabled = CONFIG.get("routing", {}).get("enabled", False)
+    if router_enabled and provider == "anthropic":
+        try:
+            classification = classify_query(prompt)
+            routed_model = MODEL_ALIASES.get(classification.model, model)
+            logger.info(f"🧠 Router: complexity={classification.complexity}, "
+                        f"model={classification.model} ({routed_model}), "
+                        f"confidence={classification.confidence}")
+            model = routed_model
+        except Exception as e:
+            logger.warning(f"⚠️  Router failed, using default model: {e}")
+
     logger.info(f"📍 Agent: {agent_key} → Provider: {provider} → Model: {model}")
 
     # Build full prompt with conversation history if provided
@@ -235,7 +263,7 @@ Remember: You ARE {name}. Stay in character!"""
 
     # Route to correct provider
     if provider == "ollama":
-        # For Ollama, just add signature reminder
+        # For Ollama, just add signature reminder (no cost tracking - local model)
         ollama_prompt = f"{full_prompt}{ollama_suffix}"
         return call_ollama(model, ollama_prompt, endpoint)
     elif provider == "anthropic":
@@ -247,7 +275,9 @@ Remember: You ARE {name}. Stay in character!"""
                 system=anthropic_system,
                 messages=conversation
             )
-            return response.content[0].text, response.usage.output_tokens
+            response_text = response.content[0].text
+            tokens_input = response.usage.input_tokens
+            tokens_output = response.usage.output_tokens
         else:
             response = anthropic_client.messages.create(
                 model=model,
@@ -255,7 +285,24 @@ Remember: You ARE {name}. Stay in character!"""
                 system=anthropic_system,
                 messages=[{"role": "user", "content": prompt}]
             )
-            return response.content[0].text, response.usage.output_tokens
+            response_text = response.content[0].text
+            tokens_input = response.usage.input_tokens
+            tokens_output = response.usage.output_tokens
+
+        # Log cost event (non-blocking, errors won't affect response)
+        try:
+            cost = log_cost_event(
+                project="openclaw",
+                agent=agent_key,
+                model=model,
+                tokens_input=tokens_input,
+                tokens_output=tokens_output
+            )
+            logger.info(f"💰 Cost logged: ${cost:.4f} ({agent_key} / {model})")
+        except Exception as e:
+            logger.warning(f"⚠️ Cost logging failed: {e}")
+
+        return response_text, tokens_output
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
@@ -382,6 +429,248 @@ async def chat_endpoint(message: Message):
     except Exception as e:
         logger.error(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/costs/summary")
+async def costs_summary():
+    """Get cost metrics summary"""
+    try:
+        metrics = get_cost_metrics()
+        return {
+            "success": True,
+            "timestamp": datetime.utcnow().isoformat(),
+            "data": metrics
+        }
+    except Exception as e:
+        logger.error(f"Error getting cost metrics: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/costs/text")
+async def costs_text():
+    """Get cost summary as text"""
+    try:
+        summary = get_cost_summary()
+        return {
+            "success": True,
+            "timestamp": datetime.utcnow().isoformat(),
+            "summary": summary
+        }
+    except Exception as e:
+        logger.error(f"Error getting cost summary: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# INTELLIGENT ROUTER ENDPOINTS
+# POST /api/route       - Classify query and get optimal model routing
+# POST /api/route/test  - Test routing with multiple queries
+# GET  /api/route/models - Get available models and pricing
+# GET  /api/route/health - Health check for router
+# ═══════════════════════════════════════════════════════════════════════
+
+class RouteRequest(BaseModel):
+    query: str
+    context: Optional[str] = None
+    sessionKey: Optional[str] = None
+    force_model: Optional[str] = None
+
+class RouteTestRequest(BaseModel):
+    queries: list
+
+
+@app.post("/api/route")
+async def route_endpoint(req: RouteRequest):
+    """Classify query and route to optimal model (Haiku/Sonnet/Opus)"""
+    try:
+        if not req.query or not isinstance(req.query, str):
+            return JSONResponse(status_code=400, content={
+                "success": False,
+                "error": "query is required and must be a string",
+            })
+
+        # Force model override
+        if req.force_model and req.force_model in ("haiku", "sonnet", "opus"):
+            forced = ClassificationResult(
+                complexity=0, model=req.force_model, confidence=1.0,
+                reasoning=f"Forced to {req.force_model.upper()} by request",
+                estimated_tokens=0, cost_estimate=0,
+            )
+            return {
+                "success": True,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "model": req.force_model,
+                "complexity": 0,
+                "confidence": 1.0,
+                "reasoning": forced.reasoning,
+                "cost_estimate": 0,
+                "estimated_tokens": 0,
+                "metadata": {
+                    "pricing": MODEL_PRICING.get(req.force_model, {}),
+                    "cost_savings_vs_sonnet": 0,
+                    "cost_savings_percentage": 0,
+                    "rate_limit": MODEL_RATE_LIMITS.get(req.force_model, {}),
+                },
+            }
+
+        # Combine query and context
+        full_query = f"{req.query}\n\nContext: {req.context}" if req.context else req.query
+
+        # Classify
+        result = classify_query(full_query)
+
+        # Calculate savings vs sonnet baseline
+        sonnet_cost = (result.estimated_tokens // 3 * MODEL_PRICING["sonnet"]["input"]
+                       + (result.estimated_tokens - result.estimated_tokens // 3) * MODEL_PRICING["sonnet"]["output"]) / 1_000_000
+        savings = max(0, sonnet_cost - result.cost_estimate)
+        savings_pct = round((savings / sonnet_cost) * 100, 2) if sonnet_cost > 0 else 0
+
+        # Log cost event if sessionKey provided
+        if req.sessionKey:
+            try:
+                log_cost_event(
+                    project="openclaw",
+                    agent="router",
+                    model=MODEL_ALIASES.get(result.model, result.model),
+                    tokens_input=result.estimated_tokens // 3,
+                    tokens_output=result.estimated_tokens - result.estimated_tokens // 3,
+                    cost=result.cost_estimate,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to log cost event: {e}")
+
+        return {
+            "success": True,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "model": result.model,
+            "complexity": result.complexity,
+            "confidence": result.confidence,
+            "reasoning": result.reasoning,
+            "cost_estimate": result.cost_estimate,
+            "estimated_tokens": result.estimated_tokens,
+            "metadata": {
+                "pricing": MODEL_PRICING.get(result.model, {}),
+                "cost_savings_vs_sonnet": round(savings, 6),
+                "cost_savings_percentage": savings_pct,
+                "rate_limit": MODEL_RATE_LIMITS.get(result.model, {}),
+            },
+        }
+    except Exception as e:
+        logger.error(f"Router endpoint error: {e}")
+        return JSONResponse(status_code=500, content={
+            "success": False,
+            "error": str(e),
+        })
+
+
+@app.post("/api/route/test")
+async def route_test_endpoint(req: RouteTestRequest):
+    """Test routing with multiple queries"""
+    try:
+        if not req.queries or len(req.queries) == 0:
+            return JSONResponse(status_code=400, content={
+                "success": False,
+                "error": "queries array is required and must not be empty",
+            })
+
+        results = []
+        for q in req.queries:
+            r = classify_query(q)
+            sonnet_cost = (r.estimated_tokens // 3 * MODEL_PRICING["sonnet"]["input"]
+                           + (r.estimated_tokens - r.estimated_tokens // 3) * MODEL_PRICING["sonnet"]["output"]) / 1_000_000
+            savings_pct = round(((sonnet_cost - r.cost_estimate) / sonnet_cost) * 100, 2) if sonnet_cost > 0 else 0
+            results.append({
+                "query": q[:100] + ("..." if len(q) > 100 else ""),
+                "model": r.model,
+                "complexity": r.complexity,
+                "confidence": r.confidence,
+                "cost_estimate": r.cost_estimate,
+                "savings_percentage": savings_pct,
+            })
+
+        by_model = {"haiku": 0, "sonnet": 0, "opus": 0}
+        for r in results:
+            by_model[r["model"]] = by_model.get(r["model"], 0) + 1
+
+        stats = {
+            "total_queries": len(results),
+            "by_model": by_model,
+            "avg_complexity": round(sum(r["complexity"] for r in results) / len(results), 1),
+            "avg_confidence": round(sum(r["confidence"] for r in results) / len(results), 2),
+            "total_estimated_cost": round(sum(r["cost_estimate"] for r in results), 6),
+            "avg_savings_percentage": round(sum(r["savings_percentage"] for r in results) / len(results), 1),
+        }
+
+        return {
+            "success": True,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "results": results,
+            "stats": stats,
+        }
+    except Exception as e:
+        logger.error(f"Route test endpoint error: {e}")
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.get("/api/route/models")
+async def route_models_endpoint():
+    """Get available models and pricing information"""
+    models_info = [
+        {
+            "name": "Claude 3.5 Haiku",
+            "model": "haiku",
+            "alias": MODEL_ALIASES["haiku"],
+            "pricing": MODEL_PRICING["haiku"],
+            "contextWindow": 200000,
+            "maxOutputTokens": 4096,
+            "costSavingsPercentage": -75,
+            "available": True,
+            "rateLimit": MODEL_RATE_LIMITS["haiku"],
+        },
+        {
+            "name": "Claude 3.5 Sonnet",
+            "model": "sonnet",
+            "alias": MODEL_ALIASES["sonnet"],
+            "pricing": MODEL_PRICING["sonnet"],
+            "contextWindow": 200000,
+            "maxOutputTokens": 4096,
+            "costSavingsPercentage": 0,
+            "available": True,
+            "rateLimit": MODEL_RATE_LIMITS["sonnet"],
+        },
+        {
+            "name": "Claude Opus 4.6",
+            "model": "opus",
+            "alias": MODEL_ALIASES["opus"],
+            "pricing": MODEL_PRICING["opus"],
+            "contextWindow": 200000,
+            "maxOutputTokens": 4096,
+            "costSavingsPercentage": 400,
+            "available": True,
+            "rateLimit": MODEL_RATE_LIMITS["opus"],
+        },
+    ]
+
+    return {
+        "success": True,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "models": models_info,
+        "optimalDistribution": {"haiku": "70%", "sonnet": "20%", "opus": "10%"},
+        "expectedCostSavings": "60-70% reduction vs always using Sonnet",
+    }
+
+
+@app.get("/api/route/health")
+async def route_health_endpoint():
+    """Health check for router"""
+    return {
+        "success": True,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "status": "healthy",
+        "models_available": 3,
+        "models": ["haiku", "sonnet", "opus"],
+        "router_version": "1.0.0",
+    }
 
 
 @app.websocket("/")
@@ -575,6 +864,7 @@ if __name__ == "__main__":
     print("🦞 OpenClaw Gateway FIXED - Now using ACTUAL models from config!")
     print(f"   Protocol: OpenClaw v{PROTOCOL_VERSION}")
     print("   WebSocket: ws://0.0.0.0:18789/ws")
+    print(f"   Cost Log: {get_cost_log_path()}")
     print("")
     print("📊 Agent Configuration:")
     for agent_id, config in CONFIG.get("agents", {}).items():
@@ -582,5 +872,7 @@ if __name__ == "__main__":
         model = config.get("model", "unknown")
         emoji = config.get("emoji", "")
         print(f"   {emoji} {agent_id:20} → {provider:10} → {model}")
+    print("")
+    print("💰 Cost Tracking Enabled")
     print("")
     uvicorn.run(app, host="0.0.0.0", port=18789, log_level="info")

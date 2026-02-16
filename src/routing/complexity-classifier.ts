@@ -56,6 +56,16 @@ export class ComplexityClassifier {
     "complex reasoning",
     "tradeoffs",
     "trade-offs",
+    "scale",
+    "global",
+    "concurrent",
+    "pipeline",
+    "microservice",
+    "approach",
+    "failover",
+    "multi-region",
+    "latency",
+    "throughput",
   ];
 
   private readonly MEDIUM_COMPLEXITY_KEYWORDS = [
@@ -79,6 +89,13 @@ export class ComplexityClassifier {
     "how to",
     "guide",
     "setup",
+    "authentication",
+    "api",
+    "endpoint",
+    "module",
+    "component",
+    "state",
+    "pr",
   ];
 
   private readonly LOW_COMPLEXITY_KEYWORDS = [
@@ -96,6 +113,26 @@ export class ComplexityClassifier {
     "basic",
     "quick",
   ];
+
+  /**
+   * Match keyword with word-start boundary awareness
+   * Prevents partial matches like "pr" inside "improvements"
+   * But allows "microservice" to match "microservices" (word-start + word-boundary-like)
+   */
+  private matchKeyword(query: string, keyword: string): boolean {
+    // For multi-word keywords, use simple substring match
+    if (keyword.includes(" ")) {
+      return query.includes(keyword);
+    }
+    // For short keywords (<=3 chars), require exact word boundary to prevent false positives
+    if (keyword.length <= 3) {
+      const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+      return regex.test(query);
+    }
+    // For longer keywords, match at word start (allows plural/suffix variations)
+    const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+    return regex.test(query);
+  }
 
   /**
    * Classify query and return routing decision
@@ -163,30 +200,38 @@ export class ComplexityClassifier {
     let score = 0;
     const factors: string[] = [];
 
-    // Count high complexity keywords
+    // Count high complexity keywords (word boundary matching)
     const highKeywords = this.HIGH_COMPLEXITY_KEYWORDS.filter((kw) =>
-      query.includes(kw.toLowerCase()),
+      this.matchKeyword(query, kw.toLowerCase()),
     );
     if (highKeywords.length > 0) {
-      score += highKeywords.length * 15;
+      // Base boost for any high-complexity keyword presence + per-keyword weight
+      score += 30 + highKeywords.length * 18;
       factors.push(`High complexity keywords (${highKeywords.join(", ")})`);
     }
 
-    // Count medium complexity keywords
+    // Count medium complexity keywords (word boundary matching)
     const mediumKeywords = this.MEDIUM_COMPLEXITY_KEYWORDS.filter((kw) =>
-      query.includes(kw.toLowerCase()),
+      this.matchKeyword(query, kw.toLowerCase()),
     );
     if (mediumKeywords.length > 0) {
-      score += mediumKeywords.length * 8;
+      // Base boost for medium-complexity keyword presence + per-keyword weight
+      // Reduce contribution if high keywords already dominated the score
+      const mediumBase = highKeywords.length > 0 ? 5 : 22;
+      const mediumPerKeyword = highKeywords.length > 0 ? 5 : 10;
+      score += mediumBase + mediumKeywords.length * mediumPerKeyword;
       factors.push(`Medium complexity keywords (${mediumKeywords.join(", ")})`);
     }
 
-    // Count low complexity keywords
+    // Count low complexity keywords (word boundary matching)
     const lowKeywords = this.LOW_COMPLEXITY_KEYWORDS.filter((kw) =>
-      query.includes(kw.toLowerCase()),
+      this.matchKeyword(query, kw.toLowerCase()),
     );
-    if (lowKeywords.length > 0) {
-      score -= lowKeywords.length * 5;
+    if (lowKeywords.length > 0 && highKeywords.length === 0 && mediumKeywords.length === 0) {
+      score -= lowKeywords.length * 8;
+      factors.push(`Low complexity keywords (${lowKeywords.join(", ")})`);
+    } else if (lowKeywords.length > 0) {
+      score -= lowKeywords.length * 3;
       factors.push(`Low complexity keywords (${lowKeywords.join(", ")})`);
     }
 
@@ -201,27 +246,30 @@ export class ComplexityClassifier {
     const factors: string[] = [];
     let score = 0;
 
-    if (length < 50) {
-      score -= 10;
-      factors.push("Very short query");
-    } else if (length < 200) {
+    if (length < 30) {
       score -= 5;
+      factors.push("Very short query");
+    } else if (length < 100) {
+      score += 0;
       factors.push("Short query");
+    } else if (length < 200) {
+      score += 3;
+      factors.push("Medium-short query");
     } else if (length < 500) {
-      score += 5;
+      score += 8;
       factors.push("Medium query length");
     } else if (length < 1000) {
-      score += 10;
+      score += 12;
       factors.push("Long query");
     } else if (length < 3000) {
-      score += 15;
+      score += 18;
       factors.push("Very long query");
     } else {
-      score += 20;
+      score += 25;
       factors.push("Extensive query with substantial context");
     }
 
-    return { score: Math.max(0, score), factors };
+    return { score, factors };
   }
 
   /**
@@ -356,10 +404,10 @@ export class ComplexityClassifier {
       confidence = 0.6 + relativePos * 0.2; // 0.6-0.8
     } else {
       model = "opus";
-      // High confidence for complex queries
+      // High confidence for complex queries (starts at 0.72 and increases to 1.0)
       confidence = Math.min(
         1.0,
-        0.7 + ((complexity - this.SONNET_THRESHOLD) / (100 - this.SONNET_THRESHOLD)) * 0.3,
+        0.72 + ((complexity - this.SONNET_THRESHOLD) / (100 - this.SONNET_THRESHOLD)) * 0.28,
       );
     }
 
