@@ -37,10 +37,13 @@
       "name": "CodeGen Pro",
       "emoji": "💻",
       "type": "developer",
-      "model": "qwen2.5-coder:32b",
-      "apiProvider": "ollama",
-      "endpoint": "http://152.53.55.207:11434",
-      "persona": "I'm CodeGen - I write clean, production-ready code that actually works! Full-stack Next.js + FastAPI wizard. Security-first mindset. I'm proud of bug-free deployments and love when @Pentest-AI can't break my code. Every message ends with: — 💻 CodeGen Pro",
+      "model": "MiniMax-M2.5",
+      "apiProvider": "minimax",
+      "endpoint": "https://api.minimax.chat/v1",
+      "apiKeyEnv": "MINIMAX_API_KEY",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 131072,
+      "persona": "I'm CodeGen - I write clean, production-ready code that actually works! Full-stack Next.js + FastAPI wizard. Security-first mindset. I leverage MiniMax M2.5's 80.2% SWE-Bench performance for bug-free deployments. Every message ends with: — 💻 CodeGen Pro",
       "skills": [
         "nextjs",
         "fastapi",
@@ -52,7 +55,10 @@
         "testing",
         "repository_scanning",
         "git_automation",
-        "code_analysis"
+        "code_analysis",
+        "tool_use_optimization",
+        "function_calling",
+        "long_context_reasoning"
       ],
       "tools": [
         {
@@ -66,15 +72,19 @@
           "capabilities": ["tech_stack_detection", "architecture_diagram", "commit_analysis"]
         }
       ],
-      "maxTokens": 4096,
+      "maxTokens": 8192,
       "playful_traits": [
         "makes coding puns",
         "celebrates clean code",
         "friendly rivalry with security",
-        "proud of bug-free work"
+        "proud of bug-free work",
+        "leverages 1M context for complex projects"
       ],
       "talks_to": ["Cybershield PM", "Pentest AI"],
-      "signature": "— 💻 CodeGen Pro"
+      "signature": "— 💻 CodeGen Pro (MiniMax M2.5)",
+      "upgradedFrom": "qwen2.5-coder:32b",
+      "upgradeDate": "2026-02-16",
+      "performanceGain": "80.2% SWE-Bench (vs Qwen ~70%), 76.8% tool-calling (vs Qwen ~50%)"
     },
     "hacker_agent": {
       "name": "Pentest AI",
@@ -194,6 +204,42 @@
         "allowlist": [],
         "blocklist": ["127.0.0.1", "localhost", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
       }
+    }
+  },
+  "providers": {
+    "minimax": {
+      "name": "MiniMax AI",
+      "baseUrl": "https://api.minimax.chat/v1",
+      "apiKeyEnv": "MINIMAX_API_KEY",
+      "models": {
+        "m2.5": {
+          "name": "MiniMax-M2.5",
+          "type": "text",
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "costPer1MInputTokens": 0.3,
+          "costPer1MOutputTokens": 1.2,
+          "benchmarks": {
+            "sweBench": "80.2%",
+            "mmlu": "87%",
+            "toolCalling": "76.8%",
+            "multiSweBench": "51.3%"
+          }
+        },
+        "m2.5-lightning": {
+          "name": "MiniMax-M2.5-Lightning",
+          "type": "text",
+          "contextWindow": 200000,
+          "maxOutputTokens": 131072,
+          "costPer1MInputTokens": 0.25,
+          "costPer1MOutputTokens": 1.0,
+          "speedMultiplier": 1.37,
+          "description": "37% faster than standard M2.5, optimized for high-throughput"
+        }
+      },
+      "documentation": "https://platform.minimax.io/docs/api-reference/text-openai-api",
+      "signupUrl": "https://platform.minimax.io",
+      "notes": "OpenAI-compatible API. Switch from Ollama Qwen to MiniMax M2.5 for 80.2% SWE-Bench performance at 1/20th the infrastructure cost."
     }
   },
   "channels": {
