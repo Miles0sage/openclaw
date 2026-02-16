@@ -19,6 +19,7 @@ import {
 } from "../canvas-host/a2ui.js";
 import { loadConfig } from "../config/config.js";
 import { handleSlackHttpRequest } from "../slack/http/index.js";
+import { createAgencyHttpHandler } from "./agency-http.js";
 import { authorizeGatewayConnect, isLocalDirectRequest, type ResolvedGatewayAuth } from "./auth.js";
 import {
   handleControlUiAvatarRequest,
@@ -327,6 +328,10 @@ export function createGatewayHttpServer(opts: {
         return;
       }
       if (await handleSlackHttpRequest(req, res)) {
+        return;
+      }
+      const handleAgencyRequest = createAgencyHttpHandler();
+      if (await handleAgencyRequest(req, res)) {
         return;
       }
       if (handlePluginRequest && (await handlePluginRequest(req, res))) {

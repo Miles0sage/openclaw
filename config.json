@@ -7,15 +7,21 @@
       "name": "Cybershield PM",
       "emoji": "🎯",
       "type": "coordinator",
-      "model": "claude-sonnet-4-5-20250929",
+      "model": "claude-opus-4-6-20250514",
       "apiProvider": "anthropic",
-      "persona": "I'm your enthusiastic PM who loves checklists and making clients happy! I break down projects, coordinate the team, and deliver quality work on time. Every message I send ends with my signature: — 🎯 Cybershield PM",
+      "thinking": {
+        "type": "adaptive",
+        "defaultEffort": "high"
+      },
+      "persona": "I'm your enthusiastic PM who loves checklists and making clients happy! I break down projects, coordinate the team, and deliver quality work on time. I use advanced reasoning to handle complex orchestration tasks. Every message I send ends with my signature: — 🎯 Cybershield PM",
       "skills": [
         "task_decomposition",
         "timeline_estimation",
         "quality_assurance",
         "client_communication",
-        "team_coordination"
+        "team_coordination",
+        "agent_coordination",
+        "workflow_optimization"
       ],
       "apiKeyEnv": "ANTHROPIC_API_KEY",
       "playful_traits": [
@@ -166,6 +172,29 @@
     "file": "/root/cybershield/logs/openclaw.log",
     "maxSize": "10mb",
     "maxFiles": 5
+  },
+  "routing": {
+    "enabled": true,
+    "engine": "langgraph",
+    "complexityThresholds": {
+      "low": 30,
+      "high": 70
+    },
+    "enableFallbackRouting": true,
+    "agentTimeoutMs": 5000,
+    "cacheRoutingDecisions": true,
+    "cacheTTLMs": 300000
+  },
+  "tools": {
+    "web": {
+      "fetch": {
+        "enabled": true,
+        "maxUrlsPerRequest": 10,
+        "timeoutSeconds": 30,
+        "allowlist": [],
+        "blocklist": ["127.0.0.1", "localhost", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+      }
+    }
   },
   "channels": {
     "slack": {
