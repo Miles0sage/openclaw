@@ -9,6 +9,16 @@
       "name": "Telegram Bot",
       "type": "messaging",
       "sessionKeyPrefix": "telegram"
+    },
+    "slack": {
+      "enabled": true,
+      "botToken": "${SLACK_BOT_TOKEN}",
+      "signingSecret": "${SLACK_SIGNING_SECRET}",
+      "reportChannel": "${SLACK_REPORT_CHANNEL}",
+      "name": "Slack Bot",
+      "type": "messaging",
+      "sessionKeyPrefix": "slack",
+      "webhookUrl": "/slack/events"
     }
   },
   "agents": {

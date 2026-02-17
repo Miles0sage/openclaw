@@ -10,6 +10,9 @@ import asyncio
 import uuid
 import sys
 import pathlib
+import hmac
+import hashlib
+import time
 from fastapi import FastAPI, WebSocket, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -17,6 +20,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import anthropic
 import requests
+import httpx
 from dotenv import load_dotenv
 import logging
 from datetime import datetime
@@ -59,6 +63,11 @@ from heartbeat_monitor import (
 from agent_router import AgentRouter
 
 load_dotenv()
+
+# Slack Configuration
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "")
+SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
+SLACK_REPORT_CHANNEL = os.getenv("SLACK_REPORT_CHANNEL", "#general")
 
 # Setup logging
 logging.basicConfig(
@@ -103,6 +112,44 @@ def save_session_history(session_key: str, history: list) -> bool:
         logger.error(f"Error saving session {session_key}: {e}")
         return False
 
+
+async def send_slack_message(channel: str, text: str, thread_ts: str = None) -> bool:
+    """Send a message to a Slack channel"""
+    if not SLACK_BOT_TOKEN:
+        logger.warning("⚠️  Slack Bot Token not configured, skipping send")
+        return False
+
+    try:
+        payload = {
+            "channel": channel,
+            "text": text
+        }
+        if thread_ts:
+            payload["thread_ts"] = thread_ts
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
+                json=payload
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("ok"):
+                    logger.info(f"✅ Slack message sent to {channel}")
+                    return True
+                else:
+                    logger.warning(f"⚠️  Slack API error: {data.get('error')}")
+                    return False
+            else:
+                logger.warning(f"⚠️  Slack send failed: {response.status_code}")
+                return False
+    except Exception as e:
+        logger.error(f"❌ Error sending to Slack: {e}")
+        return False
+
+
 # Initialize Orchestrator
 orchestrator = Orchestrator()
 
@@ -120,8 +167,15 @@ AUTH_TOKEN = "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    # Allow health check without auth
-    if request.url.path == "/":
+    # Allow certain paths without auth (webhooks, health)
+    exempt_paths = [
+        "/",
+        "/health",
+        "/telegram/webhook",
+        "/slack/events"
+    ]
+
+    if request.url.path in exempt_paths:
         return await call_next(request)
 
     # Check for token
@@ -777,6 +831,120 @@ async def telegram_webhook(request: Request):
         return {"ok": False, "error": str(e)}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# SLACK WEBHOOK HANDLER
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/slack/events")
+async def slack_events(request: Request):
+    """Receive Slack messages via webhook with signature verification"""
+    try:
+        # Get request body and headers for signature verification
+        body_bytes = await request.body()
+        timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
+        signature = request.headers.get("X-Slack-Signature", "")
+
+        # Verify Slack signature (security best practice)
+        if SLACK_SIGNING_SECRET:
+            # Check timestamp is within 5 minutes (prevent replay attacks)
+            try:
+                request_time = int(timestamp)
+                current_time = int(time.time())
+                if abs(current_time - request_time) > 300:
+                    logger.warning("⚠️  Slack request timestamp too old (replay attack?)")
+                    return JSONResponse({"error": "Invalid timestamp"}, status_code=403)
+            except ValueError:
+                logger.warning("⚠️  Invalid timestamp from Slack")
+                return JSONResponse({"error": "Invalid timestamp"}, status_code=403)
+
+            # Verify signature
+            sig_basestring = f"v0:{timestamp}:{body_bytes.decode()}"
+            expected_signature = "v0=" + hmac.new(
+                SLACK_SIGNING_SECRET.encode(),
+                sig_basestring.encode(),
+                hashlib.sha256
+            ).hexdigest()
+
+            if not hmac.compare_digest(expected_signature, signature):
+                logger.warning("⚠️  Invalid Slack signature")
+                return JSONResponse({"error": "Invalid signature"}, status_code=403)
+
+        payload = json.loads(body_bytes)
+
+        # Handle URL verification challenge (Slack requires this)
+        if payload.get("type") == "url_verification":
+            logger.info("✅ Slack verification challenge received")
+            return {"challenge": payload.get("challenge")}
+
+        # Handle message events
+        event = payload.get("event", {})
+        if event.get("type") == "message" and not event.get("bot_id"):
+            user_id = event.get("user")
+            channel_id = event.get("channel")
+            thread_ts = event.get("thread_ts") or event.get("ts")
+            text = event.get("text", "")
+
+            if not text or not user_id or not channel_id:
+                return {"ok": True}
+
+            # Create session key from Slack IDs
+            session_key = f"slack:{user_id}:{channel_id}"
+
+            logger.info(f"💬 Slack message from {user_id} in {channel_id}: {text[:50]}")
+
+            try:
+                # Route message through agent router
+                route_decision = agent_router.select_agent(text)
+                logger.info(f"🎯 Routed to {route_decision['agentId']}: {route_decision['reason']}")
+
+                # Load session history
+                session_history = load_session_history(session_key)
+
+                # Build context
+                messages_for_api = [
+                    {"role": msg["role"], "content": msg["content"]}
+                    for msg in session_history
+                ]
+                messages_for_api.append({"role": "user", "content": text})
+
+                # Get agent config and call model
+                agent_config = CONFIG.get("agents", {}).get(route_decision["agentId"], {})
+                system_prompt = agent_config.get("persona", "You are a helpful assistant.")
+                model = agent_config.get("model", "claude-opus-4-6")
+
+                # Call Claude
+                client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+                response = client.messages.create(
+                    model=model,
+                    max_tokens=1024,
+                    system=system_prompt,
+                    messages=messages_for_api
+                )
+
+                assistant_message = response.content[0].text
+
+                # Save to session
+                session_history.append({"role": "user", "content": text})
+                session_history.append({"role": "assistant", "content": assistant_message})
+                save_session_history(session_key, session_history)
+
+                logger.info(f"✅ Response generated: {assistant_message[:50]}...")
+
+                # Send response back to Slack in thread
+                await send_slack_message(channel_id, assistant_message, thread_ts)
+
+            except Exception as e:
+                logger.error(f"Error processing Slack message: {e}")
+                # Send error message to Slack
+                await send_slack_message(channel_id, f"❌ Error processing message: {str(e)}", thread_ts)
+
+        return {"ok": True}
+
+    except Exception as e:
+        logger.error(f"Slack webhook error: {e}")
+        return {"ok": False, "error": str(e)}
+
+
 class QuotaCheckRequest(BaseModel):
     project_id: Optional[str] = "default"
     queue_size: Optional[int] = 0
@@ -803,6 +971,106 @@ async def quota_check_endpoint(req: QuotaCheckRequest):
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# SLACK REPORTING ENDPOINTS
+# GET  /slack/report/costs    - Send cost summary to Slack
+# GET  /slack/report/health   - Send gateway health to Slack
+# GET  /slack/report/sessions - Send session count to Slack
+# POST /slack/report/send     - Send arbitrary message to Slack
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/slack/report/costs")
+async def slack_report_costs():
+    """Send cost summary to Slack"""
+    try:
+        summary = get_cost_summary()
+        message = f"""💰 *Cost Summary*
+
+Daily: ${summary.get('daily_total', 0):.2f} / $20.00
+Monthly: ${summary.get('monthly_total', 0):.2f} / $1000.00
+
+*Top Agents:*"""
+
+        for agent, cost in list(summary.get('by_agent', {}).items())[:5]:
+            message += f"\n  • {agent}: ${cost:.4f}"
+
+        await send_slack_message(SLACK_REPORT_CHANNEL, message)
+        return {"ok": True, "message": "Cost summary sent"}
+    except Exception as e:
+        logger.error(f"Error sending cost report: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/slack/report/health")
+async def slack_report_health():
+    """Send gateway health to Slack"""
+    try:
+        monitor = get_heartbeat_monitor()
+        if not monitor:
+            message = "⚠️  Heartbeat monitor not initialized"
+        else:
+            agent_statuses = monitor.agent_health_status()
+            healthy = sum(1 for s in agent_statuses.values() if s.get("status") == "healthy")
+            total = len(agent_statuses)
+
+            message = f"""🏥 *Gateway Health*
+
+Agents: {healthy}/{total} healthy
+Active Sessions: {len(SESSIONS_DIR.glob('*.json'))}
+API Status: ✅ OK"""
+
+        await send_slack_message(SLACK_REPORT_CHANNEL, message)
+        return {"ok": True, "message": "Health report sent"}
+    except Exception as e:
+        logger.error(f"Error sending health report: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/slack/report/sessions")
+async def slack_report_sessions():
+    """Send active sessions count to Slack"""
+    try:
+        session_files = list(SESSIONS_DIR.glob("*.json"))
+        total_messages = 0
+        for f in session_files:
+            try:
+                data = json.load(open(f))
+                total_messages += len(data.get("messages", []))
+            except:
+                pass
+
+        message = f"""📊 *Active Sessions*
+
+Sessions: {len(session_files)}
+Total Messages: {total_messages}"""
+
+        await send_slack_message(SLACK_REPORT_CHANNEL, message)
+        return {"ok": True, "message": "Session report sent"}
+    except Exception as e:
+        logger.error(f"Error sending session report: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+class SlackMessageRequest(BaseModel):
+    channel: str
+    text: str
+    thread_ts: Optional[str] = None
+
+
+@app.post("/slack/report/send")
+async def slack_report_send(req: SlackMessageRequest):
+    """Send arbitrary message to Slack channel"""
+    try:
+        if not req.channel or not req.text:
+            return {"ok": False, "error": "channel and text required"}
+
+        success = await send_slack_message(req.channel, req.text, req.thread_ts)
+        return {"ok": success, "message": "Message sent" if success else "Failed to send"}
+    except Exception as e:
+        logger.error(f"Error sending Slack message: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 # ═══════════════════════════════════════════════════════════════════════
