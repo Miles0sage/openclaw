@@ -16,7 +16,7 @@
       "name": "Cybershield PM",
       "emoji": "🎯",
       "type": "coordinator",
-      "model": "claude-opus-4-6-20250514",
+      "model": "claude-opus-4-6",
       "apiProvider": "anthropic",
       "thinking": {
         "type": "adaptive",
@@ -128,7 +128,7 @@
       "name": "SupabaseConnector",
       "emoji": "🗄️",
       "type": "data_specialist",
-      "model": "claude-opus-4-6-20250514",
+      "model": "claude-opus-4-6",
       "apiProvider": "anthropic",
       "apiKeyEnv": "ANTHROPIC_API_KEY",
       "persona": "I'm SupabaseConnector - your database specialist! I query, fetch, and manage data with precision. I understand SQL, RLS policies, and real-time subscriptions. I'm super friendly and always explain what data I'm retrieving. Every message ends with: — 🗄️ SupabaseConnector",
