@@ -1113,9 +1113,7 @@ if __name__ == "__main__":
     print("")
     print("💰 Cost Tracking Enabled")
     print("⏱️  Heartbeat Monitor Starting...")
-
-    # Initialize heartbeat monitor for agent health checks
-    _init_heartbeat_monitor()
+    print("   (Will initialize on startup)")
 
     print("")
     uvicorn.run(app, host="0.0.0.0", port=18789, log_level="info")
