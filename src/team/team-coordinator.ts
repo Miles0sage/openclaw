@@ -17,13 +17,12 @@ export class TeamCoordinator {
   private taskQueue: TaskQueue;
   private agents: AgentConfig[];
   private sessionId: string;
-  private parallelStartTime: number;
+  private parallelStartTime: number = 0;
 
   constructor(sessionId: string, agents: AgentConfig[]) {
     this.sessionId = sessionId;
     this.agents = agents;
     this.taskQueue = new TaskQueue(sessionId);
-    this.parallelStartTime = Date.now();
   }
 
   /**
@@ -40,6 +39,8 @@ export class TeamCoordinator {
     sequentialBaselineMs: number;
     parallelizationGain: number;
   }> {
+    this.parallelStartTime = Date.now();
+
     // Add tasks to queue
     for (const task of tasks) {
       this.taskQueue.addTask({
@@ -52,14 +53,13 @@ export class TeamCoordinator {
     // Spawn agents in parallel
     const agentPromises = this.agents.map((agent) => this.runAgent(agent, taskExecutor));
 
-    const parallelElapsedMs = Date.now() - this.parallelStartTime;
-
     // Collect results
     const results: Array<{ agentId: string; task: TaskDefinition; result: T }> = [];
     for (const result of await Promise.all(agentPromises)) {
       results.push(...result);
     }
 
+    const parallelElapsedMs = Date.now() - this.parallelStartTime;
     const totalCost = this.taskQueue.getTotalCost();
 
     // Calculate baseline (sequential execution estimate)
