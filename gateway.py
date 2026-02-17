@@ -1474,10 +1474,13 @@ async def handle_websocket(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
+    # Read port from env var (Northflank sets PORT), default to 18789
+    port = int(os.getenv("PORT", "18789"))
+
     print("🦞 OpenClaw Gateway FIXED - Now using ACTUAL models from config!")
     print(f"   Protocol: OpenClaw v{PROTOCOL_VERSION}")
-    print("   REST: http://0.0.0.0:18789/api/chat")
-    print("   WebSocket: ws://0.0.0.0:18789/ws")
+    print(f"   REST: http://0.0.0.0:{port}/api/chat")
+    print(f"   WebSocket: ws://0.0.0.0:{port}/ws")
     print(f"   Cost Log: {get_cost_log_path()}")
     print("")
     print("📊 Agent Configuration:")
@@ -1492,4 +1495,4 @@ if __name__ == "__main__":
     print("   (Will initialize on startup)")
 
     print("")
-    uvicorn.run(app, host="0.0.0.0", port=18789, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

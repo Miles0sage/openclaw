@@ -19,7 +19,7 @@ runtime:
       OPENCLAW_CONFIG: /etc/openclaw/config.json
       OPENCLAW_SESSIONS_DIR: /tmp/openclaw_sessions
       NODE_ENV: production
-      PORT: 8000
+      PORT: "18789"
       LOG_LEVEL: info
 
   isolation:
@@ -67,13 +67,13 @@ volumes:
 networking:
   ports:
     - name: api
-      port: 8000
+      port: 18789
       protocol: HTTP
       visibility: public
 
   healthCheck:
     path: /health
-    port: 8000
+    port: 18789
     intervalSeconds: 10
     timeoutSeconds: 5
     successThreshold: 1
