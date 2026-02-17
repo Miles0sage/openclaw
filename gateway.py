@@ -47,7 +47,16 @@ from complexity_classifier import (
 )
 
 # Import heartbeat monitor
-from heartbeat_monitor import init_heartbeat_monitor, get_heartbeat_monitor
+from heartbeat_monitor import (
+    HeartbeatMonitor,
+    HeartbeatMonitorConfig,
+    init_heartbeat_monitor,
+    get_heartbeat_monitor,
+    stop_heartbeat_monitor,
+)
+
+# Import agent router (intelligent task routing)
+from agent_router import AgentRouter
 
 load_dotenv()
 
@@ -127,6 +136,9 @@ async def auth_middleware(request: Request, call_next):
 with open('config.json', 'r') as f:
     CONFIG = json.load(f)
 
+# Initialize Agent Router for intelligent task routing
+agent_router = AgentRouter(config_path='config.json')
+
 # Initialize Anthropic client
 anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
@@ -142,20 +154,32 @@ WS_PING_TIMEOUT = 10
 active_connections: Dict[str, WebSocket] = {}
 chat_history: Dict[str, list] = {}
 
-# Initialize heartbeat monitor on startup
-def _init_heartbeat_monitor():
-    """Initialize the heartbeat monitor for agent health checks"""
+# FastAPI startup/shutdown event handlers for heartbeat monitor
+@app.on_event("startup")
+async def startup_heartbeat_monitor():
+    """Initialize heartbeat monitor on FastAPI startup"""
     try:
-        monitor = init_heartbeat_monitor(
+        config = HeartbeatMonitorConfig(
             check_interval_ms=30000,  # 30 seconds
             stale_threshold_ms=5 * 60 * 1000,  # 5 minutes
             timeout_threshold_ms=30 * 60 * 1000  # 30 minutes
         )
+        monitor = await init_heartbeat_monitor(alert_manager=None, config=config)
         logger.info("✅ Heartbeat monitor initialized and started")
         return monitor
     except Exception as err:
         logger.error(f"Failed to initialize heartbeat monitor: {err}")
         return None
+
+
+@app.on_event("shutdown")
+async def shutdown_heartbeat_monitor():
+    """Stop heartbeat monitor on FastAPI shutdown"""
+    try:
+        stop_heartbeat_monitor()
+        logger.info("✅ Heartbeat monitor stopped")
+    except Exception as err:
+        logger.error(f"Failed to stop heartbeat monitor: {err}")
 
 # Load existing sessions from disk
 def _load_all_sessions():
@@ -436,6 +460,38 @@ async def list_agents():
     return {"agents": agents}
 
 
+@app.get("/api/heartbeat/status")
+async def heartbeat_status():
+    """Get heartbeat monitor status and agent health"""
+    heartbeat = get_heartbeat_monitor()
+    if not heartbeat:
+        return {
+            "success": True,
+            "status": "offline",
+            "message": "Heartbeat monitor not initialized"
+        }
+
+    status = heartbeat.get_status()
+    in_flight = heartbeat.get_in_flight_agents()
+
+    return {
+        "success": True,
+        "status": "online" if status["running"] else "offline",
+        "monitor": status,
+        "in_flight_agents": [
+            {
+                "agent_id": agent.agent_id,
+                "task_id": agent.task_id,
+                "status": agent.status,
+                "running_for_ms": int(datetime.now().timestamp() * 1000) - agent.started_at,
+                "idle_for_ms": int(datetime.now().timestamp() * 1000) - agent.last_activity_at,
+            }
+            for agent in in_flight
+        ],
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # QUOTA & CAP GATE MIDDLEWARE
 # Enforces daily/monthly spend limits and queue size limits
@@ -444,9 +500,29 @@ async def list_agents():
 @app.post("/api/chat")
 async def chat_endpoint(message: Message):
     """REST chat with optional session memory"""
-    agent_id = message.agent_id or "project_manager"
     session_key = message.sessionKey or "default"
     project_id = message.project_id or "default"
+
+    # ═ AGENT ROUTING: Use intelligent router if no explicit agent_id
+    if message.agent_id:
+        # Explicit agent_id takes precedence
+        agent_id = message.agent_id
+        logger.info(f"📌 Explicit agent: {agent_id}")
+    else:
+        # Use intelligent router for automatic agent selection
+        if CONFIG.get("routing", {}).get("agent_routing_enabled", True):
+            route_decision = agent_router.select_agent(message.content)
+            agent_id = route_decision["agentId"]
+            logger.info(f"🎯 Agent Router: {route_decision['reason']} (confidence: {route_decision['confidence']:.2f})")
+        else:
+            # Fallback to PM if routing disabled
+            agent_id = "project_manager"
+            logger.info(f"📌 Routing disabled, using default: project_manager")
+
+    # Register agent with heartbeat monitor
+    heartbeat = get_heartbeat_monitor()
+    if heartbeat:
+        heartbeat.register_agent(agent_id, session_key)
 
     try:
         # ═ QUOTA CHECK: Verify daily/monthly limits and queue size
@@ -487,6 +563,10 @@ async def chat_endpoint(message: Message):
             chat_history[session_key][-10:]
         )
 
+        # Update activity after getting response
+        if heartbeat:
+            heartbeat.update_activity(agent_id)
+
         # Add assistant response to history
         chat_history[session_key].append({
             "role": "assistant",
@@ -510,6 +590,10 @@ async def chat_endpoint(message: Message):
     except Exception as e:
         logger.error(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Unregister agent when done
+        if heartbeat:
+            heartbeat.unregister_agent(agent_id)
 
 
 @app.get("/api/costs/summary")
