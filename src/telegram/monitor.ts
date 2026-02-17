@@ -10,6 +10,7 @@ import { registerUnhandledRejectionHandler } from "../infra/unhandled-rejections
 import { resolveTelegramAccount } from "./accounts.js";
 import { resolveTelegramAllowedUpdates } from "./allowed-updates.js";
 import { createTelegramBot } from "./bot.js";
+import { registerTelegramHttpHandler } from "./http/index.js";
 import { isRecoverableTelegramNetworkError } from "./network-errors.js";
 import { makeProxyFetch } from "./proxy.js";
 import { readTelegramUpdateOffset, writeTelegramUpdateOffset } from "./update-offset-store.js";
@@ -27,6 +28,9 @@ export type MonitorTelegramOpts = {
   webhookSecret?: string;
   proxyFetch?: typeof fetch;
   webhookUrl?: string;
+  useHttpGateway?: boolean;
+  httpGatewayPath?: string;
+  httpGatewaySecret?: string;
 };
 
 export function createTelegramRunnerOptions(cfg: OpenClawConfig): RunOptions<unknown> {
@@ -166,6 +170,41 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
       return;
     }
 
+    // Register HTTP gateway handler if enabled
+    let unregisterHttpGateway: (() => void) | undefined;
+    if (opts.useHttpGateway) {
+      unregisterHttpGateway = registerTelegramHttpHandler({
+        path: opts.httpGatewayPath,
+        token,
+        secret: opts.httpGatewaySecret,
+        handler: async (req, res) => {
+          try {
+            let body = "";
+            await new Promise<void>((resolve, reject) => {
+              req.on("data", (chunk) => {
+                body += chunk.toString();
+              });
+              req.on("end", resolve);
+              req.on("error", reject);
+            });
+
+            const update = JSON.parse(body) as Record<string, unknown>;
+            // Process update through bot middleware
+            void bot.handleUpdate(update as Parameters<typeof bot.handleUpdate>[0]);
+
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true }));
+          } catch (err) {
+            (opts.runtime?.error ?? console.error)(`telegram HTTP gateway error: ${String(err)}`);
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: String(err) }));
+          }
+        },
+        log: opts.runtime?.log,
+        accountId: account.accountId,
+      });
+    }
+
     // Use grammyjs/runner for concurrent update processing
     let restartAttempts = 0;
 
@@ -211,5 +250,6 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
     }
   } finally {
     unregisterHandler();
+    unregisterHttpGateway?.();
   }
 }
