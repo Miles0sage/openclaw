@@ -722,4 +722,4 @@ function extractSkills(agentCfg: any): string[] {
 /**
  * Export types for external use
  */
-export type { RouterState, AgentAvailabilityResult, LangGraphRouterConfig };
+export type { RouterState, AgentAvailabilityResult };

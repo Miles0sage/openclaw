@@ -106,6 +106,8 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
     return false;
   });
 
+  let unregisterHttpGateway: (() => void) | undefined;
+
   try {
     const cfg = opts.config ?? loadConfig();
     const account = resolveTelegramAccount({
@@ -171,7 +173,6 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
     }
 
     // Register HTTP gateway handler if enabled
-    let unregisterHttpGateway: (() => void) | undefined;
     if (opts.useHttpGateway) {
       unregisterHttpGateway = registerTelegramHttpHandler({
         path: opts.httpGatewayPath,
@@ -190,7 +191,7 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
 
             const update = JSON.parse(body) as Record<string, unknown>;
             // Process update through bot middleware
-            void bot.handleUpdate(update as Parameters<typeof bot.handleUpdate>[0]);
+            void bot.handleUpdate(update as unknown as Parameters<typeof bot.handleUpdate>[0]);
 
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ ok: true }));

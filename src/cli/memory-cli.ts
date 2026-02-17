@@ -670,12 +670,12 @@ export function registerMemoryCli(program: Command) {
             await manager.close?.();
           },
           run: async (manager) => {
-            let results: Awaited<ReturnType<typeof manager.search>>;
+            let results: any;
             try {
-              results = await manager.search(query, {
+              results = (await manager.search(query, {
                 maxResults: opts.maxResults,
                 minScore: opts.minScore,
-              });
+              })) as any;
             } catch (err) {
               const message = formatErrorMessage(err);
               defaultRuntime.error(`Memory search failed: ${message}`);
@@ -694,13 +694,13 @@ export function registerMemoryCli(program: Command) {
             const lines: string[] = [];
             for (const result of results) {
               lines.push(
-                `${colorize(rich, theme.success, result.score.toFixed(3))} ${colorize(
+                `${colorize(rich, theme.success, (result as any).score.toFixed(3))} ${colorize(
                   rich,
                   theme.accent,
-                  `${shortenHomePath(result.path)}:${result.startLine}-${result.endLine}`,
+                  `${shortenHomePath((result as any).path)}:${(result as any).startLine}-${(result as any).endLine}`,
                 )}`,
               );
-              lines.push(colorize(rich, theme.muted, result.snippet));
+              lines.push(colorize(rich, theme.muted, (result as any).snippet));
               lines.push("");
             }
             defaultRuntime.log(lines.join("\n").trim());

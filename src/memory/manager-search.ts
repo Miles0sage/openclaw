@@ -1,21 +1,15 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { InternalSearchResult, MemorySource } from "./types.js";
 import { truncateUtf16Safe } from "../utils.js";
 import { cosineSimilarity, parseEmbedding } from "./internal.js";
 
 const vectorToBlob = (embedding: number[]): Buffer =>
   Buffer.from(new Float32Array(embedding).buffer);
 
-export type SearchSource = string;
+export type SearchSource = MemorySource;
 
-export type SearchRowResult = {
-  id: string;
-  path: string;
-  startLine: number;
-  endLine: number;
-  score: number;
-  snippet: string;
-  source: SearchSource;
-};
+// For backward compatibility - use InternalSearchResult instead
+export type SearchRowResult = InternalSearchResult;
 
 export async function searchVector(params: {
   db: DatabaseSync;
@@ -64,7 +58,7 @@ export async function searchVector(params: {
       endLine: row.end_line,
       score: 1 - row.dist,
       snippet: truncateUtf16Safe(row.text, params.snippetMaxChars),
-      source: row.source,
+      source: row.source as MemorySource,
     }));
   }
 
@@ -89,7 +83,7 @@ export async function searchVector(params: {
       endLine: entry.chunk.endLine,
       score: entry.score,
       snippet: truncateUtf16Safe(entry.chunk.text, params.snippetMaxChars),
-      source: entry.chunk.source,
+      source: entry.chunk.source as MemorySource,
     }));
 }
 
@@ -181,7 +175,7 @@ export async function searchKeyword(params: {
       score: textScore,
       textScore,
       snippet: truncateUtf16Safe(row.text, params.snippetMaxChars),
-      source: row.source,
+      source: row.source as MemorySource,
     };
   });
 }

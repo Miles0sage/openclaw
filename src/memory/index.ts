@@ -22,4 +22,14 @@ export type {
   MemoryEntry,
   MemoryIndex,
   MemorySearchResult,
+  // Legacy memory search types (backward compatibility)
+  MemorySource,
+  LegacyMemorySearchResult,
+  MemoryEmbeddingProbeResult,
+  MemoryProviderStatus,
+  MemorySyncProgressUpdate,
+  MemorySearchManager,
 } from "./types.js";
+
+// Re-export legacy memory search manager function
+export { getMemorySearchManager, type MemorySearchManagerResult } from "./search-manager.js";

@@ -16,7 +16,7 @@ import {
   createLangGraphRouter,
   type RoutingDecision,
 } from "./langgraph-router.js";
-import { buildAgentSessionKey, type ParsedAgentSessionKey } from "./session-key.js";
+import { buildAgentMainSessionKey, type ParsedAgentSessionKey } from "./session-key.js";
 
 /**
  * Session manager interface (compatible with OpenClaw's session system)
@@ -80,12 +80,10 @@ export class LangGraphRoutingHandler {
       channel,
       accountId,
       sessionKey: decision.sessionKey,
-      mainSessionKey: buildAgentSessionKey({
+      mainSessionKey: buildAgentMainSessionKey({
         agentId: decision.agentId,
-        channel,
-        accountId,
       }).toLowerCase(),
-      matchedBy: "langgraph_router",
+      matchedBy: "default",
     };
   }
 
@@ -114,10 +112,8 @@ export class LangGraphRoutingHandler {
   ): RoutingDecision {
     return {
       ...decision,
-      sessionKey: buildAgentSessionKey({
+      sessionKey: buildAgentMainSessionKey({
         agentId: decision.agentId,
-        channel: sessionKey.split(":")[0],
-        accountId: "default",
       }).toLowerCase(),
     };
   }
@@ -232,8 +228,3 @@ export function createLangGraphRouterMiddleware(
     },
   };
 }
-
-/**
- * Type exports
- */
-export type { SessionManager };

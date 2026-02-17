@@ -6,7 +6,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { TaskDefinition, TaskStatus, AgentStatus, TaskQueueFile } from "./types.js";
+import type { TaskDefinition, AgentStatus, TaskQueueFile } from "./types.js";
+import { TaskStatus } from "./types.js";
 
 export class TaskQueue {
   private sessionId: string;
@@ -124,7 +125,7 @@ export class TaskQueue {
       }
 
       const task = queue.tasks[taskIndex];
-      task.status = "in_progress";
+      task.status = TaskStatus.InProgress;
       task.assignedAgent = agentId;
       task.startedAt = new Date().toISOString();
 
@@ -174,7 +175,7 @@ export class TaskQueue {
       if (opts?.error !== undefined) {
         task.error = opts.error;
       }
-      if (status === "complete" || status === "failed") {
+      if (status === TaskStatus.Complete || status === TaskStatus.Failed) {
         task.completedAt = new Date().toISOString();
       }
 
@@ -182,10 +183,10 @@ export class TaskQueue {
       if (task.assignedAgent) {
         const agentStatus = queue.agentStatuses[task.assignedAgent];
         if (agentStatus) {
-          if (status === "complete") {
+          if (status === TaskStatus.Complete) {
             agentStatus.tasksCompleted += 1;
             agentStatus.status = "idle";
-          } else if (status === "failed") {
+          } else if (status === TaskStatus.Failed) {
             agentStatus.status = "failed";
             agentStatus.error = opts?.error;
           }
@@ -214,7 +215,9 @@ export class TaskQueue {
    */
   getAllComplete(): boolean {
     const queue = this.readQueue();
-    return queue.tasks.every((t) => t.status === "complete" || t.status === "failed");
+    return queue.tasks.every(
+      (t) => t.status === TaskStatus.Complete || t.status === TaskStatus.Failed,
+    );
   }
 
   /**
@@ -253,10 +256,10 @@ export class TaskQueue {
     const queue = this.readQueue();
     return {
       total: queue.tasks.length,
-      pending: queue.tasks.filter((t) => t.status === "pending").length,
-      inProgress: queue.tasks.filter((t) => t.status === "in_progress").length,
-      complete: queue.tasks.filter((t) => t.status === "complete").length,
-      failed: queue.tasks.filter((t) => t.status === "failed").length,
+      pending: queue.tasks.filter((t) => t.status === TaskStatus.Pending).length,
+      inProgress: queue.tasks.filter((t) => t.status === TaskStatus.InProgress).length,
+      complete: queue.tasks.filter((t) => t.status === TaskStatus.Complete).length,
+      failed: queue.tasks.filter((t) => t.status === TaskStatus.Failed).length,
       totalCost: queue.metadata.totalCost,
       agents: Object.values(queue.agentStatuses).length,
     };

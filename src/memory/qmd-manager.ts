@@ -271,7 +271,7 @@ export class QmdMemoryManager implements MemorySearchManager {
         score,
         snippet,
         source: doc.source,
-      });
+      } as any);
     }
     return this.clampResultsByInjectedChars(results.slice(0, limit));
   }
@@ -777,21 +777,21 @@ export class QmdMemoryManager implements MemorySearchManager {
     }
     let remaining = budget;
     const clamped: MemorySearchResult[] = [];
-    for (const entry of results) {
+    for (const entry of results as any) {
       if (remaining <= 0) {
         break;
       }
-      const snippet = entry.snippet ?? "";
+      const snippet = (entry as any).snippet ?? "";
       if (snippet.length <= remaining) {
         clamped.push(entry);
         remaining -= snippet.length;
       } else {
         const trimmed = snippet.slice(0, Math.max(0, remaining));
-        clamped.push({ ...entry, snippet: trimmed });
+        clamped.push({ ...entry, snippet: trimmed } as any);
         break;
       }
     }
-    return clamped;
+    return clamped as any;
   }
 
   private shouldSkipUpdate(force?: boolean): boolean {

@@ -14,7 +14,7 @@ import {
   analyzeRepository,
   analyzeRepositories,
   generateMarkdownSummary,
-} from "../../skills/repository-scanner";
+} from "../../skills/repository-scanner.js";
 
 const app = new Hono();
 

@@ -295,17 +295,19 @@ export class MemoryIndexManager implements MemorySearchManager {
       : [];
 
     if (!hybrid.enabled) {
-      return vectorResults.filter((entry) => entry.score >= minScore).slice(0, maxResults);
+      return (vectorResults as any)
+        .filter((entry: any) => entry.score >= minScore)
+        .slice(0, maxResults);
     }
 
     const merged = this.mergeHybridResults({
-      vector: vectorResults,
-      keyword: keywordResults,
+      vector: vectorResults as any,
+      keyword: keywordResults as any,
       vectorWeight: hybrid.vectorWeight,
       textWeight: hybrid.textWeight,
     });
 
-    return merged.filter((entry) => entry.score >= minScore).slice(0, maxResults);
+    return (merged as any).filter((entry: any) => entry.score >= minScore).slice(0, maxResults);
   }
 
   private async searchVector(
@@ -323,7 +325,7 @@ export class MemoryIndexManager implements MemorySearchManager {
       sourceFilterVec: this.buildSourceFilter("c"),
       sourceFilterChunks: this.buildSourceFilter(),
     });
-    return results.map((entry) => entry as MemorySearchResult & { id: string });
+    return results.map((entry) => entry as any);
   }
 
   private buildFtsQuery(raw: string): string | null {
@@ -349,7 +351,7 @@ export class MemoryIndexManager implements MemorySearchManager {
       buildFtsQuery: (raw) => this.buildFtsQuery(raw),
       bm25RankToScore,
     });
-    return results.map((entry) => entry as MemorySearchResult & { id: string; textScore: number });
+    return results.map((entry) => entry as any);
   }
 
   private mergeHybridResults(params: {
@@ -359,7 +361,7 @@ export class MemoryIndexManager implements MemorySearchManager {
     textWeight: number;
   }): MemorySearchResult[] {
     const merged = mergeHybridResults({
-      vector: params.vector.map((r) => ({
+      vector: (params.vector as any).map((r: any) => ({
         id: r.id,
         path: r.path,
         startLine: r.startLine,
@@ -368,7 +370,7 @@ export class MemoryIndexManager implements MemorySearchManager {
         snippet: r.snippet,
         vectorScore: r.score,
       })),
-      keyword: params.keyword.map((r) => ({
+      keyword: (params.keyword as any).map((r: any) => ({
         id: r.id,
         path: r.path,
         startLine: r.startLine,
@@ -380,7 +382,7 @@ export class MemoryIndexManager implements MemorySearchManager {
       vectorWeight: params.vectorWeight,
       textWeight: params.textWeight,
     });
-    return merged.map((entry) => entry as MemorySearchResult);
+    return merged.map((entry) => entry as any);
   }
 
   async sync(params?: {

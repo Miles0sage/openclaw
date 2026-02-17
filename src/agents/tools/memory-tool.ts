@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { MemoryCitationsMode } from "../../config/types.memory.js";
-import type { MemorySearchResult } from "../../memory/types.js";
+import type { LegacyMemorySearchResult } from "../../memory/types.js";
 import type { AnyAgentTool } from "./common.js";
 import { resolveMemoryBackendConfig } from "../../memory/backend-config.js";
 import { getMemorySearchManager } from "../../memory/index.js";
@@ -66,7 +66,10 @@ export function createMemorySearchTool(options: {
           sessionKey: options.agentSessionKey,
         });
         const status = manager.status();
-        const decorated = decorateCitations(rawResults, includeCitations);
+        const decorated = decorateCitations(
+          rawResults as any as LegacyMemorySearchResult[],
+          includeCitations,
+        );
         const resolved = resolveMemoryBackendConfig({ cfg, agentId });
         const results =
           status.backend === "qmd"
@@ -142,7 +145,10 @@ function resolveMemoryCitationsMode(cfg: OpenClawConfig): MemoryCitationsMode {
   return "auto";
 }
 
-function decorateCitations(results: MemorySearchResult[], include: boolean): MemorySearchResult[] {
+function decorateCitations(
+  results: LegacyMemorySearchResult[],
+  include: boolean,
+): LegacyMemorySearchResult[] {
   if (!include) {
     return results.map((entry) => ({ ...entry, citation: undefined }));
   }
@@ -153,7 +159,7 @@ function decorateCitations(results: MemorySearchResult[], include: boolean): Mem
   });
 }
 
-function formatCitation(entry: MemorySearchResult): string {
+function formatCitation(entry: LegacyMemorySearchResult): string {
   const lineRange =
     entry.startLine === entry.endLine
       ? `#L${entry.startLine}`
@@ -162,14 +168,14 @@ function formatCitation(entry: MemorySearchResult): string {
 }
 
 function clampResultsByInjectedChars(
-  results: MemorySearchResult[],
+  results: LegacyMemorySearchResult[],
   budget?: number,
-): MemorySearchResult[] {
+): LegacyMemorySearchResult[] {
   if (!budget || budget <= 0) {
     return results;
   }
   let remaining = budget;
-  const clamped: MemorySearchResult[] = [];
+  const clamped: LegacyMemorySearchResult[] = [];
   for (const entry of results) {
     if (remaining <= 0) {
       break;
