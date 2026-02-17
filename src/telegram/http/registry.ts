@@ -100,3 +100,8 @@ export async function handleTelegramHttpRequest(
   await route.handler(req, res);
   return true;
 }
+
+/** For testing only: clears all registered routes */
+export function clearTelegramHttpRoutes(): void {
+  telegramHttpRoutes.clear();
+}

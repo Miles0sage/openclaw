@@ -193,7 +193,7 @@ describe("LangGraphRouter", () => {
   describe("Skill Matching", () => {
     it("selects agent with matching skills", async () => {
       const decision = await router.route(
-        "Set up a PostgreSQL database connection with Node.js",
+        "Implement a PostgreSQL database connection with Node.js",
         sessionKey,
         context,
       );

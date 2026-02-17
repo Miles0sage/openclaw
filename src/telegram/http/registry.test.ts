@@ -1,12 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   handleTelegramHttpRequest,
   normalizeTelegramWebhookPath,
   registerTelegramHttpHandler,
+  clearTelegramHttpRoutes,
 } from "./registry.js";
 
 describe("Telegram HTTP handler", () => {
+  beforeEach(() => {
+    clearTelegramHttpRoutes();
+  });
   it("normalizes webhook paths", () => {
     expect(normalizeTelegramWebhookPath()).toBe("/telegram/webhook");
     expect(normalizeTelegramWebhookPath("/custom")).toBe("/custom");
