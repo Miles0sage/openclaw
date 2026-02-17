@@ -2,6 +2,7 @@
 OpenClaw Gateway - ACTUALLY USES LOCAL MODELS
 Fixed to properly route to Ollama based on config.json
 WITH PERSISTENT MEMORY
+Webhook auth exemptions active (2026-02-17 18:30 UTC)
 """
 
 import os
