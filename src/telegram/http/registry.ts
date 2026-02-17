@@ -75,9 +75,19 @@ export async function handleTelegramHttpRequest(
   res: ServerResponse,
 ): Promise<boolean> {
   const url = new URL(req.url ?? "/", "http://localhost");
+
+  // Only handle /telegram/webhook paths
+  if (!url.pathname.startsWith("/telegram/webhook")) {
+    return false;
+  }
+
   const route = telegramHttpRoutes.get(url.pathname);
   if (!route) {
-    return false;
+    // Stub response for unregistered webhook (e.g., during startup)
+    logVerbose(`telegram: webhook received on ${url.pathname} but no handler registered`);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return true;
   }
 
   // Verify Telegram secret if configured

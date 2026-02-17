@@ -40,9 +40,18 @@ export async function handleSlackHttpRequest(
   res: ServerResponse,
 ): Promise<boolean> {
   const url = new URL(req.url ?? "/", "http://localhost");
+
+  // Only handle /slack/events paths
+  if (!url.pathname.startsWith("/slack/events")) {
+    return false;
+  }
+
   const handler = slackHttpRoutes.get(url.pathname);
   if (!handler) {
-    return false;
+    // Stub response for unregistered webhook (e.g., during startup)
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return true;
   }
   await handler(req, res);
   return true;
