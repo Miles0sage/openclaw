@@ -2,6 +2,15 @@
   "name": "Cybershield Agency",
   "version": "1.0.0",
   "port": 8000,
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "botToken": "8327486359:AAGECiQ1DsVUuBtrMgGzXnANhI_B9nfQZIQ",
+      "name": "Telegram Bot",
+      "type": "messaging",
+      "sessionKeyPrefix": "telegram"
+    }
+  },
   "agents": {
     "project_manager": {
       "name": "Cybershield PM",
@@ -37,13 +46,12 @@
       "name": "CodeGen Pro",
       "emoji": "💻",
       "type": "developer",
-      "model": "MiniMax-M2.5",
-      "apiProvider": "minimax",
-      "endpoint": "https://api.minimax.chat/v1",
-      "apiKeyEnv": "MINIMAX_API_KEY",
-      "contextWindow": 1000000,
-      "maxOutputTokens": 131072,
-      "persona": "I'm CodeGen - I write clean, production-ready code that actually works! Full-stack Next.js + FastAPI wizard. Security-first mindset. I leverage MiniMax M2.5's 80.2% SWE-Bench performance for bug-free deployments. Every message ends with: — 💻 CodeGen Pro",
+      "model": "claude-sonnet-4-5-20250929",
+      "apiProvider": "anthropic",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "contextWindow": 200000,
+      "maxOutputTokens": 16000,
+      "persona": "I'm CodeGen - I write clean, production-ready code that actually works! Full-stack Next.js + FastAPI wizard. Security-first mindset. Every message ends with: — 💻 CodeGen Pro",
       "skills": [
         "nextjs",
         "fastapi",
@@ -101,7 +109,9 @@
         "owasp",
         "security_best_practices",
         "threat_modeling",
-        "secure_architecture"
+        "secure_architecture",
+        "rls_audit",
+        "database_security"
       ],
       "maxTokens": 4096,
       "playful_traits": [
@@ -113,6 +123,52 @@
       "talks_to": ["Cybershield PM", "CodeGen Pro"],
       "signature": "— 🔒 Pentest AI",
       "endpoint": "http://152.53.55.207:11434"
+    },
+    "database_agent": {
+      "name": "SupabaseConnector",
+      "emoji": "🗄️",
+      "type": "data_specialist",
+      "model": "claude-opus-4-6-20250514",
+      "apiProvider": "anthropic",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "persona": "I'm SupabaseConnector - your database specialist! I query, fetch, and manage data with precision. I understand SQL, RLS policies, and real-time subscriptions. I'm super friendly and always explain what data I'm retrieving. Every message ends with: — 🗄️ SupabaseConnector",
+      "skills": [
+        "supabase_queries",
+        "query_database",
+        "sql_execution",
+        "data_analysis",
+        "schema_exploration",
+        "rls_policy_analysis",
+        "real_time_subscriptions",
+        "transaction_handling",
+        "data_validation"
+      ],
+      "maxTokens": 8192,
+      "databases": {
+        "barber_crm": {
+          "name": "Barber CRM",
+          "url": "https://djdilkhedpnlercxggby.supabase.co",
+          "anonKey": "${BARBER_CRM_SUPABASE_ANON_KEY}",
+          "serviceRoleKey": "${BARBER_CRM_SUPABASE_SERVICE_ROLE_KEY}",
+          "enabled": true
+        },
+        "delhi_palace": {
+          "name": "Delhi Palace",
+          "url": "https://banxtacevgopeczuzycz.supabase.co",
+          "anonKey": "${DELHI_PALACE_SUPABASE_ANON_KEY}",
+          "serviceRoleKey": "${DELHI_PALACE_SUPABASE_SERVICE_ROLE_KEY}",
+          "enabled": true
+        }
+      },
+      "playful_traits": [
+        "loves databases",
+        "makes SQL jokes",
+        "celebrates data consistency",
+        "always follows RLS policies",
+        "explains query results clearly"
+      ],
+      "talks_to": ["Cybershield PM", "CodeGen Pro", "Pentest AI"],
+      "signature": "— 🗄️ SupabaseConnector"
     }
   },
   "workflows": {
@@ -221,7 +277,10 @@
         "authentication",
         "authorization",
         "access control",
-        "sql injection"
+        "sql injection",
+        "rls",
+        "row_level_security",
+        "policy"
       ],
       "development": [
         "code",
@@ -259,6 +318,34 @@
         "rest",
         "graphql",
         "websocket"
+      ],
+      "database": [
+        "query",
+        "fetch",
+        "select",
+        "insert",
+        "update",
+        "delete",
+        "table",
+        "column",
+        "row",
+        "data",
+        "supabase",
+        "postgresql",
+        "postgres",
+        "sql",
+        "database",
+        "appointments",
+        "clients",
+        "services",
+        "transactions",
+        "orders",
+        "customers",
+        "call_logs",
+        "schema",
+        "rls",
+        "subscription",
+        "real_time"
       ],
       "planning": [
         "plan",

@@ -49,7 +49,16 @@ class AgentRouter:
             "skills": [
                 "security_scanning", "vulnerability_assessment", "penetration_testing",
                 "owasp", "security_best_practices", "threat_modeling",
-                "secure_architecture"
+                "secure_architecture", "rls_audit", "database_security"
+            ]
+        },
+        "database_agent": {
+            "id": "database_agent",
+            "name": "SupabaseConnector",
+            "skills": [
+                "supabase_queries", "query_database", "sql_execution", "data_analysis",
+                "schema_exploration", "rls_policy_analysis", "real_time_subscriptions",
+                "transaction_handling", "data_validation"
             ]
         }
     }
@@ -60,7 +69,8 @@ class AgentRouter:
         "xss", "csrf", "injection", "pentest", "hack", "breach",
         "secure", "threat", "attack", "threat_modeling", "risk",
         "malware", "payload", "sanitize", "encrypt", "cryptography",
-        "authentication", "authorization", "access control", "sql injection"
+        "authentication", "authorization", "access control", "sql injection",
+        "rls", "row_level_security", "policy"
     ]
 
     DEVELOPMENT_KEYWORDS = [
@@ -70,6 +80,14 @@ class AgentRouter:
         "deploy", "deployment", "frontend", "backend", "full-stack",
         "refactor", "refactoring", "clean_code", "git", "repository",
         "json", "yaml", "xml", "rest", "graphql", "websocket"
+    ]
+
+    DATABASE_KEYWORDS = [
+        "query", "fetch", "select", "insert", "update", "delete", "table",
+        "column", "row", "data", "supabase", "postgresql", "postgres", "sql",
+        "database", "appointments", "clients", "services", "transactions",
+        "orders", "customers", "call_logs", "schema", "rls", "subscription",
+        "real_time"
     ]
 
     PLANNING_KEYWORDS = [
@@ -102,6 +120,7 @@ class AgentRouter:
             if routing_config:
                 self.SECURITY_KEYWORDS = routing_config.get("security", self.SECURITY_KEYWORDS)
                 self.DEVELOPMENT_KEYWORDS = routing_config.get("development", self.DEVELOPMENT_KEYWORDS)
+                self.DATABASE_KEYWORDS = routing_config.get("database", self.DATABASE_KEYWORDS)
                 self.PLANNING_KEYWORDS = routing_config.get("planning", self.PLANNING_KEYWORDS)
         except Exception:
             pass  # Use defaults if config parsing fails
@@ -138,13 +157,17 @@ class AgentRouter:
 
     def _classify_intent(self, query: str) -> str:
         """
-        Classify query intent as: security_audit, development, planning, or general
+        Classify query intent as: security_audit, development, database, planning, or general
         """
         security_count = sum(1 for kw in self.SECURITY_KEYWORDS if self.match_keyword(query, kw))
         dev_count = sum(1 for kw in self.DEVELOPMENT_KEYWORDS if self.match_keyword(query, kw))
+        db_count = sum(1 for kw in self.DATABASE_KEYWORDS if self.match_keyword(query, kw))
         planning_count = sum(1 for kw in self.PLANNING_KEYWORDS if self.match_keyword(query, kw))
 
-        if security_count > 0 and security_count >= dev_count and security_count >= planning_count:
+        # Prioritize database queries
+        if db_count > 0 and db_count >= dev_count and db_count >= security_count:
+            return "database"
+        elif security_count > 0 and security_count >= dev_count and security_count >= planning_count:
             return "security_audit"
         elif dev_count > 0 and dev_count >= planning_count:
             return "development"
@@ -156,7 +179,7 @@ class AgentRouter:
     def _extract_keywords(self, query: str) -> List[str]:
         """Extract all matching keywords from query"""
         keywords = []
-        for kw in self.SECURITY_KEYWORDS + self.DEVELOPMENT_KEYWORDS + self.PLANNING_KEYWORDS:
+        for kw in self.SECURITY_KEYWORDS + self.DEVELOPMENT_KEYWORDS + self.DATABASE_KEYWORDS + self.PLANNING_KEYWORDS:
             if self.match_keyword(query, kw):
                 keywords.append(kw)
         return keywords
@@ -192,17 +215,31 @@ class AgentRouter:
             # General queries routed to PM
             return 1.0 if agent_id == "project_manager" else 0.3
 
+        elif intent == "database":
+            if agent_id == "database_agent":
+                return 1.0
+            elif agent_id == "coder_agent":
+                return 0.6  # CodeGen can also work with databases
+            elif agent_id == "hacker_agent":
+                return 0.4  # Security auditing of database
+            else:
+                return 0.1
+
         elif intent == "security_audit":
             if agent_id == "hacker_agent":
                 return 1.0
             elif agent_id == "coder_agent":
                 return 0.5
+            elif agent_id == "database_agent":
+                return 0.4  # RLS policy auditing
             else:
                 return 0.2
 
         elif intent == "development":
             if agent_id == "coder_agent":
                 return 1.0
+            elif agent_id == "database_agent":
+                return 0.5  # Database schema design
             elif agent_id == "hacker_agent":
                 return 0.4  # Security considerations in dev
             else:

@@ -671,6 +671,112 @@ async def quota_config_endpoint():
         }
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# TELEGRAM WEBHOOK HANDLER
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(request: Request):
+    """Receive Telegram messages via webhook"""
+    try:
+        update = await request.json()
+
+        # Extract message from update
+        if "message" not in update:
+            logger.debug(f"Skipping non-message update: {update.get('update_id')}")
+            return {"ok": True}
+
+        message = update["message"]
+        chat_id = message["chat"]["id"]
+        user_id = message["from"]["id"]
+        text = message.get("text", "")
+
+        # Create session key from Telegram IDs
+        session_key = f"telegram:{user_id}:{chat_id}"
+
+        if not text:
+            return {"ok": True}
+
+        logger.info(f"📱 Telegram message from {user_id} in chat {chat_id}: {text[:50]}")
+
+        # Route message through OpenClaw chat endpoint
+        try:
+            # Create message for chat endpoint
+            chat_message = {
+                "content": text,
+                "sessionKey": session_key,
+                "project_id": "telegram-bot"
+            }
+
+            # Get agent routing decision
+            route_decision = agent_router.select_agent(text)
+            chat_message["agent_id"] = route_decision["agentId"]
+
+            logger.info(f"🎯 Routed to {route_decision['agentId']}: {route_decision['reason']}")
+
+            # Process through chat endpoint logic
+            session_history = load_session_history(session_key)
+
+            # Build context
+            messages_for_api = [
+                {"role": msg["role"], "content": msg["content"]}
+                for msg in session_history
+            ]
+            messages_for_api.append({"role": "user", "content": text})
+
+            # Get Anthropic client
+            client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+            # Create system prompt
+            agent_config = CONFIG.get("agents", {}).get(route_decision["agentId"], {})
+            system_prompt = agent_config.get("persona", "You are a helpful assistant.")
+
+            # Call Claude
+            response = client.messages.create(
+                model=agent_config.get("model", "claude-opus-4-6-20250514"),
+                max_tokens=1024,
+                system=system_prompt,
+                messages=messages_for_api
+            )
+
+            assistant_message = response.content[0].text
+
+            # Save to session
+            session_history.append({"role": "user", "content": text})
+            session_history.append({"role": "assistant", "content": assistant_message})
+            save_session_history(session_key, session_history)
+
+            logger.info(f"✅ Response generated: {assistant_message[:50]}...")
+
+            # Send response back to Telegram
+            telegram_token = CONFIG.get("channels", {}).get("telegram", {}).get("botToken", "")
+            if telegram_token:
+                telegram_send_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+                telegram_payload = {
+                    "chat_id": chat_id,
+                    "text": assistant_message,
+                    "reply_to_message_id": message["message_id"]
+                }
+
+                try:
+                    resp = requests.post(telegram_send_url, json=telegram_payload, timeout=10)
+                    if resp.status_code == 200:
+                        logger.info(f"✅ Message sent to Telegram chat {chat_id}")
+                    else:
+                        logger.warning(f"⚠️  Telegram send failed: {resp.status_code}")
+                except Exception as e:
+                    logger.error(f"❌ Error sending to Telegram: {e}")
+
+        except Exception as e:
+            logger.error(f"Error processing Telegram message: {e}")
+
+        return {"ok": True}
+
+    except Exception as e:
+        logger.error(f"Telegram webhook error: {e}")
+        return {"ok": False, "error": str(e)}
+
+
 class QuotaCheckRequest(BaseModel):
     project_id: Optional[str] = "default"
     queue_size: Optional[int] = 0
