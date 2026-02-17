@@ -27,6 +27,16 @@ from orchestrator import Orchestrator, AgentRole, Message as OrchMessage, Messag
 # Import cost tracker
 from cost_tracker import log_cost_event, get_cost_metrics, get_cost_summary, get_cost_log_path
 
+# Import quota manager
+from quota_manager import (
+    check_daily_quota,
+    check_monthly_quota,
+    check_queue_size,
+    check_all_quotas,
+    get_quota_status,
+    load_quota_config,
+)
+
 # Import complexity classifier (intelligent router)
 from complexity_classifier import (
     classify as classify_query,
@@ -35,6 +45,9 @@ from complexity_classifier import (
     MODEL_ALIASES,
     MODEL_RATE_LIMITS,
 )
+
+# Import heartbeat monitor
+from heartbeat_monitor import init_heartbeat_monitor, get_heartbeat_monitor
 
 load_dotenv()
 
@@ -129,6 +142,21 @@ WS_PING_TIMEOUT = 10
 active_connections: Dict[str, WebSocket] = {}
 chat_history: Dict[str, list] = {}
 
+# Initialize heartbeat monitor on startup
+def _init_heartbeat_monitor():
+    """Initialize the heartbeat monitor for agent health checks"""
+    try:
+        monitor = init_heartbeat_monitor(
+            check_interval_ms=30000,  # 30 seconds
+            stale_threshold_ms=5 * 60 * 1000,  # 5 minutes
+            timeout_threshold_ms=30 * 60 * 1000  # 30 minutes
+        )
+        logger.info("✅ Heartbeat monitor initialized and started")
+        return monitor
+    except Exception as err:
+        logger.error(f"Failed to initialize heartbeat monitor: {err}")
+        return None
+
 # Load existing sessions from disk
 def _load_all_sessions():
     """Load all existing sessions from disk on startup"""
@@ -150,6 +178,7 @@ class Message(BaseModel):
     content: str
     agent_id: Optional[str] = "pm"
     sessionKey: Optional[str] = None  # Support session memory
+    project_id: Optional[str] = None  # For quota tracking
 
 
 def call_ollama(model: str, prompt: str, endpoint: str = "http://localhost:11434") -> tuple[str, int]:
@@ -365,6 +394,31 @@ async def root():
         }
     }
 
+@app.get("/health")
+async def health():
+    """Health check endpoint"""
+    return {
+        "status": "operational",
+        "gateway": "OpenClaw",
+        "version": "2.0.0",
+        "agents_active": len(CONFIG.get("agents", {})),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+@app.get("/dashboard.html")
+async def dashboard():
+    """Simple HTML dashboard"""
+    return {
+        "status": "ready",
+        "dashboard_url": "Use /api/costs/summary for metrics",
+        "endpoints": {
+            "costs": "/api/costs/summary",
+            "agents": "/api/agents",
+            "chat": "POST /api/chat",
+            "routing": "/api/route"
+        }
+    }
+
 
 @app.get("/api/agents")
 async def list_agents():
@@ -382,13 +436,40 @@ async def list_agents():
     return {"agents": agents}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# QUOTA & CAP GATE MIDDLEWARE
+# Enforces daily/monthly spend limits and queue size limits
+# ═══════════════════════════════════════════════════════════════════════
+
 @app.post("/api/chat")
 async def chat_endpoint(message: Message):
     """REST chat with optional session memory"""
     agent_id = message.agent_id or "project_manager"
     session_key = message.sessionKey or "default"
+    project_id = message.project_id or "default"
 
     try:
+        # ═ QUOTA CHECK: Verify daily/monthly limits and queue size
+        quota_config = load_quota_config()
+        if quota_config.get("enabled", False):
+            # Check all quotas before processing
+            quotas_ok, quota_error = check_all_quotas(project_id)
+            if not quotas_ok:
+                logger.warning(f"Quota exceeded: {quota_error}")
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "success": False,
+                        "error": "Quota limit exceeded",
+                        "detail": quota_error,
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                    }
+                )
+
+            # Get quota status for logging
+            quota_status = get_quota_status(project_id)
+            logger.info(f"✅ Quota check passed for '{project_id}': {quota_status['daily']['percent']:.1f}% daily, {quota_status['monthly']['percent']:.1f}% monthly")
+
         # Load session history if available
         if session_key not in chat_history:
             chat_history[session_key] = load_session_history(session_key)
@@ -459,6 +540,79 @@ async def costs_text():
     except Exception as e:
         logger.error(f"Error getting cost summary: {e}")
         return {"success": False, "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# QUOTA & CAP GATE ENDPOINTS
+# GET  /api/quotas/status    - Get current quota status for a project
+# GET  /api/quotas/config    - Get quota configuration
+# POST /api/quotas/check     - Check if request would be allowed
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/quotas/status/{project_id}")
+async def quota_status_endpoint(project_id: str = "default"):
+    """Get current quota usage for a project"""
+    try:
+        status = get_quota_status(project_id)
+        return {
+            "success": True,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "data": status
+        }
+    except Exception as e:
+        logger.error(f"Error getting quota status: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+
+
+@app.get("/api/quotas/config")
+async def quota_config_endpoint():
+    """Get quota configuration"""
+    try:
+        quota_config = load_quota_config()
+        return {
+            "success": True,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "data": quota_config
+        }
+    except Exception as e:
+        logger.error(f"Error getting quota config: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+
+
+class QuotaCheckRequest(BaseModel):
+    project_id: Optional[str] = "default"
+    queue_size: Optional[int] = 0
+
+
+@app.post("/api/quotas/check")
+async def quota_check_endpoint(req: QuotaCheckRequest):
+    """Check if a request would be allowed under current quotas"""
+    try:
+        quotas_ok, error_msg = check_all_quotas(req.project_id, req.queue_size)
+        status = get_quota_status(req.project_id)
+
+        return {
+            "success": True,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "allowed": quotas_ok,
+            "error": error_msg,
+            "status": status
+        }
+    except Exception as e:
+        logger.error(f"Error checking quotas: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -874,5 +1028,10 @@ if __name__ == "__main__":
         print(f"   {emoji} {agent_id:20} → {provider:10} → {model}")
     print("")
     print("💰 Cost Tracking Enabled")
+    print("⏱️  Heartbeat Monitor Starting...")
+
+    # Initialize heartbeat monitor for agent health checks
+    _init_heartbeat_monitor()
+
     print("")
     uvicorn.run(app, host="0.0.0.0", port=18789, log_level="info")

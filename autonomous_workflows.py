@@ -12,6 +12,8 @@ from enum import Enum
 from datetime import datetime
 
 from orchestrator import Orchestrator, AgentRole, Message, MessageAudience
+from gateway import call_model_for_agent
+from cost_tracker import log_cost_event
 
 logger = logging.getLogger("autonomous_workflows")
 
@@ -186,6 +188,15 @@ class AutonomousWorkflowEngine:
         }
         return mapping.get(agent_key, AgentRole.PM)
 
+    def _agent_role_to_key(self, agent_role: AgentRole) -> str:
+        """Convert AgentRole back to agent config key"""
+        mapping = {
+            AgentRole.PM: "project_manager",
+            AgentRole.DEVELOPER: "coder_agent",
+            AgentRole.SECURITY: "hacker_agent"
+        }
+        return mapping.get(agent_role, "project_manager")
+
     async def _execute_workflow(
         self,
         execution_id: str,
@@ -242,22 +253,102 @@ class AutonomousWorkflowEngine:
         step: WorkflowStep
     ) -> Dict:
         """
-        Execute a single workflow step.
+        Execute a single workflow step with real agent invocation.
 
-        This would call the actual agent with the task.
+        Maps AgentRole to agent_key, builds context-aware prompt,
+        calls real agent via call_model_for_agent, logs costs.
         """
-        # TODO: Implement actual agent invocation
-        # For now, simulate execution
-        logger.info(f"🔧 Executing: {step.agent.value} - {step.task}")
+        # Map AgentRole to agent config key
+        agent_key = self._agent_role_to_key(step.agent)
 
-        await asyncio.sleep(0.5)  # Simulate work
+        logger.info(f"🔧 Executing: {step.agent.value} ({agent_key}) - {step.task}")
 
-        return {
-            "agent": step.agent.value,
-            "task": step.task,
-            "status": "completed",
-            "output": f"Simulated result for {step.task}"
+        # Build context for the agent
+        context = {
+            "workflow_id": execution.workflow_name,
+            "workflow_execution_id": id(execution),
+            "step_number": execution.current_step + 1,
+            "total_steps": execution.total_steps,
+            "prior_results": [
+                {
+                    "step": r["step"],
+                    "agent": r["agent"],
+                    "output": r["result"].get("output", "")
+                }
+                for r in execution.results
+            ],
+            "requirements": execution.context.get("requirements", ""),
+            "client": execution.context.get("client", ""),
+            "project_type": execution.context.get("project_type", ""),
+            "budget": execution.context.get("budget", ""),
+            "deadline_hours": execution.context.get("deadline_hours", "")
         }
+
+        # Build agent prompt with workflow context
+        full_prompt = f"""{step.task}
+
+WORKFLOW CONTEXT:
+{json.dumps(context, indent=2)}
+
+INSTRUCTIONS:
+1. Complete the task using all available context
+2. Reference prior step results if relevant
+3. Keep the workflow moving forward
+4. Be specific and actionable in your output
+5. Flag any blockers or risks immediately"""
+
+        # Call real agent
+        try:
+            response_text, tokens_output = call_model_for_agent(
+                agent_key=agent_key,
+                prompt=full_prompt,
+                conversation=None  # Could use execution context for multi-turn if needed
+            )
+
+            # Log cost event
+            try:
+                log_cost_event(
+                    project="openclaw_workflows",
+                    agent=agent_key,
+                    model="claude-opus-4-6",  # Default model used by gateway
+                    tokens_input=len(full_prompt.split()),  # Rough estimate
+                    tokens_output=tokens_output
+                )
+            except Exception as e:
+                logger.warning(f"⚠️  Cost logging failed: {e}")
+
+            logger.info(f"✅ Agent responded: {tokens_output} tokens")
+
+            return {
+                "agent": step.agent.value,
+                "agent_key": agent_key,
+                "task": step.task,
+                "status": "completed",
+                "output": response_text,
+                "tokens_output": tokens_output,
+                "context_used": list(context.keys())
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Agent execution failed: {e}")
+
+            # Determine if we should retry
+            if step.retry_count < step.max_retries:
+                step.retry_count += 1
+                logger.info(f"🔄 Retrying step (attempt {step.retry_count}/{step.max_retries})")
+                await asyncio.sleep(1)  # Brief delay before retry
+                return await self._execute_step(execution, step)
+
+            # Max retries exceeded - return error result
+            return {
+                "agent": step.agent.value,
+                "agent_key": agent_key,
+                "task": step.task,
+                "status": "failed",
+                "error": str(e),
+                "output": f"Agent execution failed after {step.max_retries} retries: {str(e)}",
+                "tokens_output": 0
+            }
 
     async def _transition_workflow_state(self, agent: AgentRole):
         """Update orchestrator workflow state based on agent"""

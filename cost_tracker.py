@@ -142,8 +142,8 @@ def get_cost_metrics(time_window: Optional[str] = None) -> dict:
     # Filter by time window if provided (e.g., "24h", "7d", "30d")
     filtered = entries
     if time_window:
-        from datetime import datetime, timedelta
-        now = datetime.utcnow()
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
         cutoff = parse_time_window(now, time_window)
 
         filtered = [
@@ -191,7 +191,7 @@ def get_cost_metrics(time_window: Optional[str] = None) -> dict:
 
 
 def parse_time_window(now, window: str):
-    """Parse time window string to datetime cutoff"""
+    """Parse time window string to datetime cutoff (expects timezone-aware datetime)"""
     from datetime import timedelta
     import re
 

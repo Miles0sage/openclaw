@@ -242,6 +242,23 @@
       "notes": "OpenAI-compatible API. Switch from Ollama Qwen to MiniMax M2.5 for 80.2% SWE-Bench performance at 1/20th the infrastructure cost."
     }
   },
+  "quotas": {
+    "enabled": true,
+    "daily_limit_usd": 50,
+    "monthly_limit_usd": 1000,
+    "max_queue_size": 100,
+    "per_project": {
+      "barber-crm": {
+        "daily_limit_usd": 20,
+        "monthly_limit_usd": 500
+      },
+      "delhi-palace": {
+        "daily_limit_usd": 10,
+        "monthly_limit_usd": 300
+      }
+    },
+    "warning_threshold_percent": 80
+  },
   "channels": {
     "slack": {
       "enabled": true,
