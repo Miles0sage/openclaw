@@ -68,7 +68,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("openclaw_gateway")
 
-# Session persistence
+# Session persistence - v2
 SESSIONS_DIR = pathlib.Path(os.getenv("OPENCLAW_SESSIONS_DIR", "/tmp/openclaw_sessions"))
 SESSIONS_DIR.mkdir(exist_ok=True)
 logger.info(f"📁 Session storage: {SESSIONS_DIR}")
