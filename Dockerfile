@@ -18,6 +18,8 @@ RUN corepack enable
 
 WORKDIR /app
 
+# Support concurrency tuning for 7GB GitHub Actions runners
+ARG PNPM_CONCURRENCY=16
 ARG OPENCLAW_DOCKER_APT_PACKAGES=""
 RUN if [ -n "$OPENCLAW_DOCKER_APT_PACKAGES" ]; then \
       apt-get update && \
@@ -31,14 +33,27 @@ COPY ui/package.json ./ui/package.json
 COPY patches ./patches
 COPY scripts ./scripts
 
-RUN pnpm install --frozen-lockfile
+# Install dependencies (use --child-concurrency for 7GB-constrained environments)
+RUN if [ "${PNPM_CONCURRENCY}" -lt 4 ]; then \
+      echo "🔧 Installing with --child-concurrency=1 for low-memory environment..." && \
+      pnpm install --frozen-lockfile --child-concurrency=1; \
+    else \
+      pnpm install --frozen-lockfile; \
+    fi
 
 COPY . .
-# Increase Node heap size to prevent OOM during build
-RUN NODE_OPTIONS=--max-old-space-size=16384 OPENCLAW_A2UI_SKIP_MISSING=1 pnpm build
-# Force pnpm for UI build (Bun may fail on ARM/Synology architectures)
-ENV OPENCLAW_PREFER_PNPM=1
-RUN NODE_OPTIONS=--max-old-space-size=16384 pnpm ui:build
+
+# Support two build modes:
+# 1. Full build (default): pnpm build generates dist/
+# 2. Pre-built mode: skip build if dist/ already exists (from GitHub Actions artifacts)
+RUN if [ ! -d dist ] || [ -z "$(ls -A dist)" ]; then \
+      echo "🔨 Building from source (workspace-concurrency=${PNPM_CONCURRENCY})..." && \
+      pnpm build --workspace-concurrency=${PNPM_CONCURRENCY} && \
+      export OPENCLAW_PREFER_PNPM=1 && \
+      pnpm ui:build; \
+    else \
+      echo "✅ Using pre-built dist/ artifacts (from GitHub Actions)"; \
+    fi
 
 ENV NODE_ENV=production
 

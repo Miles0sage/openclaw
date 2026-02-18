@@ -9,8 +9,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-# Pricing constants (Feb 2026 Claude API rates)
+# Pricing constants (Feb 2026 Claude API rates + Deepseek Kimi)
 PRICING = {
+    # Claude Models
     "claude-3-5-haiku-20241022": {
         "input": 0.8,      # $0.80 per million input tokens
         "output": 4.0,     # $4.00 per million output tokens
@@ -23,10 +24,28 @@ PRICING = {
         "input": 15.0,     # $15.00 per million input tokens
         "output": 75.0,    # $75.00 per million output tokens
     },
-    # Aliases for common references
+    # Claude Aliases
     "claude-3-5-haiku": {"input": 0.8, "output": 4.0},
     "claude-3-5-sonnet": {"input": 3.0, "output": 15.0},
     "claude-opus": {"input": 15.0, "output": 75.0},
+
+    # Deepseek Kimi Models (95-82% cheaper than Claude)
+    "kimi-2.5": {
+        "input": 0.14,     # $0.14 per million input tokens (95% cheaper than Sonnet)
+        "output": 0.28,    # $0.28 per million output tokens (98% cheaper than Sonnet)
+    },
+    "deepseek-chat": {
+        "input": 0.14,     # Alias for kimi-2.5
+        "output": 0.28,
+    },
+    "kimi": {
+        "input": 0.27,     # $0.27 per million input tokens (82% cheaper than Opus)
+        "output": 0.68,    # $0.68 per million output tokens (99% cheaper than Opus)
+    },
+    "deepseek-reasoner": {
+        "input": 0.27,     # Alias for kimi
+        "output": 0.68,
+    },
 }
 
 

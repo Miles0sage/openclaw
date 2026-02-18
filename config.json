@@ -56,12 +56,13 @@
       "name": "CodeGen Pro",
       "emoji": "💻",
       "type": "developer",
-      "model": "claude-sonnet-4-5-20250929",
-      "apiProvider": "anthropic",
-      "apiKeyEnv": "ANTHROPIC_API_KEY",
-      "contextWindow": 200000,
-      "maxOutputTokens": 16000,
-      "persona": "I'm CodeGen - I write clean, production-ready code that actually works! Full-stack Next.js + FastAPI wizard. Security-first mindset. Every message ends with: — 💻 CodeGen Pro",
+      "model": "kimi-2.5",
+      "apiProvider": "deepseek",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "contextWindow": 64000,
+      "maxOutputTokens": 8192,
+      "temperature": 0.3,
+      "persona": "I'm CodeGen - I write clean, production-ready code that actually works! Full-stack Next.js + FastAPI wizard. Security-first mindset. Optimized for speed and cost efficiency with Kimi 2.5. Every message ends with: — 💻 CodeGen Pro",
       "skills": [
         "nextjs",
         "fastapi",
@@ -71,47 +72,42 @@
         "supabase",
         "clean_code",
         "testing",
-        "repository_scanning",
-        "git_automation",
         "code_analysis",
-        "tool_use_optimization",
-        "function_calling",
-        "long_context_reasoning"
+        "function_calling"
       ],
       "tools": [
         {
           "name": "read_repo",
           "description": "Clone and analyze GitHub repositories",
           "capabilities": ["git_clone", "file_read", "git_log"]
-        },
-        {
-          "name": "generate_summary",
-          "description": "Create project summaries from repo analysis",
-          "capabilities": ["tech_stack_detection", "architecture_diagram", "commit_analysis"]
         }
       ],
       "maxTokens": 8192,
       "playful_traits": [
         "makes coding puns",
         "celebrates clean code",
-        "friendly rivalry with security",
-        "proud of bug-free work",
-        "leverages 1M context for complex projects"
+        "proud of efficient code",
+        "fast iteration"
       ],
       "talks_to": ["Cybershield PM", "Pentest AI"],
-      "signature": "— 💻 CodeGen Pro (MiniMax M2.5)",
-      "upgradedFrom": "qwen2.5-coder:32b",
-      "upgradeDate": "2026-02-16",
-      "performanceGain": "80.2% SWE-Bench (vs Qwen ~70%), 76.8% tool-calling (vs Qwen ~50%)"
+      "signature": "— 💻 CodeGen Pro",
+      "migratedFrom": "claude-sonnet-4-5-20250929",
+      "migrationDate": "2026-02-18",
+      "costSavings": "95% cheaper than Claude Sonnet",
+      "notes": "Kimi 2.5 offers excellent code generation at a fraction of the cost. Falls back to Anthropic for complex tasks if needed."
     },
     "hacker_agent": {
       "name": "Pentest AI",
       "emoji": "🔒",
       "type": "security",
-      "model": "qwen2.5-coder:14b",
-      "apiProvider": "ollama",
-      "apiKeyEnv": "ANTHROPIC_API_KEY",
-      "persona": "I'm Pentest - your friendly paranoid security expert! I find vulnerabilities before bad actors do. I make security fun (yes, really!) and celebrate when code is Fort Knox level secure. Every message ends with: — 🔒 Pentest AI",
+      "model": "kimi",
+      "apiProvider": "deepseek",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "contextWindow": 128000,
+      "maxOutputTokens": 8192,
+      "temperature": 0.5,
+      "thinkingBudget": 5000,
+      "persona": "I'm Pentest - your friendly paranoid security expert! I find vulnerabilities before bad actors do. I use advanced reasoning (extended thinking) for threat modeling. I make security fun and celebrate Fort Knox-level secure code. Every message ends with: — 🔒 Pentest AI",
       "skills": [
         "security_scanning",
         "vulnerability_assessment",
@@ -123,16 +119,20 @@
         "rls_audit",
         "database_security"
       ],
-      "maxTokens": 4096,
+      "maxTokens": 8192,
       "playful_traits": [
         "makes security jokes",
         "celebrates secure code",
         "friendly but thorough",
-        "explains fixes clearly"
+        "explains fixes clearly",
+        "uses extended thinking for complex threat analysis"
       ],
       "talks_to": ["Cybershield PM", "CodeGen Pro"],
       "signature": "— 🔒 Pentest AI",
-      "endpoint": "http://152.53.55.207:11434"
+      "migratedFrom": "qwen2.5-coder:14b",
+      "migrationDate": "2026-02-18",
+      "costSavings": "82% cheaper than Claude Opus, with better reasoning via extended thinking",
+      "notes": "Kimi provides superior threat modeling with extended thinking capability. Better cost/performance for security analysis."
     },
     "database_agent": {
       "name": "SupabaseConnector",
@@ -396,6 +396,48 @@
     }
   },
   "providers": {
+    "deepseek": {
+      "name": "Deepseek AI",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "description": "Deepseek Kimi models - Cost-effective alternatives to Claude",
+      "models": {
+        "kimi-2.5": {
+          "name": "Kimi 2.5 (deepseek-chat)",
+          "type": "text",
+          "contextWindow": 64000,
+          "maxOutputTokens": 8192,
+          "costPer1MInputTokens": 0.14,
+          "costPer1MOutputTokens": 0.28,
+          "costVsClaudeXornet": "95% cheaper",
+          "useCase": "Code generation, routine tasks",
+          "benchmarks": {
+            "codingSpeed": "High",
+            "accuracy": "Good",
+            "costEfficiency": "Excellent"
+          }
+        },
+        "kimi": {
+          "name": "Kimi (deepseek-reasoner)",
+          "type": "text",
+          "contextWindow": 128000,
+          "maxOutputTokens": 8192,
+          "costPer1MInputTokens": 0.27,
+          "costPer1MOutputTokens": 0.68,
+          "costVsClaudeOpus": "82% cheaper",
+          "useCase": "Security analysis, threat modeling, complex reasoning",
+          "features": ["extendedThinking", "functionCalling", "largeContext"],
+          "benchmarks": {
+            "reasoning": "Advanced",
+            "threatModeling": "Excellent",
+            "costEfficiency": "Excellent"
+          }
+        }
+      },
+      "documentation": "https://api-docs.deepseek.com",
+      "signupUrl": "https://platform.deepseek.com",
+      "notes": "Excellent cost/performance for specialized tasks. Kimi 2.5 for CodeGen (95% savings), Kimi for Security (82% savings)."
+    },
     "minimax": {
       "name": "MiniMax AI",
       "baseUrl": "https://api.minimax.chat/v1",
@@ -414,21 +456,11 @@
             "toolCalling": "76.8%",
             "multiSweBench": "51.3%"
           }
-        },
-        "m2.5-lightning": {
-          "name": "MiniMax-M2.5-Lightning",
-          "type": "text",
-          "contextWindow": 200000,
-          "maxOutputTokens": 131072,
-          "costPer1MInputTokens": 0.25,
-          "costPer1MOutputTokens": 1.0,
-          "speedMultiplier": 1.37,
-          "description": "37% faster than standard M2.5, optimized for high-throughput"
         }
       },
       "documentation": "https://platform.minimax.io/docs/api-reference/text-openai-api",
       "signupUrl": "https://platform.minimax.io",
-      "notes": "OpenAI-compatible API. Switch from Ollama Qwen to MiniMax M2.5 for 80.2% SWE-Bench performance at 1/20th the infrastructure cost."
+      "notes": "OpenAI-compatible API. Alternative for high-throughput coding tasks."
     }
   },
   "quotas": {
