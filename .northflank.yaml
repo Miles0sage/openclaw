@@ -110,7 +110,7 @@ security:
     ingress:
       - from: any
         ports:
-          - port: 8000
+          - port: 18789
             protocol: TCP
 
     egress:
@@ -166,7 +166,7 @@ validation:
 
   readinessProbe:
     path: /health
-    port: 8000
+    port: 18789
     initialDelaySeconds: 10
     periodSeconds: 5
 
