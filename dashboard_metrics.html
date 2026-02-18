@@ -1,0 +1,1556 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenClaw - Advanced Metrics Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell",
+          sans-serif;
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        color: #e2e8f0;
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 1600px;
+        margin: 0 auto;
+      }
+
+      /* Header */
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 30px;
+        flex-wrap: wrap;
+        gap: 20px;
+      }
+
+      .header h1 {
+        font-size: 32px;
+        font-weight: 700;
+        background: linear-gradient(135deg, #60a5fa, #3b82f6);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .header-controls {
+        display: flex;
+        gap: 15px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .control-group {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      label {
+        font-size: 14px;
+        font-weight: 500;
+        color: #cbd5e1;
+      }
+
+      input[type="date"],
+      select,
+      button {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid #475569;
+        background: #1e293b;
+        color: #e2e8f0;
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+
+      input[type="date"]:hover,
+      select:hover {
+        border-color: #64748b;
+        background: #334155;
+      }
+
+      button {
+        background: linear-gradient(135deg, #3b82f6, #1e40af);
+        border: none;
+        font-weight: 600;
+        padding: 8px 16px;
+      }
+
+      button:hover {
+        background: linear-gradient(135deg, #60a5fa, #3b82f6);
+        transform: translateY(-2px);
+        box-shadow: 0 10px 25px rgba(59, 130, 246, 0.3);
+      }
+
+      button:active {
+        transform: translateY(0);
+      }
+
+      .toggle-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 50px;
+        height: 24px;
+      }
+
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #475569;
+        transition: 0.3s;
+        border-radius: 24px;
+      }
+
+      .slider:before {
+        position: absolute;
+        content: "";
+        height: 18px;
+        width: 18px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        transition: 0.3s;
+        border-radius: 50%;
+      }
+
+      input:checked + .slider {
+        background-color: #3b82f6;
+      }
+
+      input:checked + .slider:before {
+        transform: translateX(26px);
+      }
+
+      /* Status Cards Grid */
+      .cards-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+      }
+
+      .status-card {
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        border: 1px solid #475569;
+        border-radius: 12px;
+        padding: 20px;
+        transition: all 0.3s ease;
+        cursor: pointer;
+      }
+
+      .status-card:hover {
+        border-color: #64748b;
+        background: linear-gradient(135deg, #334155 0%, #475569 100%);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+        transform: translateY(-4px);
+      }
+
+      .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 12px;
+      }
+
+      .card-title {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #94a3b8;
+        font-weight: 600;
+      }
+
+      .card-icon {
+        font-size: 24px;
+        opacity: 0.7;
+      }
+
+      .card-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: #60a5fa;
+        margin-bottom: 8px;
+      }
+
+      .card-subtitle {
+        font-size: 13px;
+        color: #cbd5e1;
+      }
+
+      .card-trend {
+        font-size: 12px;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid #475569;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .trend-up {
+        color: #10b981;
+      }
+
+      .trend-down {
+        color: #ef4444;
+      }
+
+      /* Charts Section */
+      .charts-section {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+        gap: 25px;
+        margin-bottom: 30px;
+      }
+
+      .chart-container {
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        border: 1px solid #475569;
+        border-radius: 12px;
+        padding: 20px;
+        transition: all 0.3s ease;
+      }
+
+      .chart-container:hover {
+        border-color: #64748b;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+      }
+
+      .chart-title {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 15px;
+        color: #e2e8f0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .chart-subtitle {
+        font-size: 12px;
+        color: #94a3b8;
+      }
+
+      .chart-wrapper {
+        position: relative;
+        height: 300px;
+        margin-bottom: 15px;
+      }
+
+      .full-width {
+        grid-column: 1 / -1;
+      }
+
+      /* Metrics Table */
+      .metrics-table-section {
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        border: 1px solid #475569;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 30px;
+      }
+
+      .metrics-table-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 20px;
+        color: #e2e8f0;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      thead {
+        background: #0f172a;
+        border-bottom: 2px solid #475569;
+      }
+
+      th {
+        padding: 12px 16px;
+        text-align: left;
+        font-size: 13px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #94a3b8;
+      }
+
+      td {
+        padding: 12px 16px;
+        border-bottom: 1px solid #334155;
+        font-size: 13px;
+      }
+
+      tbody tr:hover {
+        background: rgba(59, 130, 246, 0.1);
+      }
+
+      .metric-value {
+        color: #60a5fa;
+        font-weight: 600;
+      }
+
+      .metric-healthy {
+        color: #10b981;
+      }
+
+      .metric-warning {
+        color: #f59e0b;
+      }
+
+      .metric-critical {
+        color: #ef4444;
+      }
+
+      /* Drill-down Modal */
+      .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.8);
+        animation: fadeIn 0.3s ease;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      .modal-content {
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        border: 1px solid #475569;
+        margin: 5% auto;
+        padding: 30px;
+        border-radius: 12px;
+        width: 90%;
+        max-width: 800px;
+        max-height: 80vh;
+        overflow-y: auto;
+        animation: slideUp 0.3s ease;
+      }
+
+      @keyframes slideUp {
+        from {
+          transform: translateY(50px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+
+      .close {
+        color: #94a3b8;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: color 0.3s ease;
+      }
+
+      .close:hover {
+        color: #e2e8f0;
+      }
+
+      .modal-title {
+        font-size: 24px;
+        font-weight: 700;
+        margin-bottom: 20px;
+        background: linear-gradient(135deg, #60a5fa, #3b82f6);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .detail-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+      }
+
+      .detail-item {
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid #475569;
+        border-radius: 8px;
+        padding: 15px;
+      }
+
+      .detail-label {
+        font-size: 12px;
+        color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 5px;
+      }
+
+      .detail-value {
+        font-size: 18px;
+        font-weight: 600;
+        color: #60a5fa;
+      }
+
+      /* Export Buttons */
+      .export-section {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+      }
+
+      /* Responsive */
+      @media (max-width: 768px) {
+        .charts-section {
+          grid-template-columns: 1fr;
+        }
+
+        .cards-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .header h1 {
+          font-size: 24px;
+        }
+
+        .header-controls {
+          width: 100%;
+          justify-content: flex-start;
+        }
+
+        .chart-wrapper {
+          height: 250px;
+        }
+
+        .modal-content {
+          width: 95%;
+          margin: 20% auto;
+        }
+      }
+
+      /* Loading Spinner */
+      .spinner {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 2px solid #475569;
+        border-top: 2px solid #3b82f6;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      .live-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: #10b981;
+      }
+
+      .live-dot {
+        width: 8px;
+        height: 8px;
+        background: #10b981;
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <!-- Header -->
+      <div class="header">
+        <div>
+          <h1>📊 OpenClaw Metrics</h1>
+          <p style="color: #94a3b8; font-size: 14px; margin-top: 5px">
+            Real-time monitoring & analytics
+          </p>
+        </div>
+        <div class="header-controls">
+          <div class="control-group">
+            <label for="dateFrom">From:</label>
+            <input type="date" id="dateFrom" />
+          </div>
+          <div class="control-group">
+            <label for="dateTo">To:</label>
+            <input type="date" id="dateTo" />
+          </div>
+          <div class="control-group toggle-switch">
+            <label for="autoRefresh">Auto-Refresh</label>
+            <label class="switch">
+              <input type="checkbox" id="autoRefresh" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <button onclick="exportData()">📥 Export CSV</button>
+          <button onclick="refreshDashboard()">🔄 Refresh</button>
+        </div>
+      </div>
+
+      <!-- Status Cards -->
+      <div class="cards-grid">
+        <div class="status-card" onclick="openDrilldown('costs')">
+          <div class="card-header">
+            <span class="card-title">💰 Daily Spend</span>
+            <span class="card-icon">→</span>
+          </div>
+          <div class="card-value" id="dailySpend">$12.45</div>
+          <div class="card-subtitle">Today</div>
+          <div class="card-trend trend-down">
+            <span>↓ 15% vs yesterday</span>
+          </div>
+        </div>
+
+        <div class="status-card" onclick="openDrilldown('monthly')">
+          <div class="card-header">
+            <span class="card-title">📈 Monthly Projection</span>
+            <span class="card-icon">→</span>
+          </div>
+          <div class="card-value" id="monthlyProjection">$385.50</div>
+          <div class="card-subtitle">Est. total (Feb)</div>
+          <div class="card-trend trend-up">
+            <span>↑ 5% vs last month</span>
+          </div>
+        </div>
+
+        <div class="status-card" onclick="openDrilldown('tokens')">
+          <div class="card-header">
+            <span class="card-title">🔑 Tokens Used</span>
+            <span class="card-icon">→</span>
+          </div>
+          <div class="card-value" id="tokensUsed">2.4M</div>
+          <div class="card-subtitle">of 10M available</div>
+          <div class="card-trend trend-healthy">
+            <span>✓ 76% remaining</span>
+          </div>
+        </div>
+
+        <div class="status-card" onclick="openDrilldown('latency')">
+          <div class="card-header">
+            <span class="card-title">⚡ Response Time</span>
+            <span class="card-icon">→</span>
+          </div>
+          <div class="card-value" id="p50Latency">245ms</div>
+          <div class="card-subtitle">p50 / p95 / p99</div>
+          <div class="card-trend trend-healthy">
+            <span>✓ 98.5% <200ms</span>
+          </div>
+        </div>
+
+        <div class="status-card" onclick="openDrilldown('errors')">
+          <div class="card-header">
+            <span class="card-title">🚨 Error Rate</span>
+            <span class="card-icon">→</span>
+          </div>
+          <div class="card-value" id="errorRate">0.12%</div>
+          <div class="card-subtitle">of all requests</div>
+          <div class="card-trend trend-healthy">
+            <span>✓ Below SLA (0.5%)</span>
+          </div>
+        </div>
+
+        <div class="status-card" onclick="openDrilldown('uptime')">
+          <div class="card-header">
+            <span class="card-title">✅ Uptime</span>
+            <span class="card-icon">→</span>
+          </div>
+          <div class="card-value" id="uptime">99.98%</div>
+          <div class="card-subtitle">Last 30 days</div>
+          <div class="card-trend trend-healthy">
+            <span><span class="live-dot"></span> Live</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts Section -->
+      <div class="charts-section">
+        <!-- Cost Over Time -->
+        <div class="chart-container">
+          <div class="chart-title">
+            Daily Cost Breakdown
+            <span class="chart-subtitle">Last 14 days</span>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="costChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Agent Latency Histogram -->
+        <div class="chart-container">
+          <div class="chart-title">
+            Agent Latency Distribution
+            <span class="chart-subtitle">Response times (ms)</span>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="latencyChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Message Throughput -->
+        <div class="chart-container">
+          <div class="chart-title">
+            Message Throughput
+            <span class="chart-subtitle">Requests per minute</span>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="throughputChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Error Rate Trending -->
+        <div class="chart-container">
+          <div class="chart-title">
+            Error Rate Trending
+            <span class="chart-subtitle">% of failed requests</span>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="errorChart"></canvas>
+          </div>
+        </div>
+
+        <!-- CPU & Memory Usage -->
+        <div class="chart-container full-width">
+          <div class="chart-title">
+            System Resources (Last 24 Hours)
+            <span class="chart-subtitle">Real-time monitoring</span>
+          </div>
+          <div class="chart-wrapper" style="height: 250px">
+            <canvas id="resourceChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Uptime Timeline -->
+        <div class="chart-container full-width">
+          <div class="chart-title">
+            Uptime Timeline (Last 30 Days)
+            <span class="chart-subtitle">Green = Online, Red = Offline</span>
+          </div>
+          <div class="chart-wrapper" style="height: 120px">
+            <canvas id="uptimeChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detailed Metrics Table -->
+      <div class="metrics-table-section">
+        <h3 class="metrics-table-title">Agent Performance Metrics</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Agent</th>
+              <th>Requests (24h)</th>
+              <th>Avg Latency</th>
+              <th>Error Rate</th>
+              <th>Cost (24h)</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>PM Agent</strong> (Claude Opus 4.6)</td>
+              <td class="metric-value">1,247</td>
+              <td class="metric-value">312ms</td>
+              <td class="metric-healthy">0.08%</td>
+              <td class="metric-value">$4.82</td>
+              <td>
+                <span class="live-indicator"><span class="live-dot"></span>Online</span>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>CodeGen Agent</strong> (Ollama Qwen 32B)</td>
+              <td class="metric-value">892</td>
+              <td class="metric-value">187ms</td>
+              <td class="metric-healthy">0.05%</td>
+              <td class="metric-value">$1.24</td>
+              <td>
+                <span class="live-indicator"><span class="live-dot"></span>Online</span>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Security Agent</strong> (Ollama Qwen 14B)</td>
+              <td class="metric-value">534</td>
+              <td class="metric-value">156ms</td>
+              <td class="metric-warning">0.18%</td>
+              <td class="metric-value">$0.67</td>
+              <td>
+                <span class="live-indicator"><span class="live-dot"></span>Online</span>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Telegram Channel</strong></td>
+              <td class="metric-value">2,156</td>
+              <td class="metric-value">287ms</td>
+              <td class="metric-healthy">0.12%</td>
+              <td class="metric-value">$6.24</td>
+              <td>
+                <span class="live-indicator"><span class="live-dot"></span>Online</span>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Slack Integration</strong></td>
+              <td class="metric-value">478</td>
+              <td class="metric-value">245ms</td>
+              <td class="metric-warning">0.21%</td>
+              <td class="metric-value">$2.18</td>
+              <td>
+                <span class="live-indicator"><span class="live-dot"></span>Online</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Cost Savings Section -->
+      <div class="metrics-table-section">
+        <h3 class="metrics-table-title">💚 Cost Optimization Summary</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th>Value</th>
+              <th>Vs. Baseline (No Routing)</th>
+              <th>Monthly Impact</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Avg Cost per Request</strong></td>
+              <td class="metric-value">$0.0034</td>
+              <td class="trend-down">↓ 60% cheaper</td>
+              <td class="metric-value">-$892/mo</td>
+            </tr>
+            <tr>
+              <td><strong>Haiku Usage (cheapest)</strong></td>
+              <td class="metric-value">70%</td>
+              <td class="trend-healthy">Optimal routing</td>
+              <td class="metric-value">$1.08/1k tokens</td>
+            </tr>
+            <tr>
+              <td><strong>Sonnet Usage</strong></td>
+              <td class="metric-value">20%</td>
+              <td class="trend-healthy">Balanced accuracy</td>
+              <td class="metric-value">$3/1k tokens</td>
+            </tr>
+            <tr>
+              <td><strong>Opus Usage</strong></td>
+              <td class="metric-value">10%</td>
+              <td class="trend-healthy">Only when needed</td>
+              <td class="metric-value">$15/1k tokens</td>
+            </tr>
+            <tr>
+              <td><strong>Total Monthly Spend</strong></td>
+              <td class="metric-value">$385.50</td>
+              <td class="trend-down">↓ 68% vs unoptimized</td>
+              <td class="metric-value">Saved: $1,254/mo</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Drill-down Modal -->
+    <div id="drilldownModal" class="modal">
+      <div class="modal-content">
+        <span class="close" onclick="closeDrilldown()">&times;</span>
+        <h2 class="modal-title" id="modalTitle">Details</h2>
+        <div id="modalContent"></div>
+      </div>
+    </div>
+
+    <script>
+      // Chart color scheme
+      const colors = {
+        primary: "rgba(59, 130, 246, 1)",
+        secondary: "rgba(139, 92, 246, 1)",
+        success: "rgba(16, 185, 129, 1)",
+        warning: "rgba(245, 158, 11, 1)",
+        danger: "rgba(239, 68, 68, 1)",
+        primaryLight: "rgba(59, 130, 246, 0.1)",
+        secondaryLight: "rgba(139, 92, 246, 0.1)",
+        successLight: "rgba(16, 185, 129, 0.1)",
+        grid: "rgba(71, 85, 105, 0.2)",
+      };
+
+      let charts = {};
+      let autoRefreshInterval;
+
+      // Initialize dashboard
+      function initDashboard() {
+        setDefaultDates();
+        generateMockData();
+        createCharts();
+        setupAutoRefresh();
+      }
+
+      function setDefaultDates() {
+        const today = new Date();
+        const twoWeeksAgo = new Date(today.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+        document.getElementById("dateFrom").valueAsDate = twoWeeksAgo;
+        document.getElementById("dateTo").valueAsDate = today;
+      }
+
+      function generateMockData() {
+        // Generate realistic mock data
+        const days = 14;
+        const costData = [];
+        const latencyData = [];
+        const throughputData = [];
+        const errorData = [];
+        const resourceData = { cpu: [], memory: [], labels: [] };
+
+        for (let i = 0; i < days; i++) {
+          const date = new Date();
+          date.setDate(date.getDate() - (days - i));
+
+          costData.push({
+            date: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+            cost: (8 + Math.random() * 8 + Math.sin(i / 5) * 3).toFixed(2),
+          });
+
+          latencyData.push({
+            range: (i * 30).toString() + "-" + (i + 1) * 30,
+            count: Math.floor(Math.random() * 500 + 100),
+          });
+
+          throughputData.push({
+            date: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+            requests: Math.floor(Math.random() * 150 + 800),
+          });
+
+          errorData.push({
+            date: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+            rate: (Math.random() * 0.3 + 0.05 + Math.sin(i / 4) * 0.1).toFixed(3),
+          });
+        }
+
+        // Resource data (hourly for last 24h)
+        for (let i = 0; i < 24; i++) {
+          const hour = new Date();
+          hour.setHours(hour.getHours() - (24 - i));
+          resourceData.labels.push(hour.getHours() + ":00");
+          resourceData.cpu.push(Math.floor(Math.random() * 35 + 15));
+          resourceData.memory.push(Math.floor(Math.random() * 40 + 30));
+        }
+
+        window.dashboardData = {
+          costData,
+          latencyData,
+          throughputData,
+          errorData,
+          resourceData,
+          uptimeTimeline: generateUptimeTimeline(),
+        };
+      }
+
+      function generateUptimeTimeline() {
+        const days = 30;
+        const timeline = [];
+        for (let i = 0; i < days; i++) {
+          // 99.98% uptime = ~17 minutes down per day
+          timeline.push(Math.random() > 0.0002); // 99.98% uptime
+        }
+        return timeline;
+      }
+
+      function createCharts() {
+        // 1. Cost Over Time
+        const costCtx = document.getElementById("costChart").getContext("2d");
+        charts.cost = new Chart(costCtx, {
+          type: "line",
+          data: {
+            labels: window.dashboardData.costData.map((d) => d.date),
+            datasets: [
+              {
+                label: "Daily Cost ($)",
+                data: window.dashboardData.costData.map((d) => d.cost),
+                borderColor: colors.primary,
+                backgroundColor: colors.primaryLight,
+                fill: true,
+                tension: 0.4,
+                borderWidth: 2,
+                pointRadius: 4,
+                pointBackgroundColor: colors.primary,
+                pointBorderColor: "#0f172a",
+                pointBorderWidth: 2,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                grid: { color: colors.grid },
+                ticks: { color: "#94a3b8" },
+              },
+              x: {
+                grid: { display: false },
+                ticks: { color: "#94a3b8" },
+              },
+            },
+          },
+        });
+
+        // 2. Latency Histogram
+        const latencyCtx = document.getElementById("latencyChart").getContext("2d");
+        charts.latency = new Chart(latencyCtx, {
+          type: "bar",
+          data: {
+            labels: window.dashboardData.latencyData.map((d) => d.range + "ms"),
+            datasets: [
+              {
+                label: "Response Count",
+                data: window.dashboardData.latencyData.map((d) => d.count),
+                backgroundColor: [
+                  colors.success,
+                  colors.success,
+                  colors.success,
+                  colors.warning,
+                  colors.danger,
+                ],
+                borderRadius: 6,
+                borderSkipped: false,
+              },
+            ],
+          },
+          options: {
+            indexAxis: "x",
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+            },
+            scales: {
+              y: {
+                grid: { color: colors.grid },
+                ticks: { color: "#94a3b8" },
+              },
+              x: {
+                grid: { display: false },
+                ticks: { color: "#94a3b8" },
+              },
+            },
+          },
+        });
+
+        // 3. Message Throughput
+        const throughputCtx = document.getElementById("throughputChart").getContext("2d");
+        charts.throughput = new Chart(throughputCtx, {
+          type: "line",
+          data: {
+            labels: window.dashboardData.throughputData.map((d) => d.date),
+            datasets: [
+              {
+                label: "Requests/min",
+                data: window.dashboardData.throughputData.map((d) => d.requests),
+                borderColor: colors.secondary,
+                backgroundColor: "rgba(139, 92, 246, 0.1)",
+                fill: true,
+                tension: 0.4,
+                borderWidth: 2,
+                pointRadius: 4,
+                pointBackgroundColor: colors.secondary,
+                pointBorderColor: "#0f172a",
+                pointBorderWidth: 2,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                grid: { color: colors.grid },
+                ticks: { color: "#94a3b8" },
+              },
+              x: {
+                grid: { display: false },
+                ticks: { color: "#94a3b8" },
+              },
+            },
+          },
+        });
+
+        // 4. Error Rate Trending
+        const errorCtx = document.getElementById("errorChart").getContext("2d");
+        charts.error = new Chart(errorCtx, {
+          type: "line",
+          data: {
+            labels: window.dashboardData.errorData.map((d) => d.date),
+            datasets: [
+              {
+                label: "Error Rate (%)",
+                data: window.dashboardData.errorData.map((d) => d.rate),
+                borderColor: colors.danger,
+                backgroundColor: "rgba(239, 68, 68, 0.1)",
+                fill: true,
+                tension: 0.4,
+                borderWidth: 2,
+                pointRadius: 4,
+                pointBackgroundColor: colors.danger,
+                pointBorderColor: "#0f172a",
+                pointBorderWidth: 2,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                max: 0.5,
+                grid: { color: colors.grid },
+                ticks: { color: "#94a3b8" },
+              },
+              x: {
+                grid: { display: false },
+                ticks: { color: "#94a3b8" },
+              },
+            },
+          },
+        });
+
+        // 5. System Resources
+        const resourceCtx = document.getElementById("resourceChart").getContext("2d");
+        charts.resource = new Chart(resourceCtx, {
+          type: "line",
+          data: {
+            labels: window.dashboardData.resourceData.labels,
+            datasets: [
+              {
+                label: "CPU Usage (%)",
+                data: window.dashboardData.resourceData.cpu,
+                borderColor: colors.primary,
+                backgroundColor: colors.primaryLight,
+                fill: true,
+                tension: 0.4,
+                borderWidth: 2,
+                pointRadius: 2,
+                yAxisID: "y",
+              },
+              {
+                label: "Memory Usage (%)",
+                data: window.dashboardData.resourceData.memory,
+                borderColor: colors.secondary,
+                backgroundColor: "rgba(139, 92, 246, 0.1)",
+                fill: true,
+                tension: 0.4,
+                borderWidth: 2,
+                pointRadius: 2,
+                yAxisID: "y",
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+              legend: {
+                labels: { color: "#94a3b8" },
+              },
+            },
+            scales: {
+              y: {
+                type: "linear",
+                display: true,
+                position: "left",
+                min: 0,
+                max: 100,
+                grid: { color: colors.grid },
+                ticks: { color: "#94a3b8" },
+              },
+              x: {
+                grid: { display: false },
+                ticks: { color: "#94a3b8" },
+              },
+            },
+          },
+        });
+
+        // 6. Uptime Timeline
+        const uptimeCtx = document.getElementById("uptimeChart").getContext("2d");
+        charts.uptime = new Chart(uptimeCtx, {
+          type: "bar",
+          data: {
+            labels: Array.from({ length: 30 }, (_, i) => "Day " + (i + 1)),
+            datasets: [
+              {
+                label: "Status",
+                data: window.dashboardData.uptimeTimeline.map((status) => (status ? 1 : 0)),
+                backgroundColor: window.dashboardData.uptimeTimeline.map((status) =>
+                  status ? colors.success : colors.danger,
+                ),
+                borderRadius: 2,
+                borderSkipped: false,
+              },
+            ],
+          },
+          options: {
+            indexAxis: "x",
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (context) => (context.raw ? "Online" : "Offline"),
+                },
+              },
+            },
+            scales: {
+              y: {
+                display: false,
+              },
+              x: {
+                grid: { display: false },
+                ticks: { color: "#94a3b8", maxRotation: 0 },
+              },
+            },
+          },
+        });
+      }
+
+      function setupAutoRefresh() {
+        document.getElementById("autoRefresh").addEventListener("change", (e) => {
+          if (e.target.checked) {
+            autoRefreshInterval = setInterval(refreshDashboard, 30000); // 30 seconds
+          } else {
+            clearInterval(autoRefreshInterval);
+          }
+        });
+
+        // Start auto-refresh
+        autoRefreshInterval = setInterval(refreshDashboard, 30000);
+      }
+
+      function refreshDashboard() {
+        generateMockData();
+
+        // Update charts
+        Object.keys(charts).forEach((key) => {
+          charts[key].destroy();
+        });
+        charts = {};
+        createCharts();
+
+        // Update card values with slight variation
+        updateCardValues();
+      }
+
+      function updateCardValues() {
+        const variation = () => (Math.random() - 0.5) * 0.1; // ±5% variation
+
+        document.getElementById("dailySpend").textContent =
+          "$" + (12.45 * (1 + variation())).toFixed(2);
+        document.getElementById("monthlyProjection").textContent =
+          "$" + (385.5 * (1 + variation())).toFixed(2);
+        document.getElementById("errorRate").textContent =
+          (0.12 * (1 + variation())).toFixed(3) + "%";
+      }
+
+      function openDrilldown(type) {
+        const modal = document.getElementById("drilldownModal");
+        const title = document.getElementById("modalTitle");
+        const content = document.getElementById("modalContent");
+
+        let drilldownContent = "";
+
+        switch (type) {
+          case "costs":
+            title.textContent = "Cost Analysis Drill-down";
+            drilldownContent = `
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <div class="detail-label">Today's Cost</div>
+                                <div class="detail-value">$12.45</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Yesterday</div>
+                                <div class="detail-value">$14.65</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Daily Avg (7d)</div>
+                                <div class="detail-value">$13.22</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Projected Daily</div>
+                                <div class="detail-value">$12.85</div>
+                            </div>
+                        </div>
+                        <h4 style="color: #e2e8f0; margin: 20px 0 10px; font-weight: 600;">Cost by Agent</h4>
+                        <table style="width: 100%; margin-bottom: 20px;">
+                            <tr style="border-bottom: 1px solid #475569;">
+                                <td style="padding: 8px; color: #cbd5e1;">PM Agent</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">$4.82 (39%)</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #475569;">
+                                <td style="padding: 8px; color: #cbd5e1;">Telegram</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">$6.24 (50%)</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #475569;">
+                                <td style="padding: 8px; color: #cbd5e1;">CodeGen Agent</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">$1.24 (10%)</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; color: #cbd5e1;">Other</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">$0.15 (1%)</td>
+                            </tr>
+                        </table>
+                    `;
+            break;
+
+          case "monthly":
+            title.textContent = "Monthly Projection";
+            drilldownContent = `
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <div class="detail-label">Daily Avg (YTD)</div>
+                                <div class="detail-value">$12.85</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Days Remaining</div>
+                                <div class="detail-value">11</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Projected Total</div>
+                                <div class="detail-value">$385.50</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Budget Limit</div>
+                                <div class="detail-value">$500.00</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Headroom</div>
+                                <div class="detail-value" style="color: #10b981;">$114.50</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Month-over-Month</div>
+                                <div class="detail-value" style="color: #f59e0b;">+5.2%</div>
+                            </div>
+                        </div>
+                        <h4 style="color: #e2e8f0; margin: 20px 0 10px; font-weight: 600;">Budget Allocation</h4>
+                        <table style="width: 100%;">
+                            <tr style="border-bottom: 1px solid #475569;">
+                                <td style="padding: 8px; color: #cbd5e1;">API Calls</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">$345.00 (89.5%)</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #475569;">
+                                <td style="padding: 8px; color: #cbd5e1;">Infrastructure</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">$30.00 (7.8%)</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; color: #cbd5e1;">Other Services</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">$10.50 (2.7%)</td>
+                            </tr>
+                        </table>
+                    `;
+            break;
+
+          case "tokens":
+            title.textContent = "Token Usage Analysis";
+            drilldownContent = `
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <div class="detail-label">Input Tokens</div>
+                                <div class="detail-value">1.2M</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Output Tokens</div>
+                                <div class="detail-value">1.2M</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Tokens/Min Avg</div>
+                                <div class="detail-value">2,847</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Budget Remaining</div>
+                                <div class="detail-value" style="color: #10b981;">7.6M (76%)</div>
+                            </div>
+                        </div>
+                        <h4 style="color: #e2e8f0; margin: 20px 0 10px; font-weight: 600;">Usage by Model</h4>
+                        <table style="width: 100%;">
+                            <tr style="border-bottom: 1px solid #475569;">
+                                <td style="padding: 8px; color: #cbd5e1;">Haiku (70%)</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">1.68M tokens</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #475569;">
+                                <td style="padding: 8px; color: #cbd5e1;">Sonnet (20%)</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">480K tokens</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; color: #cbd5e1;">Opus (10%)</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">240K tokens</td>
+                            </tr>
+                        </table>
+                    `;
+            break;
+
+          case "latency":
+            title.textContent = "Response Time Analysis";
+            drilldownContent = `
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <div class="detail-label">p50 Latency</div>
+                                <div class="detail-value">245ms</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">p95 Latency</div>
+                                <div class="detail-value">589ms</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">p99 Latency</div>
+                                <div class="detail-value">1,247ms</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Max Latency</div>
+                                <div class="detail-value">3,821ms</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">&lt;200ms</div>
+                                <div class="detail-value" style="color: #10b981;">98.5%</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">200-500ms</div>
+                                <div class="detail-value" style="color: #f59e0b;">1.2%</div>
+                            </div>
+                        </div>
+                        <h4 style="color: #e2e8f0; margin: 20px 0 10px; font-weight: 600;">By Agent</h4>
+                        <table style="width: 100%;">
+                            <tr style="border-bottom: 1px solid #475569;">
+                                <td style="padding: 8px; color: #cbd5e1;">PM Agent</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">312ms avg</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #475569;">
+                                <td style="padding: 8px; color: #cbd5e1;">CodeGen Agent</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">187ms avg</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; color: #cbd5e1;">Security Agent</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">156ms avg</td>
+                            </tr>
+                        </table>
+                    `;
+            break;
+
+          case "errors":
+            title.textContent = "Error Rate Analysis";
+            drilldownContent = `
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <div class="detail-label">Error Rate</div>
+                                <div class="detail-value" style="color: #10b981;">0.12%</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">SLA Target</div>
+                                <div class="detail-value" style="color: #10b981;">0.5%</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Errors (24h)</div>
+                                <div class="detail-value">48</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Status</div>
+                                <div class="detail-value" style="color: #10b981;">✓ Healthy</div>
+                            </div>
+                        </div>
+                        <h4 style="color: #e2e8f0; margin: 20px 0 10px; font-weight: 600;">Error Distribution</h4>
+                        <table style="width: 100%;">
+                            <tr style="border-bottom: 1px solid #475569;">
+                                <td style="padding: 8px; color: #cbd5e1;">4xx Errors</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">12 (25%)</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #475569;">
+                                <td style="padding: 8px; color: #cbd5e1;">5xx Errors</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">24 (50%)</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #475569;">
+                                <td style="padding: 8px; color: #cbd5e1;">Timeouts</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">8 (17%)</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; color: #cbd5e1;">Other</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">4 (8%)</td>
+                            </tr>
+                        </table>
+                    `;
+            break;
+
+          case "uptime":
+            title.textContent = "Uptime Analysis";
+            drilldownContent = `
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <div class="detail-label">30-Day Uptime</div>
+                                <div class="detail-value" style="color: #10b981;">99.98%</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Expected Downtime</div>
+                                <div class="detail-value">~8.6 minutes/month</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Last Incident</div>
+                                <div class="detail-value">18 days ago</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Incident Duration</div>
+                                <div class="detail-value">2.3 minutes</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">MTTR (Mean Time)</div>
+                                <div class="detail-value">3.2 minutes</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Status</div>
+                                <div class="detail-value" style="color: #10b981;">✓ All Systems Nominal</div>
+                            </div>
+                        </div>
+                        <h4 style="color: #e2e8f0; margin: 20px 0 10px; font-weight: 600;">Incident History (Last 30 Days)</h4>
+                        <table style="width: 100%;">
+                            <tr style="border-bottom: 1px solid #475569;">
+                                <td style="padding: 8px; color: #cbd5e1;">Feb 10 - Gateway Restart</td>
+                                <td style="padding: 8px; color: #60a5fa; font-weight: 600;">2.3 min</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; color: #cbd5e1;">Feb 22 - (None)</td>
+                                <td style="padding: 8px; color: #10b981;">✓ Clean</td>
+                            </tr>
+                        </table>
+                    `;
+            break;
+        }
+
+        content.innerHTML = drilldownContent;
+        modal.style.display = "block";
+      }
+
+      function closeDrilldown() {
+        document.getElementById("drilldownModal").style.display = "none";
+      }
+
+      function exportData() {
+        const csv = generateCSV();
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "openclaw-metrics-" + new Date().toISOString().split("T")[0] + ".csv";
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }
+
+      function generateCSV() {
+        let csv = "Date,Metric,Value\n";
+
+        // Add cost data
+        window.dashboardData.costData.forEach((d) => {
+          csv += `${d.date},Daily Cost ($),${d.cost}\n`;
+        });
+
+        // Add error data
+        window.dashboardData.errorData.forEach((d) => {
+          csv += `${d.date},Error Rate (%),${d.rate}\n`;
+        });
+
+        // Add throughput data
+        window.dashboardData.throughputData.forEach((d) => {
+          csv += `${d.date},Requests/min,${d.requests}\n`;
+        });
+
+        return csv;
+      }
+
+      // Close modal when clicking outside
+      window.onclick = function (event) {
+        const modal = document.getElementById("drilldownModal");
+        if (event.target == modal) {
+          modal.style.display = "none";
+        }
+      };
+
+      // Initialize on load
+      document.addEventListener("DOMContentLoaded", initDashboard);
+    </script>
+  </body>
+</html>

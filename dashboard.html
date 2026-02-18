@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenClaw Dashboard Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        color: #e2e8f0;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        min-height: 100vh;
+      }
+
+      .nav-tab {
+        position: relative;
+        padding: 12px 24px;
+        cursor: pointer;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        border-bottom: 3px solid transparent;
+      }
+
+      .nav-tab:hover {
+        color: #00d9ff;
+        transform: translateY(-2px);
+      }
+
+      .nav-tab.active {
+        color: #00ff88;
+        border-bottom-color: #00ff88;
+        box-shadow: 0 4px 15px rgba(0, 255, 136, 0.3);
+      }
+
+      .tab-content {
+        display: none;
+        animation: fadeIn 0.3s ease-in;
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .glass {
+        background: rgba(15, 23, 42, 0.8);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 12px;
+      }
+
+      .card {
+        background: rgba(30, 41, 59, 0.6);
+        border: 1px solid rgba(71, 85, 105, 0.3);
+        border-radius: 10px;
+        padding: 20px;
+        transition: all 0.3s ease;
+      }
+
+      .card:hover {
+        border-color: rgba(0, 255, 136, 0.3);
+        box-shadow: 0 8px 32px rgba(0, 255, 136, 0.1);
+        transform: translateY(-4px);
+      }
+
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        background: rgba(0, 255, 136, 0.1);
+        border: 1px solid rgba(0, 255, 136, 0.3);
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #00ff88;
+      }
+
+      .status-badge.active::before {
+        content: "";
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        background: #00ff88;
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      .iframe-container {
+        position: relative;
+        width: 100%;
+        height: 600px;
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+      }
+
+      .iframe-container iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+      }
+
+      .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 16px;
+        margin-bottom: 20px;
+      }
+
+      .quick-link {
+        padding: 16px;
+        border-radius: 8px;
+        text-align: center;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        border: 2px solid rgba(0, 255, 136, 0.2);
+      }
+
+      .quick-link:hover {
+        border-color: #00ff88;
+        background: rgba(0, 255, 136, 0.05);
+        transform: scale(1.05);
+      }
+
+      .quick-link h3 {
+        font-size: 16px;
+        margin-bottom: 8px;
+        font-weight: 600;
+      }
+
+      .quick-link p {
+        font-size: 12px;
+        color: #94a3b8;
+      }
+
+      .icon {
+        font-size: 32px;
+        margin-bottom: 8px;
+      }
+
+      @media (max-width: 768px) {
+        .nav-tab {
+          padding: 8px 12px;
+          font-size: 14px;
+        }
+
+        .iframe-container {
+          height: 400px;
+        }
+
+        .dashboard-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="min-h-screen p-4 md:p-8">
+      <!-- Header -->
+      <div class="glass rounded-lg p-8 mb-8">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h1
+              class="text-4xl font-bold bg-gradient-to-r from-cyan-400 via-lime-400 to-pink-400 bg-clip-text text-transparent mb-2"
+            >
+              🦞 OpenClaw Dashboard Hub
+            </h1>
+            <p class="text-slate-400">Real-time monitoring & control center for your AI gateway</p>
+          </div>
+          <div class="flex gap-4">
+            <div class="text-center">
+              <div class="status-badge active">Gateway Running</div>
+            </div>
+            <div class="text-center">
+              <div class="status-badge active">Tunnel Active</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="dashboard-grid">
+          <div class="card">
+            <div class="text-sm text-slate-400 mb-2">Gateway Status</div>
+            <div class="text-2xl font-bold text-lime-400">✅ Operational</div>
+            <div class="text-xs text-slate-500 mt-1">Port 8789</div>
+          </div>
+          <div class="card">
+            <div class="text-sm text-slate-400 mb-2">Tunnel Status</div>
+            <div class="text-2xl font-bold text-cyan-400">✅ Connected</div>
+            <div class="text-xs text-slate-500 mt-1">Cloudflare HTTPS</div>
+          </div>
+          <div class="card">
+            <div class="text-sm text-slate-400 mb-2">Active Services</div>
+            <div class="text-2xl font-bold text-pink-400">3/3</div>
+            <div class="text-xs text-slate-500 mt-1">Gateway, Tunnel, API</div>
+          </div>
+          <div class="card">
+            <div class="text-sm text-slate-400 mb-2">Uptime</div>
+            <div class="text-2xl font-bold text-lime-400">99.9%</div>
+            <div class="text-xs text-slate-500 mt-1">Last 30 days</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <div class="glass rounded-lg mb-8 sticky top-0 z-50">
+        <div class="flex overflow-x-auto">
+          <button class="nav-tab active" onclick="switchTab('overview')">📊 Overview</button>
+          <button class="nav-tab" onclick="switchTab('ui')">🎨 Control Panel</button>
+          <button class="nav-tab" onclick="switchTab('metrics')">📈 Metrics</button>
+          <button class="nav-tab" onclick="switchTab('mobile')">📱 Mobile</button>
+          <button class="nav-tab" onclick="switchTab('3d')">🎯 3D Visualization</button>
+          <button class="nav-tab" onclick="switchTab('docs')">📚 Documentation</button>
+        </div>
+      </div>
+
+      <!-- Tab Contents -->
+
+      <!-- Overview Tab -->
+      <div id="overview" class="tab-content active">
+        <div class="space-y-6">
+          <div class="glass rounded-lg p-8">
+            <h2 class="text-2xl font-bold mb-4 text-cyan-400">Welcome to OpenClaw Dashboard Hub</h2>
+            <p class="text-slate-300 mb-6">
+              Your central command center for managing and monitoring the OpenClaw AI Gateway.
+              Access all dashboards and tools from here.
+            </p>
+
+            <div class="dashboard-grid">
+              <div class="quick-link">
+                <div class="icon">🎨</div>
+                <h3>Control Panel</h3>
+                <p>Manage gateway, view logs, restart services</p>
+              </div>
+              <div class="quick-link">
+                <div class="icon">📈</div>
+                <h3>Metrics Dashboard</h3>
+                <p>Real-time cost, latency, and performance charts</p>
+              </div>
+              <div class="quick-link">
+                <div class="icon">📱</div>
+                <h3>Mobile Dashboard</h3>
+                <p>Optimized for phones and tablets</p>
+              </div>
+              <div class="quick-link">
+                <div class="icon">🎯</div>
+                <h3>3D Visualization</h3>
+                <p>Interactive 3D view of your AI agents</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6">
+            <div class="glass rounded-lg p-6">
+              <h3 class="text-lg font-bold text-lime-400 mb-4">🚀 Quick Access</h3>
+              <ul class="space-y-2 text-sm">
+                <li>
+                  <a
+                    href="dashboard_ui_enhanced.html"
+                    class="text-cyan-400 hover:text-lime-400 transition"
+                    >→ Control Panel</a
+                  >
+                </li>
+                <li>
+                  <a
+                    href="dashboard_metrics.html"
+                    class="text-cyan-400 hover:text-lime-400 transition"
+                    >→ Metrics & Analytics</a
+                  >
+                </li>
+                <li>
+                  <a
+                    href="dashboard_mobile.html"
+                    class="text-cyan-400 hover:text-lime-400 transition"
+                    >→ Mobile Dashboard</a
+                  >
+                </li>
+                <li>
+                  <a href="dashboard_3d.html" class="text-cyan-400 hover:text-lime-400 transition"
+                    >→ 3D Visualization</a
+                  >
+                </li>
+              </ul>
+            </div>
+
+            <div class="glass rounded-lg p-6">
+              <h3 class="text-lg font-bold text-pink-400 mb-4">🔗 Webhook URLs</h3>
+              <ul class="space-y-2 text-xs font-mono">
+                <li>
+                  <span class="text-slate-400">Telegram:</span>
+                  <span class="text-lime-400">/telegram/webhook</span>
+                </li>
+                <li>
+                  <span class="text-slate-400">Slack:</span>
+                  <span class="text-lime-400">/slack/events</span>
+                </li>
+                <li>
+                  <span class="text-slate-400">API:</span>
+                  <span class="text-lime-400">http://localhost:9000</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Control Panel Tab -->
+      <div id="ui" class="tab-content">
+        <div class="glass rounded-lg p-6 mb-8">
+          <h2 class="text-xl font-bold text-cyan-400 mb-2">🎨 Control Panel</h2>
+          <p class="text-slate-400 text-sm mb-4">
+            Manage services, view logs, and control your gateway
+          </p>
+        </div>
+        <div class="iframe-container">
+          <iframe src="dashboard_ui_enhanced.html" title="Control Panel Dashboard"></iframe>
+        </div>
+      </div>
+
+      <!-- Metrics Tab -->
+      <div id="metrics" class="tab-content">
+        <div class="glass rounded-lg p-6 mb-8">
+          <h2 class="text-xl font-bold text-lime-400 mb-2">📈 Metrics & Analytics</h2>
+          <p class="text-slate-400 text-sm mb-4">Real-time performance, cost, and system metrics</p>
+        </div>
+        <div class="iframe-container">
+          <iframe src="dashboard_metrics.html" title="Metrics Dashboard"></iframe>
+        </div>
+      </div>
+
+      <!-- Mobile Tab -->
+      <div id="mobile" class="tab-content">
+        <div class="glass rounded-lg p-6 mb-8">
+          <h2 class="text-xl font-bold text-pink-400 mb-2">📱 Mobile Dashboard</h2>
+          <p class="text-slate-400 text-sm mb-4">Optimized for mobile and tablet devices</p>
+        </div>
+        <div class="iframe-container" style="height: 800px">
+          <iframe src="dashboard_mobile.html" title="Mobile Dashboard"></iframe>
+        </div>
+      </div>
+
+      <!-- 3D Visualization Tab -->
+      <div id="3d" class="tab-content">
+        <div class="glass rounded-lg p-6 mb-8">
+          <h2 class="text-xl font-bold text-cyan-400 mb-2">🎯 3D Visualization</h2>
+          <p class="text-slate-400 text-sm mb-4">
+            Interactive 3D view of your AI agents and message flow
+          </p>
+        </div>
+        <div class="iframe-container" style="height: 800px">
+          <iframe src="dashboard_3d.html" title="3D Visualization"></iframe>
+        </div>
+      </div>
+
+      <!-- Documentation Tab -->
+      <div id="docs" class="tab-content">
+        <div class="space-y-6">
+          <div class="glass rounded-lg p-8">
+            <h2 class="text-2xl font-bold mb-6 text-lime-400">📚 Documentation & Resources</h2>
+
+            <div class="grid md:grid-cols-2 gap-6">
+              <div class="card">
+                <h3 class="text-lg font-bold text-cyan-400 mb-3">🚀 Getting Started</h3>
+                <ul class="space-y-2 text-sm text-slate-300">
+                  <li>✅ Gateway running on port 8789</li>
+                  <li>✅ Cloudflare tunnel active (HTTPS)</li>
+                  <li>✅ 5 dashboards available</li>
+                  <li>✅ Slack & Telegram webhooks configured</li>
+                </ul>
+              </div>
+
+              <div class="card">
+                <h3 class="text-lg font-bold text-pink-400 mb-3">📊 Dashboard Descriptions</h3>
+                <ul class="space-y-2 text-sm text-slate-300">
+                  <li>🎨 <strong>Control Panel:</strong> Manage services & view logs</li>
+                  <li>📈 <strong>Metrics:</strong> Cost, latency, performance</li>
+                  <li>📱 <strong>Mobile:</strong> Touch-optimized interface</li>
+                  <li>🎯 <strong>3D Viz:</strong> Agent visualization</li>
+                </ul>
+              </div>
+
+              <div class="card">
+                <h3 class="text-lg font-bold text-lime-400 mb-3">🔗 API Endpoints</h3>
+                <div class="text-xs font-mono space-y-1 text-slate-400">
+                  <div>GET /api/status</div>
+                  <div>GET /api/logs?lines=50</div>
+                  <div>GET /api/health</div>
+                  <div>POST /api/restart</div>
+                  <div>GET /docs (Swagger UI)</div>
+                </div>
+              </div>
+
+              <div class="card">
+                <h3 class="text-lg font-bold text-cyan-400 mb-3">🌐 Access URLs</h3>
+                <div class="text-xs font-mono space-y-1 text-slate-400">
+                  <div><span class="text-slate-500">HTTP:</span> 152.53.55.207:9000</div>
+                  <div><span class="text-slate-500">HTTPS:</span> telegram.overseerclaw.uk</div>
+                  <div><span class="text-slate-500">Gateway:</span> localhost:8789</div>
+                  <div><span class="text-slate-500">API:</span> localhost:9000/docs</div>
+                </div>
+              </div>
+            </div>
+
+            <div
+              class="mt-8 p-6 bg-gradient-to-r from-cyan-900/30 to-lime-900/30 rounded-lg border border-cyan-500/20"
+            >
+              <h3 class="text-lg font-bold text-cyan-400 mb-2">💡 Pro Tips</h3>
+              <ul class="space-y-1 text-sm text-slate-300">
+                <li>✨ Use the 3D dashboard to monitor agents in real-time</li>
+                <li>📊 Check metrics dashboard for cost optimization insights</li>
+                <li>📱 Open mobile dashboard on your phone for on-the-go monitoring</li>
+                <li>🎨 Control Panel has all management functions (restart, logs, etc)</li>
+                <li>
+                  🔐 Use auth token:
+                  <span class="text-lime-400 font-mono">moltbot-secure-token-2026</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="mt-12 p-6 glass rounded-lg text-center text-slate-400 text-sm">
+        <p>🦞 OpenClaw Gateway • Powered by Claude Opus • Running on Netcup VPS</p>
+        <p class="mt-2 text-xs">
+          All dashboards accessible via HTTPS at
+          <span class="text-cyan-400">telegram.overseerclaw.uk</span>
+        </p>
+      </div>
+    </div>
+
+    <script>
+      function switchTab(tabName) {
+        // Hide all tabs
+        document.querySelectorAll(".tab-content").forEach((tab) => {
+          tab.classList.remove("active");
+        });
+
+        // Remove active from all nav tabs
+        document.querySelectorAll(".nav-tab").forEach((tab) => {
+          tab.classList.remove("active");
+        });
+
+        // Show selected tab
+        document.getElementById(tabName).classList.add("active");
+
+        // Highlight active nav tab
+        event.target.classList.add("active");
+
+        // Scroll to top
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+
+      // Keyboard shortcuts
+      document.addEventListener("keydown", (e) => {
+        if (e.ctrlKey || e.metaKey) {
+          if (e.key === "1") switchTab("overview");
+          if (e.key === "2") switchTab("ui");
+          if (e.key === "3") switchTab("metrics");
+          if (e.key === "4") switchTab("mobile");
+          if (e.key === "5") switchTab("3d");
+          if (e.key === "6") switchTab("docs");
+        }
+      });
+    </script>
+  </body>
+</html>

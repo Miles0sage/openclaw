@@ -1,0 +1,42 @@
+[Unit]
+Description=OpenClaw Dashboard API - Real-time Gateway Monitoring
+Documentation=https://docs.openclaw.ai/dashboard
+After=network.target
+Wants=openclaw.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/openclaw
+
+# Environment variables
+EnvironmentFile=/root/openclaw/.dashboard.env
+Environment="PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Run the dashboard API
+ExecStart=/usr/bin/python3 /root/openclaw/dashboard_api.py
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitInterval=600
+StartLimitBurst=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=openclaw-dashboard
+
+# Security
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=partial
+ProtectHome=yes
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=512
+
+[Install]
+WantedBy=multi-user.target

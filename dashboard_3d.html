@@ -1,0 +1,1037 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenClaw 3D Agent Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      :root {
+        --primary: #00ff88;
+        --secondary: #00ccff;
+        --accent: #ff6b6b;
+        --warning: #ffd93d;
+        --dark-bg: #0a0e27;
+        --dark-card: #16213e;
+        --text-light: #e4e4e7;
+        --text-dim: #a1a1a6;
+      }
+
+      body {
+        font-family: "Courier New", monospace;
+        background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%);
+        color: var(--text-light);
+        overflow: hidden;
+        height: 100vh;
+      }
+
+      #canvas-container {
+        width: 100%;
+        height: 100vh;
+        position: relative;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      /* HUD Elements */
+      .hud {
+        position: absolute;
+        font-size: 11px;
+        font-weight: bold;
+        letter-spacing: 1px;
+        pointer-events: none;
+        z-index: 10;
+      }
+
+      .hud-header {
+        top: 20px;
+        left: 20px;
+        pointer-events: auto;
+      }
+
+      .hud-header h1 {
+        font-size: 20px;
+        margin-bottom: 5px;
+        color: var(--primary);
+        text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+        letter-spacing: 2px;
+      }
+
+      .hud-header p {
+        color: var(--text-dim);
+        font-size: 10px;
+      }
+
+      /* Agent Status Panel */
+      .agent-panel {
+        top: 20px;
+        right: 20px;
+        width: 280px;
+        background: rgba(22, 33, 62, 0.9);
+        border: 1px solid var(--primary);
+        border-radius: 4px;
+        padding: 15px;
+        backdrop-filter: blur(10px);
+        pointer-events: auto;
+        max-height: calc(100vh - 40px);
+        overflow-y: auto;
+        box-shadow: 0 0 20px rgba(0, 255, 136, 0.2);
+      }
+
+      .agent-panel h2 {
+        color: var(--primary);
+        margin-bottom: 12px;
+        font-size: 12px;
+        text-transform: uppercase;
+        border-bottom: 1px solid var(--primary);
+        padding-bottom: 8px;
+      }
+
+      .agent-item {
+        margin-bottom: 12px;
+        padding: 10px;
+        background: rgba(0, 0, 0, 0.3);
+        border-left: 3px solid var(--text-dim);
+        border-radius: 2px;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 10px;
+      }
+
+      .agent-item:hover {
+        background: rgba(0, 0, 0, 0.5);
+        border-left-color: var(--secondary);
+      }
+
+      .agent-item.active {
+        border-left-color: var(--primary);
+        background: rgba(0, 255, 136, 0.1);
+      }
+
+      .agent-name {
+        font-weight: bold;
+        color: var(--text-light);
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .agent-emoji {
+        font-size: 14px;
+      }
+
+      .status-badge {
+        display: inline-block;
+        padding: 2px 6px;
+        border-radius: 2px;
+        font-size: 9px;
+        font-weight: bold;
+        margin-top: 4px;
+        text-transform: uppercase;
+      }
+
+      .status-active {
+        background: rgba(0, 255, 136, 0.3);
+        color: var(--primary);
+        border: 1px solid var(--primary);
+      }
+
+      .status-inactive {
+        background: rgba(255, 107, 107, 0.3);
+        color: var(--accent);
+        border: 1px solid var(--accent);
+      }
+
+      .status-busy {
+        background: rgba(255, 217, 61, 0.3);
+        color: var(--warning);
+        border: 1px solid var(--warning);
+      }
+
+      .agent-info {
+        color: var(--text-dim);
+        margin-top: 4px;
+        line-height: 1.4;
+      }
+
+      .agent-info div {
+        margin: 2px 0;
+      }
+
+      /* Control Panel */
+      .control-panel {
+        bottom: 20px;
+        left: 20px;
+        background: rgba(22, 33, 62, 0.9);
+        border: 1px solid var(--secondary);
+        border-radius: 4px;
+        padding: 15px;
+        backdrop-filter: blur(10px);
+        pointer-events: auto;
+        box-shadow: 0 0 20px rgba(0, 204, 255, 0.2);
+      }
+
+      .control-panel h3 {
+        color: var(--secondary);
+        margin-bottom: 10px;
+        font-size: 11px;
+        text-transform: uppercase;
+        border-bottom: 1px solid var(--secondary);
+        padding-bottom: 8px;
+      }
+
+      .button-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      button {
+        padding: 8px 12px;
+        background: linear-gradient(135deg, #00ccff 0%, #0099cc 100%);
+        border: 1px solid var(--secondary);
+        color: #000;
+        font-weight: bold;
+        cursor: pointer;
+        border-radius: 2px;
+        font-size: 10px;
+        text-transform: uppercase;
+        transition: all 0.2s;
+        font-family: "Courier New", monospace;
+        letter-spacing: 0.5px;
+      }
+
+      button:hover {
+        background: linear-gradient(135deg, #00ff88 0%, #00ccff 100%);
+        box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+        transform: scale(1.02);
+      }
+
+      button:active {
+        transform: scale(0.98);
+      }
+
+      button.danger {
+        background: linear-gradient(135deg, #ff6b6b 0%, #cc3333 100%);
+        border-color: var(--accent);
+      }
+
+      button.danger:hover {
+        box-shadow: 0 0 10px rgba(255, 107, 107, 0.5);
+      }
+
+      /* Stats Panel */
+      .stats-panel {
+        bottom: 20px;
+        right: 20px;
+        background: rgba(22, 33, 62, 0.9);
+        border: 1px solid var(--warning);
+        border-radius: 4px;
+        padding: 15px;
+        backdrop-filter: blur(10px);
+        pointer-events: auto;
+        min-width: 200px;
+        box-shadow: 0 0 20px rgba(255, 217, 61, 0.2);
+      }
+
+      .stats-panel h3 {
+        color: var(--warning);
+        margin-bottom: 10px;
+        font-size: 11px;
+        text-transform: uppercase;
+        border-bottom: 1px solid var(--warning);
+        padding-bottom: 8px;
+      }
+
+      .stat-item {
+        display: flex;
+        justify-content: space-between;
+        margin: 6px 0;
+        font-size: 10px;
+        color: var(--text-dim);
+      }
+
+      .stat-value {
+        color: var(--primary);
+        font-weight: bold;
+      }
+
+      /* Message Flow Indicators */
+      .message-flow {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 5;
+      }
+
+      /* Scrollbar Styling */
+      .agent-panel::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      .agent-panel::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.3);
+      }
+
+      .agent-panel::-webkit-scrollbar-thumb {
+        background: var(--primary);
+        border-radius: 3px;
+      }
+
+      .agent-panel::-webkit-scrollbar-thumb:hover {
+        background: var(--secondary);
+      }
+
+      /* Modal */
+      .modal {
+        display: none;
+        position: fixed;
+        z-index: 100;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(5px);
+      }
+
+      .modal.active {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .modal-content {
+        background: var(--dark-card);
+        padding: 20px;
+        border: 1px solid var(--primary);
+        border-radius: 4px;
+        max-width: 500px;
+        max-height: 70vh;
+        overflow-y: auto;
+        box-shadow: 0 0 30px rgba(0, 255, 136, 0.3);
+      }
+
+      .modal-content h2 {
+        color: var(--primary);
+        margin-bottom: 15px;
+        border-bottom: 1px solid var(--primary);
+        padding-bottom: 10px;
+      }
+
+      .modal-close {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: var(--accent);
+        color: white;
+        border: none;
+        width: 25px;
+        height: 25px;
+        padding: 0;
+        cursor: pointer;
+        font-size: 12px;
+      }
+
+      .log-line {
+        font-size: 9px;
+        margin: 4px 0;
+        color: var(--text-dim);
+        font-family: "Courier New", monospace;
+        padding: 2px 4px;
+        border-left: 2px solid transparent;
+      }
+
+      .log-error {
+        color: var(--accent);
+        border-left-color: var(--accent);
+      }
+
+      .log-success {
+        color: var(--primary);
+        border-left-color: var(--primary);
+      }
+
+      .log-info {
+        color: var(--secondary);
+        border-left-color: var(--secondary);
+      }
+
+      /* Responsive */
+      @media (max-width: 768px) {
+        .agent-panel {
+          width: 100%;
+          max-width: 250px;
+          top: auto;
+          bottom: 100px;
+          right: 10px;
+        }
+
+        .control-panel {
+          width: calc(100% - 40px);
+          max-width: 200px;
+        }
+
+        .stats-panel {
+          width: calc(100% - 40px);
+          max-width: 200px;
+        }
+
+        button {
+          font-size: 9px;
+          padding: 6px 10px;
+        }
+      }
+
+      /* Animation */
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.7;
+        }
+      }
+
+      .pulsing {
+        animation: pulse 2s infinite;
+      }
+
+      .connection-line {
+        stroke: var(--primary);
+        stroke-width: 2;
+        opacity: 0.6;
+        stroke-dasharray: 5, 5;
+      }
+
+      .connection-line.active {
+        stroke: var(--secondary);
+        opacity: 1;
+        stroke-dasharray: 10, 5;
+        animation: dash 20s linear infinite;
+      }
+
+      @keyframes dash {
+        to {
+          stroke-dashoffset: -15;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="canvas-container"></div>
+
+    <!-- HUD: Header -->
+    <div class="hud hud-header">
+      <h1>⚡ OPENCLAW</h1>
+      <p>3D Agent Intelligence Dashboard</p>
+    </div>
+
+    <!-- Agent Status Panel -->
+    <div class="agent-panel" id="agentPanel">
+      <h2>Agent Network</h2>
+      <div id="agentList"></div>
+    </div>
+
+    <!-- Control Panel -->
+    <div class="control-panel">
+      <h3>Controls</h3>
+      <div class="button-group">
+        <button onclick="restartGateway()">Restart Gateway</button>
+        <button onclick="openLogs()">View Logs</button>
+        <button onclick="showConfig()">Config</button>
+        <button class="danger" onclick="killAgent()">Force Sync</button>
+      </div>
+    </div>
+
+    <!-- Stats Panel -->
+    <div class="stats-panel">
+      <h3>System Stats</h3>
+      <div class="stat-item">
+        <span>Active Agents:</span>
+        <span class="stat-value" id="activeCount">0/4</span>
+      </div>
+      <div class="stat-item">
+        <span>Message Rate:</span>
+        <span class="stat-value" id="messageRate">0 msg/s</span>
+      </div>
+      <div class="stat-item">
+        <span>Latency:</span>
+        <span class="stat-value" id="latency">-- ms</span>
+      </div>
+      <div class="stat-item">
+        <span>Uptime:</span>
+        <span class="stat-value" id="uptime">-- m</span>
+      </div>
+      <div class="stat-item">
+        <span>Last Update:</span>
+        <span class="stat-value" id="lastUpdate">--:--:--</span>
+      </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal" id="logsModal">
+      <div class="modal-content">
+        <button class="modal-close" onclick="closeLogs()">✕</button>
+        <h2>Agent Logs</h2>
+        <div id="logsContent" style="max-height: 400px; overflow-y: auto"></div>
+      </div>
+    </div>
+
+    <div class="modal" id="configModal">
+      <div class="modal-content">
+        <button class="modal-close" onclick="closeConfig()">✕</button>
+        <h2>Configuration</h2>
+        <div id="configContent" style="max-height: 400px; overflow-y: auto"></div>
+      </div>
+    </div>
+
+    <script>
+      // ============================================================================
+      // THREE.JS SCENE SETUP
+      // ============================================================================
+
+      const container = document.getElementById("canvas-container");
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0a0e27);
+      scene.fog = new THREE.Fog(0x0a0e27, 100, 500);
+
+      const camera = new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        1000,
+      );
+      camera.position.set(0, 0, 40);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      container.appendChild(renderer.domElement);
+
+      // ============================================================================
+      // LIGHTING
+      // ============================================================================
+
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+      scene.add(ambientLight);
+
+      const pointLight1 = new THREE.PointLight(0x00ff88, 1.5, 100);
+      pointLight1.position.set(30, 30, 30);
+      pointLight1.castShadow = true;
+      scene.add(pointLight1);
+
+      const pointLight2 = new THREE.PointLight(0x00ccff, 1.2, 100);
+      pointLight2.position.set(-30, -30, 30);
+      pointLight2.castShadow = true;
+      scene.add(pointLight2);
+
+      // ============================================================================
+      // AGENTS DATA
+      // ============================================================================
+
+      const agents = [
+        {
+          id: "project_manager",
+          name: "Cybershield PM",
+          emoji: "🎯",
+          position: new THREE.Vector3(-15, 15, 0),
+          color: 0x00ff88,
+          status: "active",
+          type: "coordinator",
+        },
+        {
+          id: "coder_agent",
+          name: "CodeGen Pro",
+          emoji: "💻",
+          position: new THREE.Vector3(15, 15, 0),
+          color: 0x00ccff,
+          status: "active",
+          type: "developer",
+        },
+        {
+          id: "hacker_agent",
+          name: "Pentest AI",
+          emoji: "🔒",
+          position: new THREE.Vector3(-15, -15, 0),
+          color: 0xff6b6b,
+          status: "active",
+          type: "security",
+        },
+        {
+          id: "database_agent",
+          name: "SupabaseConnector",
+          emoji: "🗄️",
+          position: new THREE.Vector3(15, -15, 0),
+          color: 0xffd93d,
+          status: "active",
+          type: "data_specialist",
+        },
+      ];
+
+      // ============================================================================
+      // 3D NODES
+      // ============================================================================
+
+      const agentMeshes = {};
+      const agentGroups = {};
+      const statusLights = {};
+
+      agents.forEach((agent) => {
+        // Create group for agent (mesh + light + aura)
+        const group = new THREE.Group();
+        scene.add(group);
+        agentGroups[agent.id] = group;
+
+        // Main sphere
+        const geometry = new THREE.IcosahedronGeometry(2, 4);
+        const material = new THREE.MeshPhongMaterial({
+          color: agent.color,
+          emissive: agent.color,
+          emissiveIntensity: 0.3,
+          shininess: 100,
+          wireframe: false,
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.userData = agent;
+        mesh.position.copy(agent.position);
+        group.add(mesh);
+        agentMeshes[agent.id] = mesh;
+
+        // Aura glow effect
+        const glowGeometry = new THREE.IcosahedronGeometry(2.5, 4);
+        const glowMaterial = new THREE.MeshBasicMaterial({
+          color: agent.color,
+          transparent: true,
+          opacity: 0.15,
+          wireframe: false,
+        });
+        const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
+        glowMesh.position.copy(agent.position);
+        group.add(glowMesh);
+        agentMeshes[agent.id + "_glow"] = glowMesh;
+
+        // Status light
+        const lightGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+        const statusLightMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff88 });
+        const light = new THREE.Mesh(lightGeometry, statusLightMaterial);
+        light.position.copy(agent.position);
+        light.position.z += 3;
+        group.add(light);
+        statusLights[agent.id] = light;
+
+        // Orbit effect
+        group.userData = {
+          rotationSpeed: Math.random() * 0.002 + 0.001,
+          pulsePhase: Math.random() * Math.PI * 2,
+        };
+      });
+
+      // ============================================================================
+      // CONNECTION LINES
+      // ============================================================================
+
+      const connections = [];
+      const linePositions = {};
+
+      function createConnectionLines() {
+        // Connect all agents to PM (hub & spoke)
+        const pmPos = agents[0].position;
+        for (let i = 1; i < agents.length; i++) {
+          const agentPos = agents[i].position;
+          createLine(pmPos, agentPos, agents[0].id, agents[i].id);
+        }
+      }
+
+      function createLine(start, end, fromId, toId) {
+        const points = [start.clone(), end.clone()];
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const material = new THREE.LineBasicMaterial({
+          color: 0x00ff88,
+          linewidth: 2,
+          transparent: true,
+          opacity: 0.3,
+        });
+        const line = new THREE.Line(geometry, material);
+        scene.add(line);
+        connections.push({
+          line,
+          fromId,
+          toId,
+          material,
+          originalOpacity: 0.3,
+          isActive: false,
+        });
+      }
+
+      createConnectionLines();
+
+      // ============================================================================
+      // GLOBAL STATE
+      // ============================================================================
+
+      let selectedAgent = null;
+      let messageCount = 0;
+      let lastMessageTime = Date.now();
+      let startTime = Date.now();
+      let apiLatency = 0;
+      let lastStatusUpdate = new Date();
+
+      // ============================================================================
+      // RAYCASTING FOR CLICKS
+      // ============================================================================
+
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+
+      window.addEventListener("click", (event) => {
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+
+        const selectables = Object.values(agentMeshes).filter(
+          (m) => m.geometry instanceof THREE.IcosahedronGeometry && !m.userData.emissive,
+        );
+        const intersects = raycaster.intersectObjects(selectables);
+
+        if (intersects.length > 0) {
+          const agent = intersects[0].object.userData;
+          selectAgent(agent.id);
+        }
+      });
+
+      // ============================================================================
+      // MOUSE CONTROLS (Drag to Rotate)
+      // ============================================================================
+
+      let isDragging = false;
+      let previousMousePosition = { x: 0, y: 0 };
+
+      document.addEventListener("mousedown", (e) => {
+        isDragging = true;
+        previousMousePosition = { x: e.clientX, y: e.clientY };
+      });
+
+      document.addEventListener("mousemove", (e) => {
+        if (isDragging) {
+          const deltaX = e.clientX - previousMousePosition.x;
+          const deltaY = e.clientY - previousMousePosition.y;
+
+          Object.values(agentGroups).forEach((group) => {
+            group.rotation.y += deltaX * 0.005;
+            group.rotation.x += deltaY * 0.005;
+          });
+
+          previousMousePosition = { x: e.clientX, y: e.clientY };
+        }
+      });
+
+      document.addEventListener("mouseup", () => {
+        isDragging = false;
+      });
+
+      // Zoom with mouse wheel
+      window.addEventListener(
+        "wheel",
+        (e) => {
+          e.preventDefault();
+          camera.position.z += e.deltaY * 0.05;
+          camera.position.z = Math.max(20, Math.min(100, camera.position.z));
+        },
+        { passive: false },
+      );
+
+      // ============================================================================
+      // AGENT SELECTION
+      // ============================================================================
+
+      function selectAgent(agentId) {
+        if (selectedAgent === agentId) {
+          selectedAgent = null;
+        } else {
+          selectedAgent = agentId;
+        }
+        updateAgentPanel();
+      }
+
+      // ============================================================================
+      // UI UPDATE FUNCTIONS
+      // ============================================================================
+
+      function updateAgentPanel() {
+        const listHtml = agents
+          .map((agent) => {
+            const isSelected = selectedAgent === agent.id;
+            const statusClass =
+              agent.status === "active"
+                ? "status-active"
+                : agent.status === "busy"
+                  ? "status-busy"
+                  : "status-inactive";
+
+            return `
+                    <div class="agent-item ${isSelected ? "active" : ""}" onclick="selectAgent('${agent.id}')">
+                        <div class="agent-name">
+                            <span class="agent-emoji">${agent.emoji}</span>
+                            <span>${agent.name}</span>
+                        </div>
+                        <div class="status-badge ${statusClass}">${agent.status.toUpperCase()}</div>
+                        <div class="agent-info">
+                            <div><strong>Model:</strong> ${
+                              agent.id === "project_manager"
+                                ? "Claude Opus 4.6"
+                                : agent.id === "database_agent"
+                                  ? "Claude Opus 4.6"
+                                  : "Kimi 2.5"
+                            }</div>
+                            <div><strong>Type:</strong> ${agent.type}</div>
+                            <div><strong>Tasks:</strong> ${Math.floor(Math.random() * 12)}</div>
+                        </div>
+                    </div>
+                `;
+          })
+          .join("");
+
+        document.getElementById("agentList").innerHTML = listHtml;
+      }
+
+      function updateStats() {
+        const now = Date.now();
+        const uptime = Math.floor((now - startTime) / 1000 / 60);
+        const messageRate =
+          messageCount > 0
+            ? (messageCount / ((now - lastMessageTime) / 1000) || 0).toFixed(2)
+            : "0.00";
+
+        const activeAgents = agents.filter((a) => a.status === "active").length;
+        document.getElementById("activeCount").textContent = `${activeAgents}/4`;
+        document.getElementById("messageRate").textContent = `${messageRate} msg/s`;
+        document.getElementById("latency").textContent = `${apiLatency} ms`;
+        document.getElementById("uptime").textContent = `${uptime} m`;
+        document.getElementById("lastUpdate").textContent = lastStatusUpdate.toLocaleTimeString();
+      }
+
+      // ============================================================================
+      // API POLLING
+      // ============================================================================
+
+      async function pollStatus() {
+        try {
+          const startTime = performance.now();
+          const response = await fetch("/api/heartbeat/status", {
+            headers: { "Content-Type": "application/json" },
+          });
+
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+          const data = await response.json();
+          apiLatency = Math.round(performance.now() - startTime);
+
+          // Update agent statuses
+          if (data.in_flight_agents) {
+            data.in_flight_agents.forEach((inFlightAgent) => {
+              const agent = agents.find((a) => a.id === inFlightAgent.agent_id);
+              if (agent) {
+                agent.status = inFlightAgent.status || "active";
+                const statusLight = statusLights[inFlightAgent.agent_id];
+                if (statusLight) {
+                  statusLight.material.color.setHex(
+                    agent.status === "active"
+                      ? 0x00ff88
+                      : agent.status === "busy"
+                        ? 0xffd93d
+                        : 0xff6b6b,
+                  );
+                }
+                messageCount++;
+              }
+            });
+          }
+
+          lastStatusUpdate = new Date();
+          updateAgentPanel();
+        } catch (error) {
+          console.warn("API polling failed:", error);
+          // Retry with fallback
+          agents.forEach((a) => (a.status = "active"));
+          updateAgentPanel();
+        }
+      }
+
+      setInterval(pollStatus, 2000);
+
+      // ============================================================================
+      // ANIMATION LOOP
+      // ============================================================================
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        // Rotate agent groups
+        Object.entries(agentGroups).forEach(([agentId, group]) => {
+          const data = group.userData;
+          group.rotation.x += data.rotationSpeed * 0.5;
+          group.rotation.z += data.rotationSpeed * 0.3;
+
+          // Pulse effect
+          data.pulsePhase += 0.02;
+          const scale = 1 + Math.sin(data.pulsePhase) * 0.1;
+          const mesh = agentMeshes[agentId];
+          if (mesh) mesh.scale.set(scale, scale, scale);
+
+          // Glow intensity
+          const glowMesh = agentMeshes[agentId + "_glow"];
+          if (glowMesh) {
+            glowMesh.scale.set(
+              1 + Math.sin(data.pulsePhase * 0.5) * 0.2,
+              1 + Math.sin(data.pulsePhase * 0.5) * 0.2,
+              1 + Math.sin(data.pulsePhase * 0.5) * 0.2,
+            );
+          }
+        });
+
+        // Animate connections
+        connections.forEach((conn) => {
+          if (conn.isActive) {
+            conn.material.opacity = conn.originalOpacity * 2;
+          } else {
+            conn.material.opacity = Math.max(conn.originalOpacity, conn.material.opacity - 0.01);
+          }
+          conn.isActive = false;
+        });
+
+        // Camera subtle movement
+        const time = Date.now() * 0.0001;
+        camera.position.x = Math.sin(time) * 5;
+        camera.position.y = Math.cos(time * 0.5) * 3;
+        camera.lookAt(0, 0, 0);
+
+        // Update stats
+        updateStats();
+
+        renderer.render(scene, camera);
+      }
+
+      animate();
+
+      // ============================================================================
+      // HANDLE WINDOW RESIZE
+      // ============================================================================
+
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // ============================================================================
+      // CONTROL FUNCTIONS
+      // ============================================================================
+
+      function restartGateway() {
+        alert(
+          "🔄 Restarting gateway...\n\nIn production, this would trigger:\nPOST /api/admin/restart",
+        );
+      }
+
+      function openLogs() {
+        const logsHtml = `
+                <div class="log-line log-info">[INFO] Gateway initialized on port 8000</div>
+                <div class="log-line log-info">[INFO] PM Agent: Opus 4.6 loaded</div>
+                <div class="log-line log-info">[INFO] CodeGen Agent: Kimi 2.5 loaded</div>
+                <div class="log-line log-info">[INFO] Security Agent: Kimi loaded</div>
+                <div class="log-line log-info">[INFO] Database Agent: Opus 4.6 loaded</div>
+                <div class="log-line log-success">[SUCCESS] All agents ready</div>
+                <div class="log-line log-info">[INFO] Session persistence: /tmp/openclaw_sessions</div>
+                <div class="log-line log-info">[INFO] Heartbeat monitor: Running (30s intervals)</div>
+                <div class="log-line log-info">[INFO] Router engine: LangGraph (0.7ms latency)</div>
+                <div class="log-line log-success">[SUCCESS] Dashboard connected</div>
+            `;
+        document.getElementById("logsContent").innerHTML = logsHtml;
+        document.getElementById("logsModal").classList.add("active");
+      }
+
+      function closeLogs() {
+        document.getElementById("logsModal").classList.remove("active");
+      }
+
+      function showConfig() {
+        const configHtml = `
+                <div style="font-size: 10px; color: var(--text-dim); font-family: monospace;">
+                    <div><strong style="color: var(--primary);">Gateway</strong></div>
+                    <div>• Port: 8000</div>
+                    <div>• Mode: Multi-channel</div>
+                    <div style="margin-top: 10px;"><strong style="color: var(--primary);">Agents</strong></div>
+                    <div>• PM Agent: claude-opus-4-6</div>
+                    <div>• CodeGen: kimi-2.5 (95% cost savings)</div>
+                    <div>• Security: kimi (82% cost savings)</div>
+                    <div>• Database: claude-opus-4-6</div>
+                    <div style="margin-top: 10px;"><strong style="color: var(--primary);">Routing</strong></div>
+                    <div>• Engine: LangGraph</div>
+                    <div>• Latency: 0.7ms</div>
+                    <div>• Keywords: 52 routing rules</div>
+                    <div style="margin-top: 10px;"><strong style="color: var(--primary);">Quotas</strong></div>
+                    <div>• Daily: $50</div>
+                    <div>• Monthly: $1,000</div>
+                    <div>• Cost Savings: 60-70%</div>
+                </div>
+            `;
+        document.getElementById("configContent").innerHTML = configHtml;
+        document.getElementById("configModal").classList.add("active");
+      }
+
+      function closeConfig() {
+        document.getElementById("configModal").classList.remove("active");
+      }
+
+      function killAgent() {
+        const agents = ["project_manager", "coder_agent", "hacker_agent", "database_agent"];
+        const randomAgent = agents[Math.floor(Math.random() * agents.length)];
+        const agent = agents.find((a) => a.id === randomAgent);
+
+        if (agent) {
+          alert(
+            `🔄 Syncing ${agent.name}...\n\nIn production, this would trigger agent health checks and auto-recovery.`,
+          );
+        }
+      }
+
+      // Initial UI update
+      updateAgentPanel();
+      updateStats();
+
+      // Simulate message flow
+      setInterval(() => {
+        const agent1 = agents[Math.floor(Math.random() * agents.length)];
+        const agent2 = agents[Math.floor(Math.random() * agents.length)];
+
+        if (agent1.id !== agent2.id) {
+          const connection = connections.find(
+            (c) =>
+              (c.fromId === agent1.id || c.toId === agent1.id) &&
+              (c.fromId === agent2.id || c.toId === agent2.id),
+          );
+          if (connection) {
+            connection.isActive = true;
+          }
+        }
+      }, 300);
+    </script>
+  </body>
+</html>

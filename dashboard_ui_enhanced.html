@@ -1,0 +1,2222 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenClaw Gateway - Control Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+      :root {
+        --primary: #00f0ff;
+        --success: #00ff41;
+        --warning: #ffd700;
+        --danger: #ff006e;
+        --bg: #0a0e27;
+        --bg-secondary: #1a1f3a;
+        --bg-tertiary: #252d48;
+        --text-primary: #e0e7ff;
+        --text-secondary: #a5afc9;
+        --border: #2d3547;
+        /* Light mode colors */
+        --light-bg: #f8fafc;
+        --light-bg-secondary: #e8eef9;
+        --light-bg-tertiary: #dbe4f5;
+        --light-text-primary: #0f1729;
+        --light-text-secondary: #475569;
+        --light-border: #cbd5e1;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+        width: 100%;
+        color: var(--text-primary);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        transition:
+          background-color 0.3s ease,
+          color 0.3s ease;
+      }
+
+      body {
+        background: linear-gradient(135deg, var(--bg) 0%, #0f1535 100%);
+      }
+
+      body.light-mode {
+        background: linear-gradient(135deg, var(--light-bg) 0%, #f0f4f9 100%);
+      }
+
+      /* Scrollbar Styling */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: var(--bg-secondary);
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--primary);
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #00d4e8;
+      }
+
+      body.light-mode ::-webkit-scrollbar-track {
+        background: var(--light-bg-secondary);
+      }
+
+      /* Glass Effect - Enhanced Glassmorphism */
+      .glass {
+        background: rgba(26, 31, 58, 0.5);
+        backdrop-filter: blur(10px) saturate(180%);
+        border: 1px solid rgba(0, 240, 255, 0.1);
+        transition: all 0.3s ease;
+      }
+
+      .glass-strong {
+        background: rgba(26, 31, 58, 0.7);
+        backdrop-filter: blur(12px) saturate(180%);
+        border: 1px solid rgba(0, 240, 255, 0.15);
+      }
+
+      body.light-mode .glass {
+        background: rgba(255, 255, 255, 0.4);
+        border: 1px solid rgba(0, 240, 255, 0.08);
+      }
+
+      body.light-mode .glass-strong {
+        background: rgba(255, 255, 255, 0.6);
+        border: 1px solid rgba(0, 240, 255, 0.12);
+      }
+
+      /* Neon Glow Effects */
+      .glow-cyan {
+        text-shadow:
+          0 0 10px var(--primary),
+          0 0 20px rgba(0, 240, 255, 0.5);
+      }
+
+      .glow-lime {
+        text-shadow:
+          0 0 10px var(--success),
+          0 0 20px rgba(0, 255, 65, 0.5);
+      }
+
+      .border-glow {
+        border-color: var(--primary);
+        box-shadow:
+          0 0 20px rgba(0, 240, 255, 0.3),
+          inset 0 0 20px rgba(0, 240, 255, 0.05);
+      }
+
+      .border-glow-success {
+        border-color: var(--success);
+        box-shadow:
+          0 0 20px rgba(0, 255, 65, 0.3),
+          inset 0 0 20px rgba(0, 255, 65, 0.05);
+      }
+
+      /* Enhanced Animations */
+      @keyframes pulse-glow {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.7;
+        }
+      }
+
+      @keyframes slide-in-left {
+        from {
+          transform: translateX(-20px);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+
+      @keyframes slide-in-right {
+        from {
+          transform: translateX(20px);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+
+      @keyframes slide-in-up {
+        from {
+          transform: translateY(20px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+
+      @keyframes fade-in {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      @keyframes float {
+        0%,
+        100% {
+          transform: translateY(0px);
+        }
+        50% {
+          transform: translateY(-5px);
+        }
+      }
+
+      @keyframes spin-slow {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes bounce-in {
+        0% {
+          transform: scale(0.8);
+          opacity: 0;
+        }
+        50% {
+          transform: scale(1.05);
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+
+      @keyframes shimmer {
+        0% {
+          background-position: -1000px 0;
+        }
+        100% {
+          background-position: 1000px 0;
+        }
+      }
+
+      .animate-slide-in-left {
+        animation: slide-in-left 0.5s ease-out;
+      }
+
+      .animate-slide-in-right {
+        animation: slide-in-right 0.5s ease-out;
+      }
+
+      .animate-slide-in-up {
+        animation: slide-in-up 0.4s ease-out;
+      }
+
+      .animate-fade-in {
+        animation: fade-in 0.5s ease-out;
+      }
+
+      .animate-float {
+        animation: float 3s ease-in-out infinite;
+      }
+
+      .animate-spin-slow {
+        animation: spin-slow 2s linear infinite;
+      }
+
+      .animate-bounce-in {
+        animation: bounce-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+
+      .pulse-glow {
+        animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+
+      /* Loading Spinner */
+      .spinner {
+        width: 24px;
+        height: 24px;
+        border: 3px solid rgba(0, 240, 255, 0.3);
+        border-top-color: var(--primary);
+        border-radius: 50%;
+        animation: spin-slow 1s linear infinite;
+      }
+
+      .spinner-sm {
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(0, 240, 255, 0.3);
+        border-top-color: var(--primary);
+      }
+
+      /* Status Indicators */
+      .status-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        display: inline-block;
+        animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+
+      .status-online {
+        background: var(--success);
+        box-shadow: 0 0 10px var(--success);
+      }
+
+      .status-offline {
+        background: #6b7280;
+        box-shadow: 0 0 10px rgba(107, 114, 128, 0.5);
+      }
+
+      .status-warning {
+        background: var(--warning);
+        box-shadow: 0 0 10px var(--warning);
+      }
+
+      /* Button Styles - Enhanced */
+      .btn {
+        padding: 0.625rem 1.25rem;
+        border-radius: 0.375rem;
+        font-weight: 600;
+        font-size: 0.875rem;
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        border: 1px solid transparent;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        white-space: nowrap;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .btn::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.2);
+        transition: left 0.3s ease;
+      }
+
+      .btn:hover::before {
+        left: 100%;
+      }
+
+      .btn-primary {
+        background: var(--primary);
+        color: var(--bg);
+        border: 1px solid var(--primary);
+      }
+
+      .btn-primary:hover {
+        background: transparent;
+        color: var(--primary);
+        box-shadow: 0 0 20px rgba(0, 240, 255, 0.5);
+        transform: translateY(-2px);
+      }
+
+      .btn-primary:active {
+        transform: translateY(0);
+      }
+
+      .btn-secondary {
+        background: transparent;
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+
+      .btn-secondary:hover {
+        border-color: var(--primary);
+        background: rgba(0, 240, 255, 0.08);
+        transform: translateY(-2px);
+      }
+
+      .btn-danger {
+        background: transparent;
+        color: var(--danger);
+        border: 1px solid var(--danger);
+      }
+
+      .btn-danger:hover {
+        background: var(--danger);
+        color: white;
+        box-shadow: 0 0 20px rgba(255, 0, 110, 0.5);
+        transform: translateY(-2px);
+      }
+
+      .btn-success {
+        background: var(--success);
+        color: var(--bg);
+        border: 1px solid var(--success);
+      }
+
+      .btn-success:hover {
+        background: transparent;
+        color: var(--success);
+        box-shadow: 0 0 20px rgba(0, 255, 65, 0.5);
+        transform: translateY(-2px);
+      }
+
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .btn:disabled:hover {
+        transform: none;
+      }
+
+      .btn.loading {
+        opacity: 0.8;
+        pointer-events: none;
+      }
+
+      /* Card Styles */
+      .card {
+        border-radius: 0.5rem;
+        padding: 1.5rem;
+        transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+
+      .card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 10px 30px rgba(0, 240, 255, 0.1);
+      }
+
+      /* Input Styles */
+      input[type="password"],
+      input[type="text"],
+      input[type="number"],
+      select,
+      textarea {
+        width: 100%;
+        padding: 0.75rem 1rem;
+        border-radius: 0.375rem;
+        background: rgba(42, 51, 85, 0.5);
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+        font-family: inherit;
+        transition: all 0.3s ease;
+      }
+
+      input[type="password"]:focus,
+      input[type="text"]:focus,
+      input[type="number"]:focus,
+      select:focus,
+      textarea:focus {
+        outline: none;
+        border-color: var(--primary);
+        background: rgba(42, 51, 85, 0.8);
+        box-shadow: 0 0 20px rgba(0, 240, 255, 0.2);
+      }
+
+      body.light-mode input[type="password"],
+      body.light-mode input[type="text"],
+      body.light-mode input[type="number"],
+      body.light-mode select,
+      body.light-mode textarea {
+        background: rgba(255, 255, 255, 0.5);
+        border-color: var(--light-border);
+        color: var(--light-text-primary);
+      }
+
+      body.light-mode input[type="password"]:focus,
+      body.light-mode input[type="text"]:focus,
+      body.light-mode input[type="number"]:focus,
+      body.light-mode select:focus,
+      body.light-mode textarea:focus {
+        background: rgba(255, 255, 255, 0.7);
+      }
+
+      /* Sidebar */
+      .sidebar {
+        width: 280px;
+        background: var(--bg-secondary);
+        border-right: 1px solid var(--border);
+        overflow-y: auto;
+        position: fixed;
+        height: 100vh;
+        left: 0;
+        top: 0;
+        z-index: 40;
+        transition: all 0.3s ease;
+        transform: translateX(0);
+      }
+
+      .sidebar.mobile-hidden {
+        transform: translateX(-100%);
+      }
+
+      body.light-mode .sidebar {
+        background: var(--light-bg-secondary);
+        border-right-color: var(--light-border);
+      }
+
+      .sidebar-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 1rem 1.5rem;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        border-left: 3px solid transparent;
+        position: relative;
+      }
+
+      .sidebar-item:hover {
+        color: var(--text-primary);
+        background: rgba(0, 240, 255, 0.05);
+        border-left-color: var(--primary);
+      }
+
+      .sidebar-item.active {
+        color: var(--primary);
+        background: rgba(0, 240, 255, 0.1);
+        border-left-color: var(--primary);
+      }
+
+      /* Main Content */
+      .main-content {
+        margin-left: 280px;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        transition: all 0.3s ease;
+      }
+
+      .main-content.sidebar-collapsed {
+        margin-left: 0;
+      }
+
+      .header {
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border);
+        padding: 1.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        transition: all 0.3s ease;
+        position: relative;
+        z-index: 30;
+      }
+
+      body.light-mode .header {
+        background: var(--light-bg-secondary);
+        border-bottom-color: var(--light-border);
+      }
+
+      .content {
+        flex: 1;
+        padding: 2rem;
+        overflow-y: auto;
+      }
+
+      /* Page Transition Overlay */
+      .page-transition {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: var(--bg);
+        z-index: 100;
+        animation: fade-in 0.3s ease-out forwards;
+        pointer-events: none;
+      }
+
+      /* Grid */
+      .grid-2 {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1.5rem;
+      }
+
+      .grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1.5rem;
+      }
+
+      .grid-4 {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1.5rem;
+      }
+
+      /* Toast Notifications */
+      .toast {
+        position: fixed;
+        bottom: 2rem;
+        right: 2rem;
+        padding: 1rem 1.5rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 0.375rem;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+        animation: slide-in-up 0.3s ease-out;
+        z-index: 200;
+        max-width: 400px;
+        word-wrap: break-word;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      }
+
+      .toast.success {
+        border-color: var(--success);
+        color: var(--success);
+      }
+
+      .toast.error {
+        border-color: var(--danger);
+        color: var(--danger);
+      }
+
+      .toast.warning {
+        border-color: var(--warning);
+        color: var(--warning);
+      }
+
+      .toast-exit {
+        animation: slide-in-right 0.3s ease-in reverse;
+      }
+
+      /* Modal */
+      .modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(5px);
+        z-index: 50;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+      }
+
+      .modal.open {
+        display: flex;
+        animation: fade-in 0.3s ease-out;
+      }
+
+      .modal-content {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 2rem;
+        max-width: 600px;
+        width: 100%;
+        max-height: 80vh;
+        overflow-y: auto;
+        animation: bounce-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+
+      body.light-mode .modal-content {
+        background: var(--light-bg-secondary);
+        border-color: var(--light-border);
+      }
+
+      /* Tabs */
+      .tabs {
+        display: flex;
+        gap: 1rem;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 1.5rem;
+        overflow-x: auto;
+      }
+
+      .tab {
+        padding: 0.75rem 1.5rem;
+        cursor: pointer;
+        color: var(--text-secondary);
+        border-bottom: 2px solid transparent;
+        transition: all 0.3s ease;
+        white-space: nowrap;
+        position: relative;
+      }
+
+      .tab:hover {
+        color: var(--text-primary);
+      }
+
+      .tab.active {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+      }
+
+      .tab-content {
+        display: none;
+        animation: fade-in 0.3s ease-out;
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      /* Badge */
+      .badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 0.25rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        transition: all 0.3s ease;
+      }
+
+      .badge-success {
+        background: rgba(0, 255, 65, 0.2);
+        color: var(--success);
+        border: 1px solid var(--success);
+      }
+
+      .badge-danger {
+        background: rgba(255, 0, 110, 0.2);
+        color: var(--danger);
+        border: 1px solid var(--danger);
+      }
+
+      .badge-warning {
+        background: rgba(255, 215, 0, 0.2);
+        color: var(--warning);
+        border: 1px solid var(--warning);
+      }
+
+      .badge-info {
+        background: rgba(0, 240, 255, 0.2);
+        color: var(--primary);
+        border: 1px solid var(--primary);
+      }
+
+      /* Theme Toggle Button */
+      .theme-toggle {
+        position: fixed;
+        bottom: 2rem;
+        left: 2rem;
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.3s ease;
+        z-index: 35;
+        color: var(--text-primary);
+      }
+
+      .theme-toggle:hover {
+        transform: scale(1.1);
+        box-shadow: 0 0 20px rgba(0, 240, 255, 0.3);
+      }
+
+      /* Responsive */
+      @media (max-width: 1024px) {
+        .grid-3 {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .grid-4 {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      @media (max-width: 768px) {
+        .sidebar {
+          width: 100%;
+          height: auto;
+          border-right: none;
+          border-bottom: 1px solid var(--border);
+          display: flex;
+          overflow-x: auto;
+          position: relative;
+          z-index: 40;
+        }
+
+        .main-content {
+          margin-left: 0;
+        }
+
+        .sidebar-item {
+          flex-shrink: 0;
+          padding: 0.75rem 1.25rem;
+        }
+
+        .grid-2,
+        .grid-3,
+        .grid-4 {
+          grid-template-columns: 1fr;
+        }
+
+        .content {
+          padding: 1rem;
+        }
+
+        .header {
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+
+        .header input {
+          flex: 1;
+          min-width: 200px;
+        }
+
+        .toast {
+          bottom: 1rem;
+          right: 1rem;
+          left: 1rem;
+          max-width: unset;
+        }
+
+        .theme-toggle {
+          bottom: 1rem;
+          left: 1rem;
+        }
+
+        .modal-content {
+          width: 95%;
+          padding: 1.5rem;
+        }
+      }
+
+      /* Mobile First */
+      @media (max-width: 480px) {
+        .sidebar {
+          height: 60px;
+        }
+
+        .sidebar-item {
+          padding: 0.5rem 1rem;
+          font-size: 0.875rem;
+        }
+
+        .content {
+          padding: 0.75rem;
+        }
+
+        .card {
+          padding: 1rem;
+        }
+
+        .btn {
+          padding: 0.5rem 1rem;
+          font-size: 0.8rem;
+        }
+
+        .header {
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+
+        .header input {
+          width: 100%;
+        }
+
+        .header .btn {
+          width: 100%;
+        }
+      }
+
+      /* Keyboard Navigation */
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      a:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+
+      /* Reduce Motion */
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+
+      /* Loading State Shimmer */
+      .shimmer-loading {
+        background: linear-gradient(
+          90deg,
+          var(--bg-tertiary) 0%,
+          var(--bg-secondary) 50%,
+          var(--bg-tertiary) 100%
+        );
+        background-size: 1000px 100%;
+        animation: shimmer 2s infinite;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Theme Toggle -->
+    <button
+      class="theme-toggle"
+      id="themeToggle"
+      aria-label="Toggle dark/light mode"
+      title="Toggle theme"
+    >
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+        ></path>
+      </svg>
+    </button>
+
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar glass-strong" role="navigation" aria-label="Main navigation">
+      <div class="p-6 border-b border-border">
+        <div class="flex items-center gap-3 mb-2">
+          <div
+            class="w-10 h-10 rounded bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center animate-float"
+          >
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 10V3L4 14h7v7l9-11h-7z"
+              ></path>
+            </svg>
+          </div>
+          <h1 class="text-xl font-bold glow-cyan">OpenClaw</h1>
+        </div>
+        <p class="text-xs text-text-secondary">Gateway Control</p>
+      </div>
+
+      <nav class="pt-6">
+        <button
+          class="sidebar-item active w-full text-left"
+          onclick="switchTab('dashboard')"
+          aria-current="page"
+          role="button"
+          tabindex="0"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M3 12l2-3m0 0l7-4 7 4M5 9v10a1 1 0 001 1h12a1 1 0 001-1V9m-9 11l-4-4m0 0l-2-2m2 2l2 2m2-2l2-2m-2 2l4 4"
+            ></path>
+          </svg>
+          <span>Dashboard</span>
+        </button>
+
+        <button
+          class="sidebar-item w-full text-left"
+          onclick="switchTab('logs')"
+          role="button"
+          tabindex="0"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            ></path>
+          </svg>
+          <span>Logs</span>
+        </button>
+
+        <button
+          class="sidebar-item w-full text-left"
+          onclick="switchTab('webhooks')"
+          role="button"
+          tabindex="0"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.658 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+            ></path>
+          </svg>
+          <span>Webhooks</span>
+        </button>
+
+        <button
+          class="sidebar-item w-full text-left"
+          onclick="switchTab('settings')"
+          role="button"
+          tabindex="0"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+            ></path>
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+            ></path>
+          </svg>
+          <span>Settings</span>
+        </button>
+
+        <button
+          class="sidebar-item w-full text-left"
+          onclick="switchTab('control')"
+          role="button"
+          tabindex="0"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+            ></path>
+          </svg>
+          <span>Control</span>
+        </button>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- Header -->
+      <header class="header">
+        <div class="flex-1">
+          <h2 class="text-2xl font-bold text-text-primary mb-1">Control Panel</h2>
+          <p class="text-sm text-text-secondary">Manage your OpenClaw Gateway</p>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <div class="relative flex-1 max-w-sm">
+            <input
+              type="password"
+              id="authToken"
+              placeholder="Paste gateway token..."
+              class="w-full pr-10"
+              aria-label="Gateway authentication token"
+            />
+            <span
+              class="absolute right-3 top-1/2 transform -translate-y-1/2 cursor-pointer"
+              onclick="togglePasswordVisibility('authToken')"
+              aria-label="Toggle token visibility"
+              tabindex="0"
+            >
+              <svg
+                class="w-4 h-4 text-text-secondary"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                ></path>
+              </svg>
+            </span>
+          </div>
+          <button
+            class="btn btn-primary"
+            onclick="authenticateGateway()"
+            aria-label="Connect to gateway"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+              ></path>
+            </svg>
+            <span class="hidden sm:inline">Connect</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Content Area -->
+      <div class="content">
+        <!-- Dashboard Tab -->
+        <div id="dashboard-tab" class="tab-content active animate-fade-in">
+          <div class="mb-8">
+            <h3 class="text-xl font-bold mb-4 glow-cyan">System Status</h3>
+            <div class="grid-4">
+              <!-- Gateway Status -->
+              <div class="card glass animate-slide-in-up" style="animation-delay: 0s">
+                <div class="flex items-start justify-between mb-3">
+                  <div>
+                    <p class="text-sm text-text-secondary mb-1">Gateway</p>
+                    <h4 class="text-lg font-bold text-text-primary">152.53.55.207</h4>
+                  </div>
+                  <span class="status-dot status-online"></span>
+                </div>
+                <p class="text-xs text-text-secondary">Port 18789 • v2.0.0</p>
+                <div class="mt-3 pt-3 border-t border-border">
+                  <span class="badge badge-success">ONLINE</span>
+                </div>
+              </div>
+
+              <!-- Tunnel Status -->
+              <div class="card glass animate-slide-in-up" style="animation-delay: 0.1s">
+                <div class="flex items-start justify-between mb-3">
+                  <div>
+                    <p class="text-sm text-text-secondary mb-1">Tunnel</p>
+                    <h4 class="text-lg font-bold text-text-primary">Cloudflare</h4>
+                  </div>
+                  <span class="status-dot status-online"></span>
+                </div>
+                <p class="text-xs text-text-secondary">4 Active Connections</p>
+                <div class="mt-3 pt-3 border-t border-border">
+                  <span class="badge badge-success">CONNECTED</span>
+                </div>
+              </div>
+
+              <!-- Telegram Bot Status -->
+              <div class="card glass animate-slide-in-up" style="animation-delay: 0.2s">
+                <div class="flex items-start justify-between mb-3">
+                  <div>
+                    <p class="text-sm text-text-secondary mb-1">Telegram</p>
+                    <h4 class="text-lg font-bold text-text-primary">Bot</h4>
+                  </div>
+                  <span class="status-dot status-online"></span>
+                </div>
+                <p class="text-xs text-text-secondary">Receiving Updates</p>
+                <div class="mt-3 pt-3 border-t border-border">
+                  <span class="badge badge-success">ACTIVE</span>
+                </div>
+              </div>
+
+              <!-- Slack Bot Status -->
+              <div class="card glass animate-slide-in-up" style="animation-delay: 0.3s">
+                <div class="flex items-start justify-between mb-3">
+                  <div>
+                    <p class="text-sm text-text-secondary mb-1">Slack</p>
+                    <h4 class="text-lg font-bold text-text-primary">Bot</h4>
+                  </div>
+                  <span class="status-dot status-offline"></span>
+                </div>
+                <p class="text-xs text-text-secondary">Not Connected</p>
+                <div class="mt-3 pt-3 border-t border-border">
+                  <span class="badge badge-warning">OFFLINE</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Agents Section -->
+          <div class="mb-8">
+            <h3 class="text-xl font-bold mb-4 glow-cyan">Active Agents</h3>
+            <div class="grid-2">
+              <!-- Agent Card 1 -->
+              <div
+                class="card glass border-glow-success animate-slide-in-left"
+                style="border: 1px solid var(--success); box-shadow: 0 0 20px rgba(0, 255, 65, 0.2)"
+              >
+                <div class="flex items-center justify-between mb-4">
+                  <h4 class="text-lg font-bold text-text-primary">PM Agent</h4>
+                  <span class="badge badge-success">ACTIVE</span>
+                </div>
+                <div class="space-y-2 text-sm mb-4">
+                  <div class="flex justify-between">
+                    <span class="text-text-secondary">Model:</span>
+                    <span class="font-mono text-primary">claude-opus-4.6</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-text-secondary">Requests:</span>
+                    <span class="text-text-primary">1,247</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-text-secondary">Latency:</span>
+                    <span class="text-success">42ms</span>
+                  </div>
+                </div>
+                <div class="w-full h-1 rounded bg-bg-tertiary overflow-hidden">
+                  <div
+                    class="h-full bg-gradient-to-r from-success to-primary"
+                    style="width: 85%"
+                  ></div>
+                </div>
+              </div>
+
+              <!-- Agent Card 2 -->
+              <div
+                class="card glass border-glow animate-slide-in-right"
+                style="
+                  border: 1px solid var(--primary);
+                  box-shadow: 0 0 20px rgba(0, 240, 255, 0.2);
+                "
+              >
+                <div class="flex items-center justify-between mb-4">
+                  <h4 class="text-lg font-bold text-text-primary">CodeGen Agent</h4>
+                  <span class="badge badge-info">IDLE</span>
+                </div>
+                <div class="space-y-2 text-sm mb-4">
+                  <div class="flex justify-between">
+                    <span class="text-text-secondary">Model:</span>
+                    <span class="font-mono text-primary">ollama-qwen-32b</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-text-secondary">Requests:</span>
+                    <span class="text-text-primary">342</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-text-secondary">Latency:</span>
+                    <span class="text-success">156ms</span>
+                  </div>
+                </div>
+                <div class="w-full h-1 rounded bg-bg-tertiary overflow-hidden">
+                  <div
+                    class="h-full bg-gradient-to-r from-primary to-success"
+                    style="width: 45%"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Actions -->
+          <div>
+            <h3 class="text-xl font-bold mb-4 glow-cyan">Quick Actions</h3>
+            <div class="flex flex-wrap gap-3">
+              <button
+                class="btn btn-primary"
+                onclick="executeActionWithLoading('restart')"
+                aria-label="Restart gateway"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  ></path>
+                </svg>
+                Restart Gateway
+              </button>
+
+              <button
+                class="btn btn-secondary"
+                onclick="switchTab('logs')"
+                aria-label="View live logs"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  ></path>
+                </svg>
+                View Live Logs
+              </button>
+
+              <button
+                class="btn btn-secondary"
+                onclick="showModal('health-check')"
+                aria-label="Check system health"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  ></path>
+                </svg>
+                Health Check
+              </button>
+
+              <button
+                class="btn btn-success"
+                onclick="executeActionWithLoading('scale')"
+                aria-label="Scale to 3 instances"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M13 10V3L4 14h7v7l9-11h-7z"
+                  ></path>
+                </svg>
+                Scale to 3 Instances
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Logs Tab -->
+        <div id="logs-tab" class="tab-content animate-fade-in">
+          <div class="mb-4">
+            <h3 class="text-xl font-bold mb-4 glow-cyan">Live Logs</h3>
+            <div class="flex gap-2 mb-4">
+              <input
+                type="text"
+                placeholder="Filter logs..."
+                class="flex-1"
+                id="logFilter"
+                aria-label="Filter logs by keyword"
+              />
+              <button class="btn btn-secondary" onclick="clearLogs()" aria-label="Clear all logs">
+                Clear Logs
+              </button>
+            </div>
+          </div>
+
+          <div
+            class="glass card font-mono text-xs"
+            style="height: 500px; overflow-y: auto; background: rgba(10, 14, 39, 0.8)"
+          >
+            <div
+              id="logsContainer"
+              class="text-text-secondary space-y-1"
+              role="log"
+              aria-live="polite"
+              aria-label="System logs"
+            >
+              <div>
+                <span style="color: var(--success)">[13:45:23]</span> Gateway started on
+                152.53.55.207:18789
+              </div>
+              <div>
+                <span style="color: var(--primary)">[13:45:24]</span> Cloudflare tunnel connected: 4
+                QUIC connections active
+              </div>
+              <div>
+                <span style="color: var(--success)">[13:45:25]</span> Telegram bot initialized
+              </div>
+              <div>
+                <span style="color: var(--warning)">[13:45:26]</span> Slack bot connection pending -
+                check credentials
+              </div>
+              <div>
+                <span style="color: var(--success)">[13:45:27]</span> PM Agent (claude-opus-4.6)
+                loaded and ready
+              </div>
+              <div>
+                <span style="color: var(--success)">[13:45:28]</span> CodeGen Agent
+                (ollama-qwen-32b) loaded and ready
+              </div>
+              <div>
+                <span style="color: var(--primary)">[13:45:29]</span> Router service initialized on
+                :3001
+              </div>
+              <div>
+                <span style="color: var(--success)">[13:45:30]</span> Health check: All systems
+                nominal
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Webhooks Tab -->
+        <div id="webhooks-tab" class="tab-content animate-fade-in">
+          <div class="mb-4">
+            <h3 class="text-xl font-bold mb-4 glow-cyan">Webhook Endpoints</h3>
+            <p class="text-text-secondary text-sm mb-6">
+              Copy webhook URLs to configure external integrations.
+            </p>
+          </div>
+
+          <div class="space-y-4">
+            <!-- Telegram Webhook -->
+            <div class="card glass">
+              <div class="flex items-center justify-between mb-3">
+                <h4 class="font-bold text-text-primary">Telegram Webhook</h4>
+                <span class="badge badge-success">ACTIVE</span>
+              </div>
+              <div class="flex items-center gap-2 mb-2">
+                <input
+                  type="text"
+                  value="https://152.53.55.207:18789/telegram/webhook"
+                  readonly
+                  class="flex-1"
+                  aria-label="Telegram webhook URL"
+                />
+                <button
+                  class="btn btn-secondary px-3"
+                  onclick="
+                    copyToClipboard(
+                      'https://152.53.55.207:18789/telegram/webhook',
+                      'Telegram webhook copied!',
+                    )
+                  "
+                  aria-label="Copy Telegram webhook URL"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    ></path>
+                  </svg>
+                </button>
+              </div>
+              <p class="text-xs text-text-secondary">
+                Last called: 2 minutes ago • 342 requests today
+              </p>
+            </div>
+
+            <!-- Slack Webhook -->
+            <div class="card glass">
+              <div class="flex items-center justify-between mb-3">
+                <h4 class="font-bold text-text-primary">Slack Webhook</h4>
+                <span class="badge badge-warning">PENDING</span>
+              </div>
+              <div class="flex items-center gap-2 mb-2">
+                <input
+                  type="text"
+                  value="https://152.53.55.207:18789/slack/webhook"
+                  readonly
+                  class="flex-1"
+                  aria-label="Slack webhook URL"
+                />
+                <button
+                  class="btn btn-secondary px-3"
+                  onclick="
+                    copyToClipboard(
+                      'https://152.53.55.207:18789/slack/webhook',
+                      'Slack webhook copied!',
+                    )
+                  "
+                  aria-label="Copy Slack webhook URL"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    ></path>
+                  </svg>
+                </button>
+              </div>
+              <p class="text-xs text-text-secondary">Configure bot permissions to enable</p>
+            </div>
+
+            <!-- Discord Webhook -->
+            <div class="card glass">
+              <div class="flex items-center justify-between mb-3">
+                <h4 class="font-bold text-text-primary">Discord Webhook</h4>
+                <span class="badge badge-warning">PENDING</span>
+              </div>
+              <div class="flex items-center gap-2 mb-2">
+                <input
+                  type="text"
+                  value="https://152.53.55.207:18789/discord/webhook"
+                  readonly
+                  class="flex-1"
+                  aria-label="Discord webhook URL"
+                />
+                <button
+                  class="btn btn-secondary px-3"
+                  onclick="
+                    copyToClipboard(
+                      'https://152.53.55.207:18789/discord/webhook',
+                      'Discord webhook copied!',
+                    )
+                  "
+                  aria-label="Copy Discord webhook URL"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    ></path>
+                  </svg>
+                </button>
+              </div>
+              <p class="text-xs text-text-secondary">Bot token required to activate</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settings-tab" class="tab-content animate-fade-in">
+          <h3 class="text-xl font-bold mb-6 glow-cyan">Gateway Settings</h3>
+
+          <!-- Tabs within Settings -->
+          <div class="tabs">
+            <button
+              class="tab active"
+              onclick="switchSettingsTab('secrets')"
+              role="tab"
+              aria-selected="true"
+              tabindex="0"
+            >
+              Secrets & API Keys
+            </button>
+            <button
+              class="tab"
+              onclick="switchSettingsTab('config')"
+              role="tab"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              Configuration
+            </button>
+            <button
+              class="tab"
+              onclick="switchSettingsTab('advanced')"
+              role="tab"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              Advanced
+            </button>
+          </div>
+
+          <!-- Secrets Tab -->
+          <div id="secrets-tab" class="tab-content active">
+            <div class="space-y-4">
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2" for="gatewayToken"
+                  >Gateway Token</label
+                >
+                <div class="flex gap-2">
+                  <input
+                    type="password"
+                    value="moltbot-secure-token-2026"
+                    readonly
+                    id="gatewayToken"
+                    aria-label="Gateway token"
+                  />
+                  <button
+                    class="btn btn-secondary px-3"
+                    onclick="togglePasswordVisibility('gatewayToken')"
+                    aria-label="Toggle gateway token visibility"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                      ></path>
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                      ></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2" for="anthropicKey"
+                  >Anthropic API Key</label
+                >
+                <div class="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="sk-ant-..."
+                    id="anthropicKey"
+                    aria-label="Anthropic API key"
+                  />
+                  <button
+                    class="btn btn-secondary px-3"
+                    onclick="saveSecret('anthropic')"
+                    aria-label="Save Anthropic API key"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2" for="telegramToken"
+                  >Telegram Bot Token</label
+                >
+                <div class="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="123456:ABCdef..."
+                    id="telegramToken"
+                    aria-label="Telegram bot token"
+                  />
+                  <button
+                    class="btn btn-secondary px-3"
+                    onclick="saveSecret('telegram')"
+                    aria-label="Save Telegram bot token"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Config Tab -->
+          <div id="config-tab" class="tab-content">
+            <div class="space-y-4">
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2" for="gatewayPort"
+                  >Gateway Port</label
+                >
+                <input
+                  type="text"
+                  value="18789"
+                  readonly
+                  id="gatewayPort"
+                  aria-label="Gateway port"
+                />
+              </div>
+
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2" for="routerPort"
+                  >Router Service Port</label
+                >
+                <input
+                  type="text"
+                  value="3001"
+                  readonly
+                  id="routerPort"
+                  aria-label="Router service port"
+                />
+              </div>
+
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2" for="maxInstances"
+                  >Max Instances</label
+                >
+                <input type="number" value="5" id="maxInstances" aria-label="Maximum instances" />
+              </div>
+
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2" for="costBudget"
+                  >Cost Budget (Monthly)</label
+                >
+                <input
+                  type="text"
+                  value="$1000"
+                  readonly
+                  id="costBudget"
+                  aria-label="Monthly cost budget"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- Advanced Tab -->
+          <div id="advanced-tab" class="tab-content">
+            <div class="space-y-4">
+              <div class="card glass">
+                <h4 class="font-bold text-text-primary mb-3">Danger Zone</h4>
+                <button
+                  class="btn btn-danger"
+                  onclick="showModal('reset-confirm')"
+                  aria-label="Reset gateway"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M12 9v2m0 4v2m0 0v2m0-2v-2m0-4v2m0-4v2"
+                    ></path>
+                  </svg>
+                  Reset Gateway
+                </button>
+                <p class="text-xs text-text-secondary mt-2">
+                  This will clear all sessions and restart the gateway.
+                </p>
+              </div>
+
+              <div class="card glass">
+                <h4 class="font-bold text-text-primary mb-3">Maintenance Mode</h4>
+                <button
+                  class="btn btn-secondary"
+                  onclick="toggleMaintenance()"
+                  aria-label="Toggle maintenance mode"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                    ></path>
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                    ></path>
+                  </svg>
+                  Enable Maintenance Mode
+                </button>
+                <p class="text-xs text-text-secondary mt-2">
+                  Gateway will return 503 Unavailable to all requests.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Control Tab -->
+        <div id="control-tab" class="tab-content animate-fade-in">
+          <h3 class="text-xl font-bold mb-6 glow-cyan">Gateway Control</h3>
+
+          <div class="grid-2 mb-8">
+            <!-- Start/Stop -->
+            <div class="card glass">
+              <h4 class="font-bold text-text-primary mb-4">Service Control</h4>
+              <div class="flex gap-2">
+                <button
+                  class="btn btn-success flex-1"
+                  onclick="executeActionWithLoading('start')"
+                  aria-label="Start gateway"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                    ></path>
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    ></path>
+                  </svg>
+                  Start
+                </button>
+                <button
+                  class="btn btn-danger flex-1"
+                  onclick="executeActionWithLoading('stop')"
+                  aria-label="Stop gateway"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    ></path>
+                  </svg>
+                  Stop
+                </button>
+              </div>
+            </div>
+
+            <!-- Restart -->
+            <div class="card glass">
+              <h4 class="font-bold text-text-primary mb-4">Restart Service</h4>
+              <button
+                class="btn btn-primary w-full"
+                onclick="executeActionWithLoading('restart')"
+                aria-label="Restart gateway"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  ></path>
+                </svg>
+                Restart Gateway
+              </button>
+            </div>
+
+            <!-- Scaling -->
+            <div class="card glass">
+              <h4 class="font-bold text-text-primary mb-4">Scaling</h4>
+              <select class="mb-3" aria-label="Select number of instances">
+                <option>Scale to 1 instance</option>
+                <option selected>Scale to 3 instances</option>
+                <option>Scale to 5 instances</option>
+              </select>
+              <button
+                class="btn btn-primary w-full"
+                onclick="executeActionWithLoading('scale')"
+                aria-label="Apply scaling configuration"
+              >
+                Apply Scaling
+              </button>
+            </div>
+
+            <!-- Deployment -->
+            <div class="card glass">
+              <h4 class="font-bold text-text-primary mb-4">Deployment</h4>
+              <button
+                class="btn btn-secondary w-full mb-2"
+                onclick="showModal('deploy-log')"
+                aria-label="View deployment log"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                  ></path>
+                </svg>
+                View Deploy Log
+              </button>
+              <p class="text-xs text-text-secondary">Last deploy: 2 hours ago</p>
+            </div>
+          </div>
+
+          <!-- Logs Section -->
+          <div class="card glass">
+            <h4 class="font-bold text-text-primary mb-4">System Logs</h4>
+            <div
+              class="font-mono text-xs"
+              style="
+                height: 300px;
+                overflow-y: auto;
+                background: rgba(10, 14, 39, 0.8);
+                padding: 1rem;
+                border-radius: 0.375rem;
+                border: 1px solid var(--border);
+              "
+              role="log"
+              aria-live="polite"
+              aria-label="Control system logs"
+            >
+              <div id="systemLogs" class="text-text-secondary space-y-1">
+                <div>
+                  <span style="color: var(--success)">[13:45:23]</span> Gateway service started
+                </div>
+                <div>
+                  <span style="color: var(--success)">[13:45:24]</span> All agents initialized
+                </div>
+                <div>
+                  <span style="color: var(--primary)">[13:45:25]</span> Health check passed: nominal
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- Health Check Modal -->
+    <div
+      id="health-check"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="health-check-title"
+    >
+      <div class="modal-content">
+        <div class="flex items-center justify-between mb-6">
+          <h3 id="health-check-title" class="text-xl font-bold text-text-primary">
+            System Health Check
+          </h3>
+          <button
+            onclick="closeModal('health-check')"
+            class="text-text-secondary hover:text-text-primary"
+            aria-label="Close health check modal"
+          >
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M6 18L18 6M6 6l12 12"
+              ></path>
+            </svg>
+          </button>
+        </div>
+
+        <div class="space-y-3">
+          <div class="flex items-center justify-between p-3 bg-bg-tertiary rounded">
+            <span class="text-text-secondary">API Connectivity</span>
+            <div class="flex items-center gap-2">
+              <span class="status-dot status-online"></span>
+              <span class="text-success font-bold">OK</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between p-3 bg-bg-tertiary rounded">
+            <span class="text-text-secondary">Database Connection</span>
+            <div class="flex items-center gap-2">
+              <span class="status-dot status-online"></span>
+              <span class="text-success font-bold">OK</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between p-3 bg-bg-tertiary rounded">
+            <span class="text-text-secondary">Memory Usage</span>
+            <span class="text-text-primary">256MB / 512MB</span>
+          </div>
+          <div class="flex items-center justify-between p-3 bg-bg-tertiary rounded">
+            <span class="text-text-secondary">CPU Usage</span>
+            <span class="text-text-primary">12%</span>
+          </div>
+        </div>
+
+        <button
+          class="btn btn-primary w-full mt-6"
+          onclick="closeModal('health-check')"
+          aria-label="Close modal"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+
+    <!-- Reset Confirmation Modal -->
+    <div
+      id="reset-confirm"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="reset-title"
+    >
+      <div class="modal-content">
+        <h3 id="reset-title" class="text-xl font-bold text-danger mb-4">Confirm Gateway Reset</h3>
+        <p class="text-text-secondary mb-6">
+          This action will clear all sessions and restart the gateway. This cannot be undone.
+        </p>
+
+        <div class="flex gap-3">
+          <button
+            class="btn btn-secondary flex-1"
+            onclick="closeModal('reset-confirm')"
+            aria-label="Cancel reset"
+          >
+            Cancel
+          </button>
+          <button
+            class="btn btn-danger flex-1"
+            onclick="executeActionWithLoading('reset-gateway')"
+            aria-label="Confirm reset"
+          >
+            Reset Gateway
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Deploy Log Modal -->
+    <div
+      id="deploy-log"
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="deploy-log-title"
+    >
+      <div class="modal-content">
+        <h3 id="deploy-log-title" class="text-xl font-bold text-text-primary mb-4">
+          Deployment Log
+        </h3>
+        <div
+          class="font-mono text-xs"
+          style="
+            height: 400px;
+            overflow-y: auto;
+            background: rgba(10, 14, 39, 0.8);
+            padding: 1rem;
+            border-radius: 0.375rem;
+            border: 1px solid var(--border);
+          "
+          role="log"
+          aria-label="Deployment logs"
+        >
+          <div class="text-text-secondary space-y-1">
+            <div><span style="color: var(--success)">[12:30:15]</span> Build started</div>
+            <div><span style="color: var(--success)">[12:30:45]</span> Dependencies installed</div>
+            <div><span style="color: var(--success)">[12:31:20]</span> TypeScript compiled</div>
+            <div><span style="color: var(--success)">[12:31:50]</span> Tests passed (213/213)</div>
+            <div><span style="color: var(--success)">[12:32:15]</span> Docker image built</div>
+            <div><span style="color: var(--success)">[12:32:45]</span> Deployed to Northflank</div>
+            <div><span style="color: var(--success)">[12:33:00]</span> Health check passed</div>
+            <div><span style="color: var(--success)">[12:33:15]</span> Deployment complete</div>
+          </div>
+        </div>
+        <button
+          class="btn btn-secondary w-full mt-4"
+          onclick="closeModal('deploy-log')"
+          aria-label="Close deployment log"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+
+    <script>
+      // Theme management
+      const themeToggle = document.getElementById("themeToggle");
+      const htmlElement = document.documentElement;
+
+      // Load saved theme preference
+      const savedTheme = localStorage.getItem("openclaw-theme") || "dark";
+      if (savedTheme === "light") {
+        document.body.classList.add("light-mode");
+      }
+
+      themeToggle.addEventListener("click", () => {
+        document.body.classList.toggle("light-mode");
+        const isDarkMode = !document.body.classList.contains("light-mode");
+        localStorage.setItem("openclaw-theme", isDarkMode ? "dark" : "light");
+      });
+
+      // Keyboard navigation for sidebar
+      document.querySelectorAll(".sidebar-item").forEach((item) => {
+        item.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            item.click();
+          }
+        });
+      });
+
+      // Tab switching with animations
+      function switchTab(tabName) {
+        const tabElement = document.getElementById(`${tabName}-tab`);
+        if (!tabElement) return;
+
+        document.querySelectorAll('[id$="-tab"]').forEach((tab) => {
+          if (
+            !tab.id.includes("secrets") &&
+            !tab.id.includes("config") &&
+            !tab.id.includes("advanced")
+          ) {
+            tab.classList.remove("active");
+          }
+        });
+
+        document.querySelectorAll(".sidebar-item").forEach((item) => {
+          item.classList.remove("active");
+        });
+
+        tabElement.classList.add("active");
+        event?.target?.closest(".sidebar-item")?.classList.add("active");
+      }
+
+      // Settings tab switching
+      function switchSettingsTab(tabName) {
+        document.querySelectorAll('[id$="-tab"]').forEach((tab) => {
+          if (
+            tab.id.includes("secrets") ||
+            tab.id.includes("config") ||
+            tab.id.includes("advanced")
+          ) {
+            tab.classList.remove("active");
+          }
+        });
+
+        document.querySelectorAll(".tabs .tab").forEach((tab) => {
+          tab.classList.remove("active");
+          tab.setAttribute("aria-selected", "false");
+          tab.setAttribute("tabindex", "-1");
+        });
+
+        document.getElementById(`${tabName}-tab`).classList.add("active");
+        event?.target?.classList.add("active");
+        event?.target?.setAttribute("aria-selected", "true");
+        event?.target?.setAttribute("tabindex", "0");
+      }
+
+      // Modal functions
+      function showModal(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) {
+          modal.classList.add("open");
+          modal.focus();
+        }
+      }
+
+      function closeModal(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) {
+          modal.classList.remove("open");
+        }
+      }
+
+      // Close modal with Escape key
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          document.querySelectorAll(".modal.open").forEach((modal) => {
+            modal.classList.remove("open");
+          });
+        }
+      });
+
+      // Close modal when clicking outside
+      document.querySelectorAll(".modal").forEach((modal) => {
+        modal.addEventListener("click", (e) => {
+          if (e.target === modal) {
+            modal.classList.remove("open");
+          }
+        });
+      });
+
+      // Toast notification system
+      function showToast(message, type = "success") {
+        const toast = document.createElement("div");
+        toast.className = `toast ${type} animate-slide-in-up`;
+
+        const icon =
+          type === "success"
+            ? '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>'
+            : type === "error"
+              ? '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>'
+              : '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>';
+
+        toast.innerHTML = `${icon}<span>${message}</span>`;
+        document.body.appendChild(toast);
+
+        setTimeout(() => {
+          toast.classList.add("toast-exit");
+          setTimeout(() => toast.remove(), 300);
+        }, 3000);
+      }
+
+      // Copy to clipboard with toast
+      function copyToClipboard(text, message) {
+        navigator.clipboard
+          .writeText(text)
+          .then(() => {
+            showToast(message || "Copied to clipboard!", "success");
+          })
+          .catch((err) => {
+            console.error("Copy failed:", err);
+            showToast("Copy failed", "error");
+          });
+      }
+
+      // Password visibility toggle
+      function togglePasswordVisibility(inputId) {
+        const input = document.getElementById(inputId);
+        if (input) {
+          input.type = input.type === "password" ? "text" : "password";
+        }
+      }
+
+      // Execute action with loading state
+      function executeActionWithLoading(action) {
+        const button = event?.target?.closest(".btn");
+        if (!button) {
+          executeAction(action);
+          return;
+        }
+
+        const originalContent = button.innerHTML;
+        button.classList.add("loading");
+        button.disabled = true;
+        button.innerHTML = '<div class="spinner-sm"></div>';
+
+        setTimeout(() => {
+          button.classList.remove("loading");
+          button.disabled = false;
+          button.innerHTML = originalContent;
+          executeAction(action);
+        }, 1500);
+      }
+
+      // Execute actions
+      function executeAction(action) {
+        console.log(`Executing action: ${action}`);
+        const messages = {
+          restart: "Gateway restart initiated... (5-10 seconds)",
+          start: "Gateway starting...",
+          stop: "Gateway stopping...",
+          scale: "Scaling configuration updated",
+          "reset-gateway": "Gateway reset initiated...",
+        };
+
+        const message = messages[action] || `Action "${action}" executed`;
+        showToast(message, "success");
+      }
+
+      // Authenticate gateway
+      function authenticateGateway() {
+        const token = document.getElementById("authToken").value;
+        if (!token) {
+          showToast("Please enter a gateway token", "error");
+          return;
+        }
+        console.log(`Authenticating with token: ${token.substring(0, 10)}...`);
+        showToast("Authenticated! Access granted.", "success");
+      }
+
+      // Save secrets
+      function saveSecret(type) {
+        showToast(`${type} secret saved securely`, "success");
+      }
+
+      // Clear logs
+      function clearLogs() {
+        document.getElementById("logsContainer").innerHTML =
+          '<div class="text-text-secondary">Logs cleared...</div>';
+        showToast("Logs cleared", "success");
+      }
+
+      // Toggle maintenance mode
+      function toggleMaintenance() {
+        showToast("Maintenance mode toggled", "success");
+      }
+
+      // Initialize icons
+      if (typeof lucide !== "undefined") {
+        lucide.createIcons();
+      }
+
+      // Simulate live log updates
+      setInterval(() => {
+        const logsContainer = document.getElementById("logsContainer");
+        if (logsContainer && Math.random() > 0.7) {
+          const newLog = document.createElement("div");
+          const timestamp = new Date().toLocaleTimeString();
+          const colors = ["var(--success)", "var(--primary)", "var(--warning)"];
+          const color = colors[Math.floor(Math.random() * colors.length)];
+          newLog.innerHTML = `<span style="color: ${color};">[${timestamp}]</span> System check completed`;
+          logsContainer.appendChild(newLog);
+          if (logsContainer.children.length > 20) {
+            logsContainer.removeChild(logsContainer.firstChild);
+          }
+        }
+      }, 3000);
+
+      // Initialize on page load
+      document.addEventListener("DOMContentLoaded", () => {
+        console.log("OpenClaw Dashboard initialized");
+      });
+    </script>
+  </body>
+</html>

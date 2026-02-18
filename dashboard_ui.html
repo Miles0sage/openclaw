@@ -1,0 +1,1541 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenClaw Gateway - Control Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+      :root {
+        --primary: #00f0ff;
+        --success: #00ff41;
+        --warning: #ffd700;
+        --danger: #ff006e;
+        --bg: #0a0e27;
+        --bg-secondary: #1a1f3a;
+        --bg-tertiary: #252d48;
+        --text-primary: #e0e7ff;
+        --text-secondary: #a5afc9;
+        --border: #2d3547;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+        width: 100%;
+        background: linear-gradient(135deg, var(--bg) 0%, #0f1535 100%);
+        color: var(--text-primary);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+
+      /* Scrollbar Styling */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: var(--bg-secondary);
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--primary);
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #00d4e8;
+      }
+
+      /* Glass Effect */
+      .glass {
+        background: rgba(26, 31, 58, 0.5);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(0, 240, 255, 0.1);
+      }
+
+      .glass-strong {
+        background: rgba(26, 31, 58, 0.7);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(0, 240, 255, 0.15);
+      }
+
+      /* Neon Glow Effects */
+      .glow-cyan {
+        text-shadow:
+          0 0 10px var(--primary),
+          0 0 20px rgba(0, 240, 255, 0.5);
+      }
+
+      .glow-lime {
+        text-shadow:
+          0 0 10px var(--success),
+          0 0 20px rgba(0, 255, 65, 0.5);
+      }
+
+      .border-glow {
+        border-color: var(--primary);
+        box-shadow:
+          0 0 20px rgba(0, 240, 255, 0.3),
+          inset 0 0 20px rgba(0, 240, 255, 0.05);
+      }
+
+      .border-glow-success {
+        border-color: var(--success);
+        box-shadow:
+          0 0 20px rgba(0, 255, 65, 0.3),
+          inset 0 0 20px rgba(0, 255, 65, 0.05);
+      }
+
+      /* Animations */
+      @keyframes pulse-glow {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.7;
+        }
+      }
+
+      @keyframes slide-in-left {
+        from {
+          transform: translateX(-20px);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+
+      @keyframes slide-in-right {
+        from {
+          transform: translateX(20px);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+
+      @keyframes fade-in {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      @keyframes float {
+        0%,
+        100% {
+          transform: translateY(0px);
+        }
+        50% {
+          transform: translateY(-5px);
+        }
+      }
+
+      .animate-slide-in-left {
+        animation: slide-in-left 0.5s ease-out;
+      }
+
+      .animate-slide-in-right {
+        animation: slide-in-right 0.5s ease-out;
+      }
+
+      .animate-fade-in {
+        animation: fade-in 0.5s ease-out;
+      }
+
+      .animate-float {
+        animation: float 3s ease-in-out infinite;
+      }
+
+      .pulse-glow {
+        animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+
+      /* Status Indicators */
+      .status-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        display: inline-block;
+        animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+
+      .status-online {
+        background: var(--success);
+        box-shadow: 0 0 10px var(--success);
+      }
+
+      .status-offline {
+        background: #6b7280;
+        box-shadow: 0 0 10px rgba(107, 114, 128, 0.5);
+      }
+
+      .status-warning {
+        background: var(--warning);
+        box-shadow: 0 0 10px var(--warning);
+      }
+
+      /* Button Styles */
+      .btn {
+        padding: 0.625rem 1.25rem;
+        border-radius: 0.375rem;
+        font-weight: 600;
+        font-size: 0.875rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        border: 1px solid transparent;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        white-space: nowrap;
+      }
+
+      .btn-primary {
+        background: var(--primary);
+        color: var(--bg);
+        border: 1px solid var(--primary);
+      }
+
+      .btn-primary:hover {
+        background: transparent;
+        color: var(--primary);
+        box-shadow: 0 0 20px rgba(0, 240, 255, 0.5);
+      }
+
+      .btn-secondary {
+        background: transparent;
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+
+      .btn-secondary:hover {
+        border-color: var(--primary);
+        background: rgba(0, 240, 255, 0.05);
+      }
+
+      .btn-danger {
+        background: transparent;
+        color: var(--danger);
+        border: 1px solid var(--danger);
+      }
+
+      .btn-danger:hover {
+        background: var(--danger);
+        color: white;
+        box-shadow: 0 0 20px rgba(255, 0, 110, 0.5);
+      }
+
+      .btn-success {
+        background: var(--success);
+        color: var(--bg);
+        border: 1px solid var(--success);
+      }
+
+      .btn-success:hover {
+        background: transparent;
+        color: var(--success);
+        box-shadow: 0 0 20px rgba(0, 255, 65, 0.5);
+      }
+
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .btn:active {
+        transform: scale(0.98);
+      }
+
+      /* Card Styles */
+      .card {
+        border-radius: 0.5rem;
+        padding: 1.5rem;
+        transition: all 0.3s ease;
+      }
+
+      .card:hover {
+        transform: translateY(-2px);
+      }
+
+      /* Input Styles */
+      input[type="password"],
+      input[type="text"],
+      select {
+        width: 100%;
+        padding: 0.75rem 1rem;
+        border-radius: 0.375rem;
+        background: rgba(42, 51, 85, 0.5);
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+        font-family: inherit;
+        transition: all 0.3s ease;
+      }
+
+      input[type="password"]:focus,
+      input[type="text"]:focus,
+      select:focus {
+        outline: none;
+        border-color: var(--primary);
+        background: rgba(42, 51, 85, 0.8);
+        box-shadow: 0 0 20px rgba(0, 240, 255, 0.2);
+      }
+
+      /* Sidebar */
+      .sidebar {
+        width: 280px;
+        background: var(--bg-secondary);
+        border-right: 1px solid var(--border);
+        overflow-y: auto;
+        position: fixed;
+        height: 100vh;
+        left: 0;
+        top: 0;
+        z-index: 40;
+      }
+
+      .sidebar-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 1rem 1.5rem;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        border-left: 3px solid transparent;
+      }
+
+      .sidebar-item:hover {
+        color: var(--text-primary);
+        background: rgba(0, 240, 255, 0.05);
+        border-left-color: var(--primary);
+      }
+
+      .sidebar-item.active {
+        color: var(--primary);
+        background: rgba(0, 240, 255, 0.1);
+        border-left-color: var(--primary);
+      }
+
+      /* Main Content */
+      .main-content {
+        margin-left: 280px;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .header {
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border);
+        padding: 1.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+      }
+
+      .content {
+        flex: 1;
+        padding: 2rem;
+        overflow-y: auto;
+      }
+
+      /* Grid */
+      .grid-2 {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1.5rem;
+      }
+
+      .grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1.5rem;
+      }
+
+      .grid-4 {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1.5rem;
+      }
+
+      /* Responsive */
+      @media (max-width: 1024px) {
+        .grid-3 {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      @media (max-width: 768px) {
+        .sidebar {
+          width: 100%;
+          height: auto;
+          border-right: none;
+          border-bottom: 1px solid var(--border);
+          display: flex;
+          overflow-x: auto;
+        }
+
+        .main-content {
+          margin-left: 0;
+        }
+
+        .sidebar-item {
+          flex-shrink: 0;
+        }
+
+        .grid-2,
+        .grid-3,
+        .grid-4 {
+          grid-template-columns: 1fr;
+        }
+
+        .content {
+          padding: 1rem;
+        }
+
+        .header {
+          flex-wrap: wrap;
+        }
+      }
+
+      /* Copy Button Animation */
+      .copy-feedback {
+        position: fixed;
+        bottom: 2rem;
+        right: 2rem;
+        padding: 1rem 1.5rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--success);
+        border-radius: 0.375rem;
+        color: var(--success);
+        font-size: 0.875rem;
+        animation: slide-in-right 0.3s ease-out;
+      }
+
+      /* Modal */
+      .modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(5px);
+        z-index: 50;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .modal.open {
+        display: flex;
+      }
+
+      .modal-content {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 2rem;
+        max-width: 600px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        animation: fade-in 0.3s ease-out;
+      }
+
+      /* Tabs */
+      .tabs {
+        display: flex;
+        gap: 1rem;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 1.5rem;
+      }
+
+      .tab {
+        padding: 0.75rem 1.5rem;
+        cursor: pointer;
+        color: var(--text-secondary);
+        border-bottom: 2px solid transparent;
+        transition: all 0.3s ease;
+      }
+
+      .tab:hover {
+        color: var(--text-primary);
+      }
+
+      .tab.active {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+      }
+
+      .tab-content {
+        display: none;
+      }
+
+      .tab-content.active {
+        display: block;
+        animation: fade-in 0.3s ease-out;
+      }
+
+      /* Badge */
+      .badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 0.25rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+
+      .badge-success {
+        background: rgba(0, 255, 65, 0.2);
+        color: var(--success);
+        border: 1px solid var(--success);
+      }
+
+      .badge-danger {
+        background: rgba(255, 0, 110, 0.2);
+        color: var(--danger);
+        border: 1px solid var(--danger);
+      }
+
+      .badge-warning {
+        background: rgba(255, 215, 0, 0.2);
+        color: var(--warning);
+        border: 1px solid var(--warning);
+      }
+
+      .badge-info {
+        background: rgba(0, 240, 255, 0.2);
+        color: var(--primary);
+        border: 1px solid var(--primary);
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar glass-strong">
+      <div class="p-6 border-b border-border">
+        <div class="flex items-center gap-3 mb-2">
+          <div
+            class="w-10 h-10 rounded bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center"
+          >
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 10V3L4 14h7v7l9-11h-7z"
+              ></path>
+            </svg>
+          </div>
+          <h1 class="text-xl font-bold glow-cyan">OpenClaw</h1>
+        </div>
+        <p class="text-xs text-text-secondary">Gateway Control</p>
+      </div>
+
+      <nav class="pt-6">
+        <div class="sidebar-item active" onclick="switchTab('dashboard')">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M3 12l2-3m0 0l7-4 7 4M5 9v10a1 1 0 001 1h12a1 1 0 001-1V9m-9 11l-4-4m0 0l-2-2m2 2l2 2m2-2l2-2m-2 2l4 4"
+            ></path>
+          </svg>
+          <span>Dashboard</span>
+        </div>
+
+        <div class="sidebar-item" onclick="switchTab('logs')">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            ></path>
+          </svg>
+          <span>Logs</span>
+        </div>
+
+        <div class="sidebar-item" onclick="switchTab('webhooks')">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.658 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+            ></path>
+          </svg>
+          <span>Webhooks</span>
+        </div>
+
+        <div class="sidebar-item" onclick="switchTab('settings')">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+            ></path>
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+            ></path>
+          </svg>
+          <span>Settings</span>
+        </div>
+
+        <div class="sidebar-item" onclick="switchTab('control')">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+            ></path>
+          </svg>
+          <span>Control</span>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- Header -->
+      <header class="header">
+        <div class="flex-1">
+          <h2 class="text-2xl font-bold text-text-primary mb-1">Control Panel</h2>
+          <p class="text-sm text-text-secondary">Manage your OpenClaw Gateway</p>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <input type="password" id="authToken" placeholder="Paste gateway token..." class="w-64" />
+          <button class="btn btn-primary" onclick="authenticateGateway()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+              ></path>
+            </svg>
+            Connect
+          </button>
+        </div>
+      </header>
+
+      <!-- Content Area -->
+      <div class="content">
+        <!-- Dashboard Tab -->
+        <div id="dashboard-tab" class="tab-content active">
+          <div class="mb-8">
+            <h3 class="text-xl font-bold mb-4 glow-cyan">System Status</h3>
+            <div class="grid-4">
+              <!-- Gateway Status -->
+              <div class="card glass">
+                <div class="flex items-start justify-between mb-3">
+                  <div>
+                    <p class="text-sm text-text-secondary mb-1">Gateway</p>
+                    <h4 class="text-lg font-bold text-text-primary">152.53.55.207</h4>
+                  </div>
+                  <span class="status-dot status-online"></span>
+                </div>
+                <p class="text-xs text-text-secondary">Port 18789 • v2.0.0</p>
+                <div class="mt-3 pt-3 border-t border-border">
+                  <span class="badge badge-success">ONLINE</span>
+                </div>
+              </div>
+
+              <!-- Tunnel Status -->
+              <div class="card glass">
+                <div class="flex items-start justify-between mb-3">
+                  <div>
+                    <p class="text-sm text-text-secondary mb-1">Tunnel</p>
+                    <h4 class="text-lg font-bold text-text-primary">Cloudflare</h4>
+                  </div>
+                  <span class="status-dot status-online"></span>
+                </div>
+                <p class="text-xs text-text-secondary">4 Active Connections</p>
+                <div class="mt-3 pt-3 border-t border-border">
+                  <span class="badge badge-success">CONNECTED</span>
+                </div>
+              </div>
+
+              <!-- Telegram Bot Status -->
+              <div class="card glass">
+                <div class="flex items-start justify-between mb-3">
+                  <div>
+                    <p class="text-sm text-text-secondary mb-1">Telegram</p>
+                    <h4 class="text-lg font-bold text-text-primary">Bot</h4>
+                  </div>
+                  <span class="status-dot status-online"></span>
+                </div>
+                <p class="text-xs text-text-secondary">Receiving Updates</p>
+                <div class="mt-3 pt-3 border-t border-border">
+                  <span class="badge badge-success">ACTIVE</span>
+                </div>
+              </div>
+
+              <!-- Slack Bot Status -->
+              <div class="card glass">
+                <div class="flex items-start justify-between mb-3">
+                  <div>
+                    <p class="text-sm text-text-secondary mb-1">Slack</p>
+                    <h4 class="text-lg font-bold text-text-primary">Bot</h4>
+                  </div>
+                  <span class="status-dot status-offline"></span>
+                </div>
+                <p class="text-xs text-text-secondary">Not Connected</p>
+                <div class="mt-3 pt-3 border-t border-border">
+                  <span class="badge badge-warning">OFFLINE</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Agents Section -->
+          <div class="mb-8">
+            <h3 class="text-xl font-bold mb-4 glow-cyan">Active Agents</h3>
+            <div class="grid-2">
+              <!-- Agent Card 1 -->
+              <div
+                class="card glass border-glow-success"
+                style="border: 1px solid var(--success); box-shadow: 0 0 20px rgba(0, 255, 65, 0.2)"
+              >
+                <div class="flex items-center justify-between mb-4">
+                  <h4 class="text-lg font-bold text-text-primary">PM Agent</h4>
+                  <span class="badge badge-success">ACTIVE</span>
+                </div>
+                <div class="space-y-2 text-sm mb-4">
+                  <div class="flex justify-between">
+                    <span class="text-text-secondary">Model:</span>
+                    <span class="font-mono text-primary">claude-opus-4.6</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-text-secondary">Requests:</span>
+                    <span class="text-text-primary">1,247</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-text-secondary">Latency:</span>
+                    <span class="text-success">42ms</span>
+                  </div>
+                </div>
+                <div class="w-full h-1 rounded bg-bg-tertiary overflow-hidden">
+                  <div
+                    class="h-full bg-gradient-to-r from-success to-primary"
+                    style="width: 85%"
+                  ></div>
+                </div>
+              </div>
+
+              <!-- Agent Card 2 -->
+              <div
+                class="card glass border-glow"
+                style="
+                  border: 1px solid var(--primary);
+                  box-shadow: 0 0 20px rgba(0, 240, 255, 0.2);
+                "
+              >
+                <div class="flex items-center justify-between mb-4">
+                  <h4 class="text-lg font-bold text-text-primary">CodeGen Agent</h4>
+                  <span class="badge badge-info">IDLE</span>
+                </div>
+                <div class="space-y-2 text-sm mb-4">
+                  <div class="flex justify-between">
+                    <span class="text-text-secondary">Model:</span>
+                    <span class="font-mono text-primary">ollama-qwen-32b</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-text-secondary">Requests:</span>
+                    <span class="text-text-primary">342</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-text-secondary">Latency:</span>
+                    <span class="text-success">156ms</span>
+                  </div>
+                </div>
+                <div class="w-full h-1 rounded bg-bg-tertiary overflow-hidden">
+                  <div
+                    class="h-full bg-gradient-to-r from-primary to-success"
+                    style="width: 45%"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Actions -->
+          <div>
+            <h3 class="text-xl font-bold mb-4 glow-cyan">Quick Actions</h3>
+            <div class="flex flex-wrap gap-3">
+              <button class="btn btn-primary" onclick="executeAction('restart')">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  ></path>
+                </svg>
+                Restart Gateway
+              </button>
+
+              <button class="btn btn-secondary" onclick="switchTab('logs')">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  ></path>
+                </svg>
+                View Live Logs
+              </button>
+
+              <button class="btn btn-secondary" onclick="showModal('health-check')">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  ></path>
+                </svg>
+                Health Check
+              </button>
+
+              <button class="btn btn-success" onclick="executeAction('scale')">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M13 10V3L4 14h7v7l9-11h-7z"
+                  ></path>
+                </svg>
+                Scale to 3 Instances
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Logs Tab -->
+        <div id="logs-tab" class="tab-content">
+          <div class="mb-4">
+            <h3 class="text-xl font-bold mb-4 glow-cyan">Live Logs</h3>
+            <div class="flex gap-2 mb-4">
+              <input type="text" placeholder="Filter logs..." class="flex-1" id="logFilter" />
+              <button class="btn btn-secondary" onclick="clearLogs()">Clear Logs</button>
+            </div>
+          </div>
+
+          <div
+            class="glass card font-mono text-xs"
+            style="height: 500px; overflow-y: auto; background: rgba(10, 14, 39, 0.8)"
+          >
+            <div id="logsContainer" class="text-text-secondary space-y-1">
+              <div>
+                <span style="color: var(--success)">[13:45:23]</span> Gateway started on
+                152.53.55.207:18789
+              </div>
+              <div>
+                <span style="color: var(--primary)">[13:45:24]</span> Cloudflare tunnel connected: 4
+                QUIC connections active
+              </div>
+              <div>
+                <span style="color: var(--success)">[13:45:25]</span> Telegram bot initialized
+              </div>
+              <div>
+                <span style="color: var(--warning)">[13:45:26]</span> Slack bot connection pending -
+                check credentials
+              </div>
+              <div>
+                <span style="color: var(--success)">[13:45:27]</span> PM Agent (claude-opus-4.6)
+                loaded and ready
+              </div>
+              <div>
+                <span style="color: var(--success)">[13:45:28]</span> CodeGen Agent
+                (ollama-qwen-32b) loaded and ready
+              </div>
+              <div>
+                <span style="color: var(--primary)">[13:45:29]</span> Router service initialized on
+                :3001
+              </div>
+              <div>
+                <span style="color: var(--success)">[13:45:30]</span> Health check: All systems
+                nominal
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Webhooks Tab -->
+        <div id="webhooks-tab" class="tab-content">
+          <div class="mb-4">
+            <h3 class="text-xl font-bold mb-4 glow-cyan">Webhook Endpoints</h3>
+            <p class="text-text-secondary text-sm mb-6">
+              Copy webhook URLs to configure external integrations.
+            </p>
+          </div>
+
+          <div class="space-y-4">
+            <!-- Telegram Webhook -->
+            <div class="card glass">
+              <div class="flex items-center justify-between mb-3">
+                <h4 class="font-bold text-text-primary">Telegram Webhook</h4>
+                <span class="badge badge-success">ACTIVE</span>
+              </div>
+              <div class="flex items-center gap-2 mb-2">
+                <input
+                  type="text"
+                  value="https://152.53.55.207:18789/telegram/webhook"
+                  readonly
+                  class="flex-1"
+                />
+                <button
+                  class="btn btn-secondary px-3"
+                  onclick="
+                    copyToClipboard(
+                      'https://152.53.55.207:18789/telegram/webhook',
+                      'Telegram webhook copied!',
+                    )
+                  "
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    ></path>
+                  </svg>
+                </button>
+              </div>
+              <p class="text-xs text-text-secondary">
+                Last called: 2 minutes ago • 342 requests today
+              </p>
+            </div>
+
+            <!-- Slack Webhook -->
+            <div class="card glass">
+              <div class="flex items-center justify-between mb-3">
+                <h4 class="font-bold text-text-primary">Slack Webhook</h4>
+                <span class="badge badge-warning">PENDING</span>
+              </div>
+              <div class="flex items-center gap-2 mb-2">
+                <input
+                  type="text"
+                  value="https://152.53.55.207:18789/slack/webhook"
+                  readonly
+                  class="flex-1"
+                />
+                <button
+                  class="btn btn-secondary px-3"
+                  onclick="
+                    copyToClipboard(
+                      'https://152.53.55.207:18789/slack/webhook',
+                      'Slack webhook copied!',
+                    )
+                  "
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    ></path>
+                  </svg>
+                </button>
+              </div>
+              <p class="text-xs text-text-secondary">Configure bot permissions to enable</p>
+            </div>
+
+            <!-- Discord Webhook -->
+            <div class="card glass">
+              <div class="flex items-center justify-between mb-3">
+                <h4 class="font-bold text-text-primary">Discord Webhook</h4>
+                <span class="badge badge-warning">PENDING</span>
+              </div>
+              <div class="flex items-center gap-2 mb-2">
+                <input
+                  type="text"
+                  value="https://152.53.55.207:18789/discord/webhook"
+                  readonly
+                  class="flex-1"
+                />
+                <button
+                  class="btn btn-secondary px-3"
+                  onclick="
+                    copyToClipboard(
+                      'https://152.53.55.207:18789/discord/webhook',
+                      'Discord webhook copied!',
+                    )
+                  "
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    ></path>
+                  </svg>
+                </button>
+              </div>
+              <p class="text-xs text-text-secondary">Bot token required to activate</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settings-tab" class="tab-content">
+          <h3 class="text-xl font-bold mb-6 glow-cyan">Gateway Settings</h3>
+
+          <!-- Tabs within Settings -->
+          <div class="tabs">
+            <div class="tab active" onclick="switchSettingsTab('secrets')">Secrets & API Keys</div>
+            <div class="tab" onclick="switchSettingsTab('config')">Configuration</div>
+            <div class="tab" onclick="switchSettingsTab('advanced')">Advanced</div>
+          </div>
+
+          <!-- Secrets Tab -->
+          <div id="secrets-tab" class="tab-content active">
+            <div class="space-y-4">
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2">Gateway Token</label>
+                <div class="flex gap-2">
+                  <input
+                    type="password"
+                    value="moltbot-secure-token-2026"
+                    readonly
+                    id="gatewayToken"
+                  />
+                  <button
+                    class="btn btn-secondary px-3"
+                    onclick="togglePasswordVisibility('gatewayToken')"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                      ></path>
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                      ></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2"
+                  >Anthropic API Key</label
+                >
+                <div class="flex gap-2">
+                  <input type="password" placeholder="sk-ant-..." id="anthropicKey" />
+                  <button class="btn btn-secondary px-3" onclick="saveSecret('anthropic')">
+                    Save
+                  </button>
+                </div>
+              </div>
+
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2"
+                  >Telegram Bot Token</label
+                >
+                <div class="flex gap-2">
+                  <input type="password" placeholder="123456:ABCdef..." id="telegramToken" />
+                  <button class="btn btn-secondary px-3" onclick="saveSecret('telegram')">
+                    Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Config Tab -->
+          <div id="config-tab" class="tab-content">
+            <div class="space-y-4">
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2">Gateway Port</label>
+                <input type="text" value="18789" readonly />
+              </div>
+
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2"
+                  >Router Service Port</label
+                >
+                <input type="text" value="3001" readonly />
+              </div>
+
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2">Max Instances</label>
+                <input type="number" value="5" />
+              </div>
+
+              <div class="card glass">
+                <label class="block text-sm font-bold text-text-primary mb-2"
+                  >Cost Budget (Monthly)</label
+                >
+                <input type="text" value="$1000" readonly />
+              </div>
+            </div>
+          </div>
+
+          <!-- Advanced Tab -->
+          <div id="advanced-tab" class="tab-content">
+            <div class="space-y-4">
+              <div class="card glass">
+                <h4 class="font-bold text-text-primary mb-3">Danger Zone</h4>
+                <button class="btn btn-danger" onclick="showModal('reset-confirm')">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M12 9v2m0 4v2m0 0v2m0-2v-2m0-4v2m0-4v2"
+                    ></path>
+                  </svg>
+                  Reset Gateway
+                </button>
+                <p class="text-xs text-text-secondary mt-2">
+                  This will clear all sessions and restart the gateway.
+                </p>
+              </div>
+
+              <div class="card glass">
+                <h4 class="font-bold text-text-primary mb-3">Maintenance Mode</h4>
+                <button class="btn btn-secondary" onclick="toggleMaintenance()">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                    ></path>
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                    ></path>
+                  </svg>
+                  Enable Maintenance Mode
+                </button>
+                <p class="text-xs text-text-secondary mt-2">
+                  Gateway will return 503 Unavailable to all requests.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Control Tab -->
+        <div id="control-tab" class="tab-content">
+          <h3 class="text-xl font-bold mb-6 glow-cyan">Gateway Control</h3>
+
+          <div class="grid-2 mb-8">
+            <!-- Start/Stop -->
+            <div class="card glass">
+              <h4 class="font-bold text-text-primary mb-4">Service Control</h4>
+              <div class="flex gap-2">
+                <button class="btn btn-success flex-1" onclick="executeAction('start')">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                    ></path>
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    ></path>
+                  </svg>
+                  Start
+                </button>
+                <button class="btn btn-danger flex-1" onclick="executeAction('stop')">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    ></path>
+                  </svg>
+                  Stop
+                </button>
+              </div>
+            </div>
+
+            <!-- Restart -->
+            <div class="card glass">
+              <h4 class="font-bold text-text-primary mb-4">Restart Service</h4>
+              <button class="btn btn-primary w-full" onclick="executeAction('restart')">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  ></path>
+                </svg>
+                Restart Gateway
+              </button>
+            </div>
+
+            <!-- Scaling -->
+            <div class="card glass">
+              <h4 class="font-bold text-text-primary mb-4">Scaling</h4>
+              <select class="mb-3">
+                <option>Scale to 1 instance</option>
+                <option selected>Scale to 3 instances</option>
+                <option>Scale to 5 instances</option>
+              </select>
+              <button class="btn btn-primary w-full" onclick="executeAction('scale')">
+                Apply Scaling
+              </button>
+            </div>
+
+            <!-- Deployment -->
+            <div class="card glass">
+              <h4 class="font-bold text-text-primary mb-4">Deployment</h4>
+              <button class="btn btn-secondary w-full mb-2" onclick="showModal('deploy-log')">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                  ></path>
+                </svg>
+                View Deploy Log
+              </button>
+              <p class="text-xs text-text-secondary">Last deploy: 2 hours ago</p>
+            </div>
+          </div>
+
+          <!-- Logs Section -->
+          <div class="card glass">
+            <h4 class="font-bold text-text-primary mb-4">System Logs</h4>
+            <div
+              class="font-mono text-xs"
+              style="
+                height: 300px;
+                overflow-y: auto;
+                background: rgba(10, 14, 39, 0.8);
+                padding: 1rem;
+                border-radius: 0.375rem;
+                border: 1px solid var(--border);
+              "
+            >
+              <div id="systemLogs" class="text-text-secondary space-y-1">
+                <div>
+                  <span style="color: var(--success)">[13:45:23]</span> Gateway service started
+                </div>
+                <div>
+                  <span style="color: var(--success)">[13:45:24]</span> All agents initialized
+                </div>
+                <div>
+                  <span style="color: var(--primary)">[13:45:25]</span> Health check passed: nominal
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- Health Check Modal -->
+    <div id="health-check" class="modal">
+      <div class="modal-content">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="text-xl font-bold text-text-primary">System Health Check</h3>
+          <button
+            onclick="closeModal('health-check')"
+            class="text-text-secondary hover:text-text-primary"
+          >
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M6 18L18 6M6 6l12 12"
+              ></path>
+            </svg>
+          </button>
+        </div>
+
+        <div class="space-y-3">
+          <div class="flex items-center justify-between p-3 bg-bg-tertiary rounded">
+            <span class="text-text-secondary">API Connectivity</span>
+            <div class="flex items-center gap-2">
+              <span class="status-dot status-online"></span>
+              <span class="text-success font-bold">OK</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between p-3 bg-bg-tertiary rounded">
+            <span class="text-text-secondary">Database Connection</span>
+            <div class="flex items-center gap-2">
+              <span class="status-dot status-online"></span>
+              <span class="text-success font-bold">OK</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between p-3 bg-bg-tertiary rounded">
+            <span class="text-text-secondary">Memory Usage</span>
+            <span class="text-text-primary">256MB / 512MB</span>
+          </div>
+          <div class="flex items-center justify-between p-3 bg-bg-tertiary rounded">
+            <span class="text-text-secondary">CPU Usage</span>
+            <span class="text-text-primary">12%</span>
+          </div>
+        </div>
+
+        <button class="btn btn-primary w-full mt-6" onclick="closeModal('health-check')">
+          Close
+        </button>
+      </div>
+    </div>
+
+    <!-- Reset Confirmation Modal -->
+    <div id="reset-confirm" class="modal">
+      <div class="modal-content">
+        <h3 class="text-xl font-bold text-danger mb-4">Confirm Gateway Reset</h3>
+        <p class="text-text-secondary mb-6">
+          This action will clear all sessions and restart the gateway. This cannot be undone.
+        </p>
+
+        <div class="flex gap-3">
+          <button class="btn btn-secondary flex-1" onclick="closeModal('reset-confirm')">
+            Cancel
+          </button>
+          <button class="btn btn-danger flex-1" onclick="executeAction('reset-gateway')">
+            Reset Gateway
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Deploy Log Modal -->
+    <div id="deploy-log" class="modal">
+      <div class="modal-content">
+        <h3 class="text-xl font-bold text-text-primary mb-4">Deployment Log</h3>
+        <div
+          class="font-mono text-xs"
+          style="
+            height: 400px;
+            overflow-y: auto;
+            background: rgba(10, 14, 39, 0.8);
+            padding: 1rem;
+            border-radius: 0.375rem;
+            border: 1px solid var(--border);
+          "
+        >
+          <div class="text-text-secondary space-y-1">
+            <div><span style="color: var(--success)">[12:30:15]</span> Build started</div>
+            <div><span style="color: var(--success)">[12:30:45]</span> Dependencies installed</div>
+            <div><span style="color: var(--success)">[12:31:20]</span> TypeScript compiled</div>
+            <div><span style="color: var(--success)">[12:31:50]</span> Tests passed (213/213)</div>
+            <div><span style="color: var(--success)">[12:32:15]</span> Docker image built</div>
+            <div><span style="color: var(--success)">[12:32:45]</span> Deployed to Northflank</div>
+            <div><span style="color: var(--success)">[12:33:00]</span> Health check passed</div>
+            <div><span style="color: var(--success)">[12:33:15]</span> Deployment complete</div>
+          </div>
+        </div>
+        <button class="btn btn-secondary w-full mt-4" onclick="closeModal('deploy-log')">
+          Close
+        </button>
+      </div>
+    </div>
+
+    <script>
+      // Tab switching
+      function switchTab(tabName) {
+        // Hide all tabs
+        document.querySelectorAll('[id$="-tab"]').forEach((tab) => {
+          tab.classList.remove("active");
+        });
+
+        // Remove active state from sidebar items
+        document.querySelectorAll(".sidebar-item").forEach((item) => {
+          item.classList.remove("active");
+        });
+
+        // Show selected tab
+        document.getElementById(`${tabName}-tab`).classList.add("active");
+
+        // Mark sidebar item as active
+        event.target.closest(".sidebar-item")?.classList.add("active");
+      }
+
+      // Settings tab switching
+      function switchSettingsTab(tabName) {
+        document.querySelectorAll('[id$="-tab"]').forEach((tab) => {
+          if (
+            tab.id.includes("secrets") ||
+            tab.id.includes("config") ||
+            tab.id.includes("advanced")
+          ) {
+            tab.classList.remove("active");
+          }
+        });
+
+        document.querySelectorAll(".tabs .tab").forEach((tab) => {
+          tab.classList.remove("active");
+        });
+
+        document.getElementById(`${tabName}-tab`).classList.add("active");
+        event.target.classList.add("active");
+      }
+
+      // Modal functions
+      function showModal(modalId) {
+        document.getElementById(modalId).classList.add("open");
+      }
+
+      function closeModal(modalId) {
+        document.getElementById(modalId).classList.remove("open");
+      }
+
+      // Close modal when clicking outside
+      document.querySelectorAll(".modal").forEach((modal) => {
+        modal.addEventListener("click", (e) => {
+          if (e.target === modal) {
+            modal.classList.remove("open");
+          }
+        });
+      });
+
+      // Copy to clipboard
+      function copyToClipboard(text, message) {
+        navigator.clipboard.writeText(text).then(() => {
+          const feedback = document.createElement("div");
+          feedback.className = "copy-feedback";
+          feedback.textContent = message || "Copied to clipboard!";
+          document.body.appendChild(feedback);
+          setTimeout(() => feedback.remove(), 3000);
+        });
+      }
+
+      // Password visibility toggle
+      function togglePasswordVisibility(inputId) {
+        const input = document.getElementById(inputId);
+        const type = input.type === "password" ? "text" : "password";
+        input.type = type;
+      }
+
+      // Execute actions
+      function executeAction(action) {
+        console.log(`Executing action: ${action}`);
+        const messages = {
+          restart: "Gateway restart initiated... (5-10 seconds)",
+          start: "Gateway starting...",
+          stop: "Gateway stopping...",
+          scale: "Scaling configuration updated",
+          "reset-gateway": "Gateway reset initiated...",
+        };
+
+        const message = messages[action] || `Action "${action}" executed`;
+        const feedback = document.createElement("div");
+        feedback.className = "copy-feedback";
+        feedback.textContent = message;
+        document.body.appendChild(feedback);
+        setTimeout(() => feedback.remove(), 3000);
+      }
+
+      // Authenticate gateway
+      function authenticateGateway() {
+        const token = document.getElementById("authToken").value;
+        if (!token) {
+          alert("Please enter a gateway token");
+          return;
+        }
+        console.log(`Authenticating with token: ${token.substring(0, 10)}...`);
+        const feedback = document.createElement("div");
+        feedback.className = "copy-feedback";
+        feedback.textContent = "Authenticated! Access granted.";
+        feedback.style.borderColor = "var(--success)";
+        feedback.style.color = "var(--success)";
+        document.body.appendChild(feedback);
+        setTimeout(() => feedback.remove(), 3000);
+      }
+
+      // Save secrets
+      function saveSecret(type) {
+        const feedback = document.createElement("div");
+        feedback.className = "copy-feedback";
+        feedback.textContent = `${type} secret saved securely`;
+        feedback.style.borderColor = "var(--success)";
+        feedback.style.color = "var(--success)";
+        document.body.appendChild(feedback);
+        setTimeout(() => feedback.remove(), 3000);
+      }
+
+      // Clear logs
+      function clearLogs() {
+        document.getElementById("logsContainer").innerHTML =
+          '<div class="text-text-secondary">Logs cleared...</div>';
+        const feedback = document.createElement("div");
+        feedback.className = "copy-feedback";
+        feedback.textContent = "Logs cleared";
+        document.body.appendChild(feedback);
+        setTimeout(() => feedback.remove(), 3000);
+      }
+
+      // Toggle maintenance mode
+      function toggleMaintenance() {
+        const feedback = document.createElement("div");
+        feedback.className = "copy-feedback";
+        feedback.textContent = "Maintenance mode toggled";
+        document.body.appendChild(feedback);
+        setTimeout(() => feedback.remove(), 3000);
+      }
+
+      // Initialize Lucide icons
+      if (typeof lucide !== "undefined") {
+        lucide.createIcons();
+      }
+
+      // Simulate live log updates
+      setInterval(() => {
+        const logsContainer = document.getElementById("logsContainer");
+        if (logsContainer && Math.random() > 0.7) {
+          const newLog = document.createElement("div");
+          const timestamp = new Date().toLocaleTimeString();
+          const colors = ["var(--success)", "var(--primary)", "var(--warning)"];
+          const color = colors[Math.floor(Math.random() * colors.length)];
+          newLog.innerHTML = `<span style="color: ${color};">[${timestamp}]</span> System check completed`;
+          logsContainer.appendChild(newLog);
+          if (logsContainer.children.length > 20) {
+            logsContainer.removeChild(logsContainer.firstChild);
+          }
+        }
+      }, 3000);
+    </script>
+  </body>
+</html>
