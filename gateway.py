@@ -218,12 +218,17 @@ AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    # WEBHOOK EXEMPTIONS: Allow webhooks without auth
+    # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
     exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard.html", "/telegram/webhook", "/slack/events", "/api/audit"]
     path = request.url.path
 
+    # Dashboard APIs exempt from auth (for monitoring UI)
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health"]
+
     # Debug logging (for troubleshooting only)
-    is_exempt = path in exempt_paths or path.startswith(("/telegram/", "/slack/", "/api/audit"))
+    is_exempt = (path in exempt_paths or
+                 path.startswith(("/telegram/", "/slack/", "/api/audit")) or
+                 any(path.startswith(prefix) for prefix in dashboard_exempt_prefixes))
     logger.info(f"AUTH_CHECK: path={path}, is_exempt={is_exempt}")
 
     # Exempt webhook paths
