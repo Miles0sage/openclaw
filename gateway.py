@@ -168,8 +168,19 @@ AUTH_TOKEN = "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    # TEMPORARILY DISABLED FOR DEBUGGING
-    # All paths are allowed - webhook exemptions below will be enabled after verification
+    # WEBHOOK EXEMPTIONS: Allow webhooks without auth
+    exempt_paths = ["/", "/health", "/telegram/webhook", "/slack/events"]
+    path = request.url.path
+
+    # Exempt webhook paths
+    if path in exempt_paths or path.startswith(("/telegram/", "/slack/")):
+        return await call_next(request)
+
+    # Check auth token
+    token = request.headers.get("X-Auth-Token") or request.query_params.get("token")
+    if token != AUTH_TOKEN:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
     return await call_next(request)
 
 # Load config
