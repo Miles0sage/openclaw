@@ -314,7 +314,7 @@ async def startup_heartbeat_monitor():
         config = HeartbeatMonitorConfig(
             check_interval_ms=30000,  # 30 seconds
             stale_threshold_ms=5 * 60 * 1000,  # 5 minutes
-            timeout=60 minutes
+            timeout=60 * 60
         )
         monitor = await init_heartbeat_monitor(alert_manager=None, config=config)
         logger.info("✅ Heartbeat monitor initialized and started")
@@ -1923,3 +1923,37 @@ if __name__ == "__main__":
 
     print("")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
+@app.post("/slack/create-job")
+async def slack_create_job(request: Request):
+    """Create a job from Slack (slash command or button)
+    
+    POST /slack/create-job
+    {
+      "project": "barber-crm",
+      "task": "Fix email notifications",
+      "priority": "P1",
+      "slack_user_id": "U123456"
+    }
+    """
+    try:
+        data = await request.json()
+        project = data.get("project", "openclaw")
+        task = data.get("task", "General task")
+        priority = data.get("priority", "P1")
+        slack_user = data.get("slack_user_id", "unknown")
+        
+        # Create job
+        job = create_job(project, task, priority)
+        
+        logger.info(f"✅ Job created from Slack: {job.id} by {slack_user}")
+        
+        return {
+            "success": True,
+            "job_id": job.id,
+            "status": "pending",
+            "message": f"✅ Job created! ID: {job.id}\nTask: {task}\nProject: {project}\nPriority: {priority}"
+        }
+    except Exception as e:
+        logger.error(f"Slack job creation error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
