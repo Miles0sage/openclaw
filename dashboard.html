@@ -384,14 +384,47 @@
 
       <!-- Secrets Manager Tab -->
       <div id="secrets" class="tab-content">
-        <div class="glass rounded-lg p-6 mb-8">
-          <h2 class="text-xl font-bold text-cyan-400 mb-2">🔐 Secrets Manager</h2>
-          <p class="text-slate-400 text-sm mb-4">
-            Manage API keys and environment variables securely
-          </p>
+        <div id="secrets-locked" class="glass rounded-lg p-8 text-center">
+          <h2 class="text-3xl font-bold text-pink-400 mb-6">🔐 Secrets Manager</h2>
+          <p class="text-slate-300 mb-8">Protected environment - PIN required to access</p>
+
+          <div class="max-w-sm mx-auto">
+            <div class="mb-6">
+              <input
+                type="password"
+                id="pin-input"
+                placeholder="Enter 4-digit PIN"
+                class="w-full px-4 py-3 rounded-lg bg-slate-800 border border-slate-600 text-white text-center text-2xl tracking-widest focus:outline-none focus:border-pink-500"
+                maxlength="4"
+                onkeypress="if (event.key === 'Enter') unlockSecrets();"
+              />
+            </div>
+            <button
+              onclick="unlockSecrets()"
+              class="w-full px-6 py-3 bg-gradient-to-r from-pink-600 to-purple-600 rounded-lg font-bold hover:from-pink-500 hover:to-purple-500 transition"
+            >
+              Unlock Secrets
+            </button>
+          </div>
+          <p class="text-xs text-slate-500 mt-6">PIN required to access</p>
         </div>
-        <div class="iframe-container" style="height: 800px">
-          <iframe src="dashboard_secrets.html" title="Secrets Manager"></iframe>
+
+        <div id="secrets-unlocked" class="hidden">
+          <div class="glass rounded-lg p-6 mb-8 flex justify-between items-center">
+            <div>
+              <h2 class="text-xl font-bold text-pink-400 mb-2">🔐 Secrets Manager</h2>
+              <p class="text-slate-400 text-sm">Manage API tokens and credentials</p>
+            </div>
+            <button
+              onclick="lockSecrets()"
+              class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition"
+            >
+              🔒 Lock
+            </button>
+          </div>
+          <div class="iframe-container" style="height: 800px">
+            <iframe src="dashboard_secrets.html" title="Secrets Manager"></iframe>
+          </div>
         </div>
       </div>
 
@@ -495,6 +528,57 @@
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
 
+      // PIN Authentication for Secrets Manager
+      const CORRECT_PIN = "1048"; // Change this to your desired PIN
+
+      function unlockSecrets() {
+        const pinInput = document.getElementById("pin-input");
+        const pin = pinInput.value;
+
+        if (pin === CORRECT_PIN) {
+          document.getElementById("secrets-locked").classList.add("hidden");
+          document.getElementById("secrets-unlocked").classList.remove("hidden");
+          sessionStorage.setItem("secretsUnlocked", "true");
+        } else {
+          pinInput.style.borderColor = "#ef4444";
+          pinInput.style.boxShadow = "0 0 10px rgba(239, 68, 68, 0.5)";
+          setTimeout(() => {
+            pinInput.style.borderColor = "";
+            pinInput.style.boxShadow = "";
+          }, 500);
+          pinInput.value = "";
+          pinInput.focus();
+        }
+      }
+
+      function lockSecrets() {
+        document.getElementById("secrets-locked").classList.remove("hidden");
+        document.getElementById("secrets-unlocked").classList.add("hidden");
+        document.getElementById("pin-input").value = "";
+        sessionStorage.removeItem("secretsUnlocked");
+      }
+
+      // Check if secrets were already unlocked in this session
+      window.addEventListener("load", () => {
+        const secretsTab = document.getElementById("secrets");
+        if (secretsTab && sessionStorage.getItem("secretsUnlocked") === "true") {
+          document.getElementById("secrets-locked").classList.add("hidden");
+          document.getElementById("secrets-unlocked").classList.remove("hidden");
+        }
+      });
+
+      // Focus on PIN input when secrets tab is opened
+      const originalSwitchTab = switchTab;
+      switchTab = function (tabName) {
+        originalSwitchTab(tabName);
+        if (tabName === "secrets") {
+          const pinInput = document.getElementById("pin-input");
+          if (pinInput && !pinInput.closest(".hidden")) {
+            setTimeout(() => pinInput.focus(), 100);
+          }
+        }
+      };
+
       // Keyboard shortcuts
       document.addEventListener("keydown", (e) => {
         if (e.ctrlKey || e.metaKey) {
@@ -503,7 +587,8 @@
           if (e.key === "3") switchTab("metrics");
           if (e.key === "4") switchTab("mobile");
           if (e.key === "5") switchTab("3d");
-          if (e.key === "6") switchTab("docs");
+          if (e.key === "6") switchTab("secrets");
+          if (e.key === "7") switchTab("docs");
         }
       });
     </script>
