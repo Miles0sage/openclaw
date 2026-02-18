@@ -13,6 +13,7 @@
     "slack": {
       "enabled": true,
       "botToken": "${SLACK_BOT_TOKEN}",
+      "appToken": "${SLACK_APP_TOKEN}",
       "signingSecret": "${SLACK_SIGNING_SECRET}",
       "reportChannel": "${SLACK_REPORT_CHANNEL}",
       "name": "Slack Bot",
@@ -484,6 +485,7 @@
     "slack": {
       "enabled": true,
       "botToken": "${SLACK_BOT_TOKEN}",
+      "appToken": "${SLACK_APP_TOKEN}",
       "appToken": "${SLACK_APP_TOKEN}",
       "replyToMode": "all",
       "threaded": true,
