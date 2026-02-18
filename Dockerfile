@@ -1,74 +1,75 @@
-FROM node:22-bookworm
+# Multi-stage Dockerfile for OpenClaw Python Gateway
+# Optimized for production deployment with security hardening
 
-# Install system dependencies for native modules (sharp, node-gyp, etc)
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    python3 \
-    make \
-    g++ \
-    ca-certificates && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# ===== Stage 1: Builder =====
+FROM python:3.13-slim AS builder
 
-# Install Bun (required for build scripts)
-RUN curl -fsSL https://bun.sh/install | bash
-ENV PATH="/root/.bun/bin:${PATH}"
+WORKDIR /build
 
-RUN corepack enable
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+
+# Create virtual environment and install dependencies
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
+
+# ===== Stage 2: Runtime =====
+FROM python:3.13-slim
 
 WORKDIR /app
 
-# Support concurrency tuning for 7GB GitHub Actions runners
-ARG PNPM_CONCURRENCY=16
-ARG OPENCLAW_DOCKER_APT_PACKAGES=""
-RUN if [ -n "$OPENCLAW_DOCKER_APT_PACKAGES" ]; then \
-      apt-get update && \
-      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $OPENCLAW_DOCKER_APT_PACKAGES && \
-      apt-get clean && \
-      rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*; \
-    fi
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
-COPY ui/package.json ./ui/package.json
-COPY patches ./patches
-COPY scripts ./scripts
+# Create non-root user with proper permissions
+RUN groupadd -r openclaw && \
+    useradd -r -g openclaw -u 1000 -d /app -s /sbin/nologin openclaw
 
-# Install dependencies (use --child-concurrency for 7GB-constrained environments)
-RUN if [ "${PNPM_CONCURRENCY}" -lt 4 ]; then \
-      echo "🔧 Installing with --child-concurrency=1 for low-memory environment..." && \
-      pnpm install --frozen-lockfile --child-concurrency=1; \
-    else \
-      pnpm install --frozen-lockfile; \
-    fi
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
 
-COPY . .
+# Copy application code with proper ownership
+COPY --chown=openclaw:openclaw gateway.py .
+COPY --chown=openclaw:openclaw orchestrator.py .
+COPY --chown=openclaw:openclaw cost_tracker.py .
+COPY --chown=openclaw:openclaw quota_manager.py .
+COPY --chown=openclaw:openclaw complexity_classifier.py .
+COPY --chown=openclaw:openclaw heartbeat_monitor.py .
+COPY --chown=openclaw:openclaw agent_router.py .
+COPY --chown=openclaw:openclaw config.json .
+COPY --chown=openclaw:openclaw dashboard_api.py .
 
-# Support two build modes:
-# 1. Full build (default): pnpm build generates dist/
-# 2. Pre-built mode: skip build if dist/ already exists (from GitHub Actions artifacts)
-RUN if [ ! -d dist ] || [ -z "$(ls -A dist)" ]; then \
-      echo "🔨 Building from source (workspace-concurrency=${PNPM_CONCURRENCY})..." && \
-      pnpm build --workspace-concurrency=${PNPM_CONCURRENCY} && \
-      export OPENCLAW_PREFER_PNPM=1 && \
-      pnpm ui:build; \
-    else \
-      echo "✅ Using pre-built dist/ artifacts (from GitHub Actions)"; \
-    fi
+# Create runtime directories
+RUN mkdir -p /app/sessions /app/logs && \
+    chown -R openclaw:openclaw /app/sessions /app/logs
 
-ENV NODE_ENV=production
+# Set environment variables
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    OPENCLAW_SESSIONS_DIR=/app/sessions \
+    OPENCLAW_LOGS_DIR=/app/logs
 
-# Allow non-root user to write temp files during runtime/tests.
-RUN chown -R node:node /app
+# Health check endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
-# Security hardening: Run as non-root user
-# The node:22-bookworm image includes a 'node' user (uid 1000)
-# This reduces the attack surface by preventing container escape via root privileges
-USER node
+# Expose port
+EXPOSE 8000
 
-# Start gateway server with default config.
-# Binds to loopback (127.0.0.1) by default for security.
-#
-# For container platforms requiring external health checks:
-#   1. Set OPENCLAW_GATEWAY_TOKEN or OPENCLAW_GATEWAY_PASSWORD env var
-#   2. Override CMD: ["node","dist/index.js","gateway","--allow-unconfigured","--bind","lan"]
-CMD ["node", "dist/index.js", "gateway", "--allow-unconfigured"]
+# Switch to non-root user
+USER openclaw
+
+# Run the gateway with production settings
+CMD ["uvicorn", "gateway:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info", "--workers", "4"]

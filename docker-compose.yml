@@ -1,46 +1,137 @@
+version: "3.9"
+
 services:
   openclaw-gateway:
-    image: ${OPENCLAW_IMAGE:-openclaw:local}
-    environment:
-      HOME: /home/node
-      TERM: xterm-256color
-      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
-      CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY}
-      CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY}
-      CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE}
-    volumes:
-      - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
-      - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openclaw-gateway
     ports:
-      - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
-      - "${OPENCLAW_BRIDGE_PORT:-18790}:18790"
-    init: true
-    restart: unless-stopped
-    command:
-      [
-        "node",
-        "dist/index.js",
-        "gateway",
-        "--bind",
-        "${OPENCLAW_GATEWAY_BIND:-lan}",
-        "--port",
-        "18789",
-      ]
-
-  openclaw-cli:
-    image: ${OPENCLAW_IMAGE:-openclaw:local}
+      - "8000:8000"
+      - "8789:8000" # Alternative port mapping for legacy configs
     environment:
-      HOME: /home/node
-      TERM: xterm-256color
-      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
-      BROWSER: echo
-      CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY}
-      CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY}
-      CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE}
+      # API Keys (from .env or secrets)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}
+      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
+      - SLACK_REPORT_CHANNEL=${SLACK_REPORT_CHANNEL:-#general}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY}
+      - BARBER_CRM_SUPABASE_ANON_KEY=${BARBER_CRM_SUPABASE_ANON_KEY}
+      - BARBER_CRM_SUPABASE_SERVICE_ROLE_KEY=${BARBER_CRM_SUPABASE_SERVICE_ROLE_KEY}
+      - DELHI_PALACE_SUPABASE_ANON_KEY=${DELHI_PALACE_SUPABASE_ANON_KEY}
+      - DELHI_PALACE_SUPABASE_SERVICE_ROLE_KEY=${DELHI_PALACE_SUPABASE_SERVICE_ROLE_KEY}
+
+      # OpenClaw Configuration
+      - OPENCLAW_SESSIONS_DIR=/app/sessions
+      - OPENCLAW_LOGS_DIR=/app/logs
+      - OPENCLAW_HTTP_GATEWAY_URL=${OPENCLAW_HTTP_GATEWAY_URL:-http://openclaw-gateway:8000}
+      - OPENCLAW_HTTP_GATEWAY_TOKEN=${OPENCLAW_HTTP_GATEWAY_TOKEN}
+
+      # Python/Uvicorn Settings
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+
     volumes:
-      - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
-      - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace
-    stdin_open: true
-    tty: true
-    init: true
-    entrypoint: ["node", "dist/index.js"]
+      # Persistent session storage
+      - sessions_data:/app/sessions
+      # Persistent log storage
+      - logs_data:/app/logs
+      # Config file (can be overridden)
+      - ./config.json:/app/config.json:ro
+
+    restart: unless-stopped
+
+    # Resource limits (adjust based on your infrastructure)
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+    # Security options
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only_root_filesystem: false
+    security_opt:
+      - no-new-privileges:true
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        labels: "service=openclaw-gateway"
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Network
+    networks:
+      - openclaw-network
+
+  openclaw-dashboard:
+    image: python:3.13-slim
+    container_name: openclaw-dashboard
+    working_dir: /app
+    command: python dashboard_api.py
+    ports:
+      - "9000:9000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DASHBOARD_PORT=9000
+      - GATEWAY_URL=http://openclaw-gateway:8000
+    volumes:
+      - ./dashboard_api.py:/app/dashboard_api.py:ro
+      - ./config.json:/app/config.json:ro
+      - logs_data:/app/logs:ro
+    depends_on:
+      - openclaw-gateway
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        labels: "service=openclaw-dashboard"
+    networks:
+      - openclaw-network
+
+volumes:
+  sessions_data:
+    driver: local
+  logs_data:
+    driver: local
+
+networks:
+  openclaw-network:
+    driver: bridge
