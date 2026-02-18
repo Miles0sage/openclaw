@@ -645,14 +645,17 @@ async def test_exempt():
     return {"message": "✅ Auth exemption working!", "path": "/test-exempt"}
 
 @app.get("/dashboard.html")
-async def dashboard():
-    """Serve HTML dashboard"""
+async def dashboard(request: Request):
+    """Serve HTML dashboard (no auth required)"""
     try:
         dashboard_path = "/root/openclaw/dashboard.html"
         with open(dashboard_path, 'r') as f:
             html_content = f.read()
         from fastapi.responses import HTMLResponse
-        return HTMLResponse(content=html_content)
+        # Allow GET, HEAD, and OPTIONS for browser compatibility
+        if request.method in ["GET", "HEAD", "OPTIONS"]:
+            return HTMLResponse(content=html_content)
+        return HTMLResponse(content="Method not allowed", status_code=405)
     except FileNotFoundError:
         return HTMLResponse(
             content="<h1>Dashboard not found</h1><p>dashboard.html is missing</p>",
