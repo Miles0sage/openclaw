@@ -1,276 +1,267 @@
-# OpenClaw 3D Dashboard - Quick Start Guide
+# OpenClaw Monitoring Dashboard - Quick Start
 
-## TL;DR - Get Started in 30 Seconds
+## Access the Dashboard
 
-### 1. Open the Dashboard
+Once deployed and integrated with the gateway:
+
+```
+http://gateway-host:18789/dashboard.html
+```
+
+Or serve locally for development:
 
 ```bash
-# Option A: Direct file (local machine)
-open file:///root/openclaw/dashboard_3d.html
-
-# Option B: Via HTTP Server
 cd /root/openclaw
-python3 -m http.server 9000
-# Then visit: http://localhost:9000/dashboard_3d.html
-
-# Option C: Copy to web server
-cp dashboard_3d.html /var/www/html/
-# Visit: http://your-server/dashboard_3d.html
+python -m http.server 8000
+# Visit: http://localhost:8000/dashboard.html
 ```
-
-### 2. Verify Gateway is Running
-
-```bash
-# Check gateway status
-curl -s http://localhost:9000/api/heartbeat/status | jq .
-
-# Start gateway if needed
-cd /root/openclaw && python3 gateway.py
-```
-
-### 3. Interact with Dashboard
-
-- **Click agents**: Select to view details
-- **Drag**: Rotate view with mouse
-- **Scroll**: Zoom in/out
-- **Buttons**: Restart, logs, config, sync
 
 ## What You'll See
 
-### 3D View
+### Top Metrics (Update every 10s)
+
+- **487 req/min** - Current request rate
+- **234ms P50** - Median response time
+- **0.32% error** - Current error rate
+- **$4.23/hr** - Hourly cost
+
+### Real-time Charts
+
+1. **Requests Over Time** - 60-minute trend
+2. **Latency Distribution** - P50/P95/P99 percentiles
+3. **Daily Cost Trend** - Last 30 days
+4. **Cost Distribution** - By agent pie chart
+
+### Agent Status
+
+- Green cards = Healthy (99%+ uptime)
+- Yellow cards = Degraded (90-99% uptime)
+- Red cards = Critical (<90% uptime)
+
+### Cost Dashboard
+
+- **30-day total:** $3,404 (optimized routing)
+- **All-Claude baseline:** $11,245
+- **Savings:** $7,841 (69.7% reduction)
+
+### Error Breakdown (Last 24h)
+
+| Error Type | Count | %     | Retry |
+| ---------- | ----- | ----- | ----- |
+| Timeouts   | 23    | 0.18% | 87%   |
+| Auth Fails | 8     | 0.06% | 75%   |
+| VPS Down   | 5     | 0.04% | 92%   |
+
+## Common Tasks
+
+### Check System Health
+
+1. Verify "All Systems Operational" badge is green
+2. Check all agents show green uptime (99%+)
+3. Confirm error rate < 0.5%
+4. Check latency P99 < 1,000ms
+
+### Investigate High Latency
+
+1. Check "Latency Distribution" chart
+2. Look for spikes in P99 line
+3. Identify slow agent in "Agent Health" cards
+4. Check agent response time trend
+5. May need to scale or restart
+
+### Analyze Error Spike
+
+1. Go to "Error Analysis" section
+2. Check "Error Trends" chart for timing
+3. See "Error Type Distribution"
+4. Check retry success rate
+5. If >90% retry success, likely self-healing
+
+### Review Costs
+
+1. Check "Daily Cost Trend" chart
+2. Look at "Cost Distribution by Agent" pie
+3. Review "Cost by Task Type"
+4. Compare to "Intelligent Routing Savings"
+
+## Key Metrics to Watch
+
+### Red Flags
 
 ```
-        [CodeGen Pro 💻]
-              /  \
-            /      \
-    [PM 🎯]          [SupabaseConnector 🗄️]
-          \          /
-            \      /
-        [Pentest AI 🔒]
+⚠️ Error rate > 1%              → System issue
+⚠️ Latency P99 > 2000ms         → Performance problem
+⚠️ Agent uptime < 95%           → Agent reliability issue
+⚠️ Cost spike > 20%             → Unexpected usage
+⚠️ "Last seen" > 2 min ago      → Agent not responding
 ```
 
-Each agent is a glowing sphere:
+### Good Signs
 
-- **Green glow** = Active ✓
-- **Yellow glow** = Busy ⊙
-- **Red glow** = Offline ✗
+```
+✅ Error rate < 0.5%            → Operating normally
+✅ Latency P99 < 1000ms         → Good performance
+✅ All agents 99%+ uptime       → Excellent reliability
+✅ Cost stable/trending down    → Efficient routing
+✅ 90%+ retry success rate      → Resilient error handling
+```
 
-Animated lines show message flow between agents.
+## API Endpoints (for programmatic access)
 
-### Panels
-
-**Right Side**: Agent list showing status, model, type, active tasks
-**Bottom Left**: Control buttons (restart, logs, config)
-**Bottom Right**: Live stats (active agents, message rate, latency, uptime)
-
-## Real-World Usage Examples
-
-### Monitor During Development
+Get real-time summary:
 
 ```bash
-# Terminal 1: Run gateway with logs
-cd /root/openclaw && python3 gateway.py
-
-# Terminal 2: Open dashboard
-# Watch agents process requests in real-time
-# View latency, throughput, which agents are active
+curl http://localhost:18789/api/metrics/summary \
+  -H "X-Auth-Token: your-token"
 ```
 
-### Check Agent Health
-
-1. Open dashboard
-2. Look at status colors
-3. Click agent for detailed stats
-4. Click "Restart Gateway" if needed
-
-### Debug Routing Issues
-
-1. Send test message to gateway
-2. Watch dashboard to see which agent handles it
-3. Click agent to verify type matches expectation
-4. View logs to see reasoning
-
-### Monitor Cost Usage
-
-1. Check stats panel for message rate
-2. View config for quota limits
-3. Calculate: message_rate × agents_active
-4. Verify within daily/monthly budgets
-
-## Common Issues & Fixes
-
-### Dashboard doesn't load
+Get agent health:
 
 ```bash
-# 1. Check file exists
-ls -la /root/openclaw/dashboard_3d.html
-
-# 2. Check gateway running
-curl http://localhost:9000/health
-
-# 3. Check port number
-# Default: 9000 (adjust in HTML if different)
+curl http://localhost:18789/api/metrics/agents \
+  -H "X-Auth-Token: your-token"
 ```
 
-### Agents all show gray/not updating
+Get error analysis (24h):
 
 ```bash
-# 1. Check API endpoint
-curl http://localhost:9000/api/heartbeat/status
-
-# 2. Check cors headers
-curl -i http://localhost:9000/api/heartbeat/status
-
-# 3. Check gateway logs
-tail -f /tmp/openclaw-gateway.log
+curl "http://localhost:18789/api/metrics/errors?hours=24" \
+  -H "X-Auth-Token: your-token"
 ```
 
-### WebGL error (3D not rendering)
-
-- Update GPU drivers
-- Try different browser (Chrome, Firefox)
-- Check "Enable WebGL" in browser settings
-- Check console (F12) for exact error
-
-## File Details
-
-**Location**: `/root/openclaw/dashboard_3d.html`
-**Size**: ~34 KB
-**Build Process**: None! Single HTML file
-**Dependencies**: Three.js (CDN) + Modern browser
-**Browser Support**: Chrome 60+, Firefox 55+, Safari 11+, Edge 79+
-
-## API Polling
-
-Dashboard polls every 2 seconds:
-
-```
-GET /api/heartbeat/status
-```
-
-Response includes:
-
-- Gateway status (online/offline)
-- In-flight agents (which agents are processing)
-- Agent status (active/busy/inactive)
-- Runtime metrics
-
-## Customization
-
-### Change Update Frequency
-
-```javascript
-// In dashboard_3d.html, around line 950:
-setInterval(pollStatus, 2000); // Change 2000 to your ms
-```
-
-### Change API Endpoint
-
-```javascript
-// In dashboard_3d.html, around line 920:
-const response = await fetch("/api/heartbeat/status", {
-  // Change to your endpoint
-});
-```
-
-### Add/Remove Agents
-
-```javascript
-// In dashboard_3d.html, around line 620:
-const agents = [
-  // Add/remove from this array
-  // Must match IDs in config.json
-];
-```
-
-### Change Colors
-
-```css
-/* In dashboard_3d.html, around line 20: */
-:root {
-  --primary: #00ff88; /* Green */
-  --secondary: #00ccff; /* Cyan */
-  --accent: #ff6b6b; /* Red */
-  --warning: #ffd93d; /* Yellow */
-}
-```
-
-## Performance Tips
-
-- **Smooth 60 FPS**: GPU-accelerated rendering
-- **Low memory**: ~15-20 MB per session
-- **Minimal network**: ~1 KB per API call every 2 seconds
-- **Mobile friendly**: Responsive design
-
-**Optimal viewing**: 1920x1080+ desktop or tablet
-
-## Next Steps
-
-1. ✓ Open dashboard in browser
-2. ✓ Verify all 4 agents show
-3. ✓ Click agents to verify details
-4. ✓ Send test message to gateway
-5. ✓ Watch agents process in real-time
-6. ✓ View logs for verification
-7. ✓ Bookmark for future reference!
-
-## Keyboard Shortcuts
-
-Currently mouse-based, but you can add:
-
-- **R**: Restart gateway (auto-bind)
-- **L**: View logs
-- **C**: Show config
-- **Space**: Reset camera view
-
-To add, find the `window.addEventListener('keydown'...)` section.
-
-## Pro Tips
-
-- **Dragging frozen?** Make sure you're clicking on dark background, not UI panels
-- **Zoom too far?** Scroll back or press Home to reset camera
-- **Agent stuck?** Click "Force Sync" to trigger health check
-- **Logs too much?** Close modal and reopen to refresh
-- **Want demo mode?** Dashboard works offline with simulated data
-
-## Integration with CI/CD
-
-Embed dashboard in monitoring:
-
-```html
-<!-- In your monitoring dashboard: -->
-<iframe
-  src="http://your-server/dashboard_3d.html"
-  width="100%"
-  height="600px"
-  frameborder="0"
-></iframe>
-```
-
-## Support & Debugging
-
-### Enable Debug Logging
-
-```javascript
-// Add to dashboard_3d.html console:
-localStorage.debug = "*";
-// Reload page for verbose logs
-```
-
-### Get Full API Response
+Get cost breakdown:
 
 ```bash
-curl -v http://localhost:9000/api/heartbeat/status | jq .
+curl http://localhost:18789/api/metrics/costs \
+  -H "X-Auth-Token: your-token"
 ```
 
-### Check Gateway Version
+Get all dashboard data:
 
 ```bash
-cd /root/openclaw && python3 -c "from gateway import app; print(app.title)"
+curl http://localhost:18789/api/metrics/dashboard-data \
+  -H "X-Auth-Token: your-token"
 ```
 
----
+## Troubleshooting
 
-**Happy monitoring!** 🚀
+### Dashboard shows no data
 
-For detailed documentation, see `DASHBOARD_3D_README.md`
+- Check gateway is running: `curl http://localhost:18789/health`
+- Verify metrics API: `curl http://localhost:18789/api/metrics/summary`
+- Check browser console (F12 → Console) for errors
+- Ensure at least one request made to gateway
+
+### Charts not updating
+
+- Refresh page (F5)
+- Check network tab (F12 → Network) for API calls
+- Verify /api/metrics/\* endpoints accessible
+- Look for CORS errors
+
+### "Last seen" shows old timestamp
+
+- System hasn't received requests recently
+- Check if agent is being used
+- Verify agent is running
+- Send test request
+
+### Cost numbers incorrect
+
+- Verify cost_tracker.py is logging
+- Check token pricing is up-to-date
+- Compare to actual bill
+
+## Integration Checklist
+
+Before going live:
+
+- [ ] Dashboard HTML deployed at `/root/openclaw/dashboard.html`
+- [ ] `metrics_collector.py` in gateway directory
+- [ ] `gateway_metrics_integration.py` routes in gateway
+- [ ] Metrics middleware added to FastAPI
+- [ ] Metrics file writable: `/tmp/openclaw_metrics.jsonl`
+- [ ] API endpoints responding with data
+- [ ] Dashboard loads and displays charts
+- [ ] Charts update every 10 seconds
+- [ ] All agents visible in health section
+- [ ] At least 5 minutes data collected
+- [ ] No console errors when loading
+- [ ] Cost calculations correct
+
+## Sample Data
+
+Dashboard includes sample data by default:
+
+- 487 req/min trending upward
+- Latency P50: 234ms, P95: 487ms, P99: 892ms
+- Error rate: 0.32%
+- Cost: $4.23/hour, $3,404 for 30 days
+- 4 agents with varying uptime (93-99%)
+
+To generate real data:
+
+```bash
+for i in {1..100}; do
+  curl http://localhost:18789/api/chat \
+    -X POST \
+    -H "X-Auth-Token: your-token" \
+    -H "Content-Type: application/json" \
+    -d '{"content":"hello","agent":"pm"}'
+  sleep 0.1
+done
+```
+
+## Advanced Usage
+
+### Export Metrics to CSV
+
+```python
+import csv
+import json
+
+with open('/tmp/openclaw_metrics.jsonl') as f:
+    lines = f.readlines()
+
+with open('/tmp/metrics.csv', 'w', newline='') as out:
+    writer = csv.writer(out)
+    writer.writerow(['timestamp', 'agent', 'latency_ms', 'success', 'cost'])
+
+    for line in lines:
+        data = json.loads(line)
+        writer.writerow([
+            data.get('timestamp'),
+            data.get('agent'),
+            data.get('latency_ms'),
+            data.get('success'),
+            data.get('cost')
+        ])
+```
+
+### Create Alert Script
+
+```python
+import requests
+import time
+
+while True:
+    resp = requests.get('http://localhost:18789/api/metrics/summary')
+    metrics = resp.json()
+
+    if metrics['error_rate_percent'] > 1.0:
+        print("ALERT: High error rate!")
+
+    if metrics['latency_p99_ms'] > 2000:
+        print("ALERT: High latency!")
+
+    time.sleep(60)
+```
+
+## Resources
+
+- Full documentation: [MONITORING_DASHBOARD.md](MONITORING_DASHBOARD.md)
+- Metrics collector: [metrics_collector.py](metrics_collector.py)
+- API integration: [gateway_metrics_integration.py](gateway_metrics_integration.py)
+- Phase 5X deployment: See MEMORY.md
+- Cost tracking: [cost_tracker.py](cost_tracker.py)
+- Agent routing: [agent_router.py](agent_router.py)

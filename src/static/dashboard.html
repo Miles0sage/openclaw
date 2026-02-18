@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenClaw Monitoring Dashboard</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell,
+          sans-serif;
+        background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
+        color: #fff;
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+
+      header {
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+      }
+
+      h1 {
+        font-size: 32px;
+        font-weight: 600;
+        margin-bottom: 5px;
+        background: linear-gradient(135deg, #00d4ff, #0099ff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .subtitle {
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 14px;
+      }
+
+      .controls {
+        display: flex;
+        gap: 10px;
+        margin-top: 15px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        padding: 8px 16px;
+        background: rgba(0, 212, 255, 0.2);
+        border: 1px solid rgba(0, 212, 255, 0.5);
+        color: #00d4ff;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: all 0.3s ease;
+      }
+
+      button:hover {
+        background: rgba(0, 212, 255, 0.3);
+        border-color: rgba(0, 212, 255, 0.8);
+      }
+
+      button.active {
+        background: rgba(0, 212, 255, 0.4);
+        border-color: #00d4ff;
+      }
+
+      .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+      }
+
+      .metric-card {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 20px;
+        backdrop-filter: blur(10px);
+        transition: all 0.3s ease;
+      }
+
+      .metric-card:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(0, 212, 255, 0.3);
+        transform: translateY(-2px);
+      }
+
+      .metric-label {
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+      }
+
+      .metric-value {
+        font-size: 28px;
+        font-weight: 600;
+        margin-bottom: 8px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .metric-change {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.5);
+      }
+
+      .metric-change.positive {
+        color: #4ade80;
+      }
+
+      .metric-change.negative {
+        color: #f87171;
+      }
+
+      .status-indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 8px;
+      }
+
+      .status-indicator.online {
+        background: #4ade80;
+        box-shadow: 0 0 10px rgba(74, 222, 128, 0.5);
+      }
+
+      .status-indicator.offline {
+        background: #f87171;
+        box-shadow: 0 0 10px rgba(248, 113, 113, 0.5);
+      }
+
+      .charts-section {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+      }
+
+      .chart-card {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 20px;
+        backdrop-filter: blur(10px);
+      }
+
+      .chart-title {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 15px;
+        color: rgba(255, 255, 255, 0.8);
+      }
+
+      canvas {
+        max-width: 100%;
+      }
+
+      .log-section {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 20px;
+        backdrop-filter: blur(10px);
+      }
+
+      .log-entry {
+        padding: 10px;
+        border-left: 3px solid rgba(0, 212, 255, 0.3);
+        margin-bottom: 8px;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: "Monaco", "Menlo", monospace;
+      }
+
+      .log-entry.error {
+        border-left-color: rgba(248, 113, 113, 0.5);
+        color: #f87171;
+      }
+
+      .log-entry.warning {
+        border-left-color: rgba(251, 191, 36, 0.5);
+        color: #fbbf24;
+      }
+
+      .log-entry.success {
+        border-left-color: rgba(74, 222, 128, 0.5);
+        color: #4ade80;
+      }
+
+      .timestamp {
+        color: rgba(255, 255, 255, 0.4);
+        margin-right: 10px;
+      }
+
+      .loading {
+        text-align: center;
+        padding: 40px;
+        color: rgba(255, 255, 255, 0.6);
+      }
+
+      .spinner {
+        display: inline-block;
+        width: 30px;
+        height: 30px;
+        border: 3px solid rgba(0, 212, 255, 0.2);
+        border-top: 3px solid #00d4ff;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        margin-bottom: 15px;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      .error-message {
+        background: rgba(248, 113, 113, 0.1);
+        border: 1px solid rgba(248, 113, 113, 0.3);
+        border-radius: 6px;
+        padding: 15px;
+        color: #f87171;
+        margin-bottom: 20px;
+      }
+
+      @media (max-width: 768px) {
+        .metrics-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .charts-section {
+          grid-template-columns: 1fr;
+        }
+
+        h1 {
+          font-size: 24px;
+        }
+      }
+
+      .refresh-rate {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 12px;
+      }
+
+      .last-update {
+        color: rgba(255, 255, 255, 0.5);
+        font-size: 12px;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>OpenClaw Monitoring Dashboard</h1>
+        <p class="subtitle">Real-time metrics and system health</p>
+        <div class="controls">
+          <button id="refreshBtn" class="active">Auto-Refresh ON</button>
+          <button id="clearLogsBtn">Clear Logs</button>
+          <div class="refresh-rate">
+            <span>Update interval: <strong id="refreshInterval">5s</strong></span>
+          </div>
+        </div>
+        <div class="last-update">Last updated: <span id="lastUpdate">never</span></div>
+      </header>
+
+      <div id="errorContainer"></div>
+
+      <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <p>Loading metrics...</p>
+      </div>
+
+      <div id="content" style="display: none">
+        <!-- Metrics Grid -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-label">Total Requests</div>
+            <div class="metric-value" id="totalRequests">0</div>
+            <div class="metric-change" id="requestsChange">+0 this minute</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">Average Response Time</div>
+            <div class="metric-value" id="avgResponseTime">0ms</div>
+            <div class="metric-change" id="responseTimeChange">P95: 0ms</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">Error Rate</div>
+            <div class="metric-value" id="errorRate">0%</div>
+            <div class="metric-change" id="errorCount">0 errors</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">API Cost (Current Month)</div>
+            <div class="metric-value" id="totalCost">$0.00</div>
+            <div class="metric-change" id="costChange">Budget: $0.00</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">Active Sessions</div>
+            <div class="metric-value" id="activeSessions">0</div>
+            <div class="metric-change" id="sessionsChange">Peak: 0</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">Gateway Status</div>
+            <div style="margin-top: 10px; font-size: 16px">
+              <span class="status-indicator online" id="gatewayStatus"></span>
+              <span id="gatewayStatusText">Online</span>
+            </div>
+            <div class="metric-change" id="gatewayUptime">Uptime: 0h</div>
+          </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="charts-section">
+          <div class="chart-card">
+            <div class="chart-title">Requests Over Time</div>
+            <canvas id="requestsChart"></canvas>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-title">Response Time Distribution</div>
+            <canvas id="responseTimeChart"></canvas>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-title">Cost Breakdown</div>
+            <canvas id="costChart"></canvas>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-title">Agent Usage</div>
+            <canvas id="agentChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Logs Section -->
+        <div class="log-section">
+          <div class="chart-title">Recent Activity Log</div>
+          <div id="logContainer" style="max-height: 400px; overflow-y: auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Configuration
+      const CONFIG = {
+        apiBase: window.location.origin,
+        refreshInterval: 5000,
+        maxLogs: 50,
+        chartUpdateInterval: 30000,
+      };
+
+      // State
+      let state = {
+        isAutoRefresh: true,
+        previousMetrics: null,
+        requestHistory: [],
+        responseTimeHistory: [],
+        logs: [],
+        charts: {},
+      };
+
+      // Chart instances
+      let charts = {};
+
+      // Initialize
+      document.addEventListener("DOMContentLoaded", () => {
+        setupEventListeners();
+        loadMetrics();
+        setInterval(() => {
+          if (state.isAutoRefresh) {
+            loadMetrics();
+          }
+        }, CONFIG.refreshInterval);
+      });
+
+      function setupEventListeners() {
+        document.getElementById("refreshBtn").addEventListener("click", toggleAutoRefresh);
+        document.getElementById("clearLogsBtn").addEventListener("click", clearLogs);
+      }
+
+      function toggleAutoRefresh() {
+        state.isAutoRefresh = !state.isAutoRefresh;
+        const btn = document.getElementById("refreshBtn");
+        btn.textContent = state.isAutoRefresh ? "Auto-Refresh ON" : "Auto-Refresh OFF";
+        btn.classList.toggle("active");
+        if (state.isAutoRefresh) {
+          loadMetrics();
+        }
+      }
+
+      async function loadMetrics() {
+        try {
+          const response = await fetch(`${CONFIG.apiBase}/api/metrics/summary`);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const data = await response.json();
+          updateUI(data);
+          updateCharts(data);
+          addLog("success", "Metrics updated");
+          document.getElementById("lastUpdate").textContent = new Date().toLocaleTimeString();
+        } catch (error) {
+          showError(`Failed to load metrics: ${error.message}`);
+          addLog("error", `Metrics fetch failed: ${error.message}`);
+        }
+      }
+
+      function updateUI(data) {
+        // Update metrics
+        const totalRequests = data.metrics?.total_requests || 0;
+        const avgTime = data.metrics?.average_response_time || 0;
+        const errorRate = data.metrics?.error_rate || 0;
+        const totalCost = data.metrics?.total_cost || 0;
+        const activeSessions = data.metrics?.active_sessions || 0;
+
+        document.getElementById("totalRequests").textContent = totalRequests.toLocaleString();
+        document.getElementById("avgResponseTime").textContent = `${avgTime.toFixed(0)}ms`;
+        document.getElementById("errorRate").textContent = `${(errorRate * 100).toFixed(1)}%`;
+        document.getElementById("totalCost").textContent = `$${totalCost.toFixed(2)}`;
+        document.getElementById("activeSessions").textContent = activeSessions;
+
+        // Calculate changes
+        if (state.previousMetrics) {
+          const requestsDelta = totalRequests - state.previousMetrics.total_requests;
+          document.getElementById("requestsChange").textContent =
+            `${requestsDelta > 0 ? "+" : ""}${requestsDelta} this minute`;
+
+          const timeDelta = avgTime - state.previousMetrics.average_response_time;
+          document.getElementById("responseTimeChange").textContent =
+            `P95: ${data.metrics?.p95_response_time?.toFixed(0) || 0}ms`;
+
+          const errorDelta = data.metrics?.error_count || 0;
+          document.getElementById("errorCount").textContent = `${errorDelta} errors`;
+        }
+
+        // Update session history
+        state.requestHistory.push({
+          timestamp: Date.now(),
+          value: totalRequests,
+        });
+        if (state.requestHistory.length > 60) {
+          state.requestHistory.shift();
+        }
+
+        // Update cost info
+        const budget = data.metrics?.monthly_budget || 0;
+        document.getElementById("costChange").textContent = `Budget: $${budget.toFixed(2)}`;
+
+        // Update gateway status
+        const isOnline = data.metrics?.gateway_online !== false;
+        const statusIndicator = document.getElementById("gatewayStatus");
+        const statusText = document.getElementById("gatewayStatusText");
+        const uptime = data.metrics?.gateway_uptime || 0;
+
+        if (isOnline) {
+          statusIndicator.className = "status-indicator online";
+          statusText.textContent = "Online";
+        } else {
+          statusIndicator.className = "status-indicator offline";
+          statusText.textContent = "Offline";
+        }
+
+        document.getElementById("gatewayUptime").textContent =
+          `Uptime: ${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`;
+
+        // Update peak sessions
+        if (!state.peakSessions || activeSessions > state.peakSessions) {
+          state.peakSessions = activeSessions;
+        }
+        document.getElementById("sessionsChange").textContent = `Peak: ${state.peakSessions}`;
+
+        state.previousMetrics = data.metrics;
+        document.getElementById("loading").style.display = "none";
+        document.getElementById("content").style.display = "block";
+      }
+
+      function updateCharts(data) {
+        const ctx1 = document.getElementById("requestsChart")?.getContext("2d");
+        const ctx2 = document.getElementById("responseTimeChart")?.getContext("2d");
+        const ctx3 = document.getElementById("costChart")?.getContext("2d");
+        const ctx4 = document.getElementById("agentChart")?.getContext("2d");
+
+        if (!window.Chart) {
+          console.log("Chart library not loaded yet");
+          return;
+        }
+
+        // Requests chart
+        if (ctx1) {
+          if (charts.requests) charts.requests.destroy();
+          charts.requests = new Chart(ctx1, {
+            type: "line",
+            data: {
+              labels: state.requestHistory.map((_, i) => i),
+              datasets: [
+                {
+                  label: "Requests",
+                  data: state.requestHistory.map((r) => r.value),
+                  borderColor: "#00d4ff",
+                  backgroundColor: "rgba(0, 212, 255, 0.1)",
+                  tension: 0.4,
+                  fill: true,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: true,
+              plugins: {
+                legend: { display: false },
+              },
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  grid: { color: "rgba(255, 255, 255, 0.05)" },
+                  ticks: { color: "rgba(255, 255, 255, 0.6)" },
+                },
+                x: {
+                  grid: { display: false },
+                  ticks: { color: "rgba(255, 255, 255, 0.6)" },
+                },
+              },
+            },
+          });
+        }
+
+        // Response time distribution
+        if (ctx2) {
+          if (charts.responseTime) charts.responseTime.destroy();
+          const responseData = data.metrics?.response_time_distribution || {};
+          charts.responseTime = new Chart(ctx2, {
+            type: "bar",
+            data: {
+              labels: Object.keys(responseData),
+              datasets: [
+                {
+                  label: "Count",
+                  data: Object.values(responseData),
+                  backgroundColor: "rgba(0, 212, 255, 0.6)",
+                  borderColor: "#00d4ff",
+                  borderWidth: 1,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: true,
+              plugins: { legend: { display: false } },
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  grid: { color: "rgba(255, 255, 255, 0.05)" },
+                  ticks: { color: "rgba(255, 255, 255, 0.6)" },
+                },
+                x: {
+                  grid: { display: false },
+                  ticks: { color: "rgba(255, 255, 255, 0.6)" },
+                },
+              },
+            },
+          });
+        }
+
+        // Cost breakdown
+        if (ctx3) {
+          if (charts.cost) charts.cost.destroy();
+          const costData = data.metrics?.cost_by_model || {};
+          charts.cost = new Chart(ctx3, {
+            type: "doughnut",
+            data: {
+              labels: Object.keys(costData),
+              datasets: [
+                {
+                  data: Object.values(costData),
+                  backgroundColor: [
+                    "rgba(0, 212, 255, 0.8)",
+                    "rgba(74, 222, 128, 0.8)",
+                    "rgba(251, 191, 36, 0.8)",
+                    "rgba(248, 113, 113, 0.8)",
+                  ],
+                  borderColor: "rgba(255, 255, 255, 0.1)",
+                  borderWidth: 2,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: true,
+              plugins: {
+                legend: {
+                  position: "bottom",
+                  labels: { color: "rgba(255, 255, 255, 0.7)" },
+                },
+              },
+            },
+          });
+        }
+
+        // Agent usage
+        if (ctx4) {
+          if (charts.agent) charts.agent.destroy();
+          const agentData = data.metrics?.agent_usage || {};
+          charts.agent = new Chart(ctx4, {
+            type: "bar",
+            data: {
+              labels: Object.keys(agentData),
+              datasets: [
+                {
+                  label: "Calls",
+                  data: Object.values(agentData),
+                  backgroundColor: "rgba(74, 222, 128, 0.6)",
+                  borderColor: "#4ade80",
+                  borderWidth: 1,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: true,
+              indexAxis: "y",
+              plugins: { legend: { display: false } },
+              scales: {
+                x: {
+                  beginAtZero: true,
+                  grid: { color: "rgba(255, 255, 255, 0.05)" },
+                  ticks: { color: "rgba(255, 255, 255, 0.6)" },
+                },
+                y: {
+                  grid: { display: false },
+                  ticks: { color: "rgba(255, 255, 255, 0.6)" },
+                },
+              },
+            },
+          });
+        }
+      }
+
+      function addLog(level, message) {
+        const timestamp = new Date().toLocaleTimeString();
+        state.logs.unshift({
+          level,
+          message,
+          timestamp,
+        });
+
+        if (state.logs.length > CONFIG.maxLogs) {
+          state.logs.pop();
+        }
+
+        renderLogs();
+      }
+
+      function renderLogs() {
+        const container = document.getElementById("logContainer");
+        container.innerHTML = state.logs
+          .map(
+            (log) => `
+                <div class="log-entry ${log.level}">
+                    <span class="timestamp">[${log.timestamp}]</span>
+                    ${log.message}
+                </div>
+            `,
+          )
+          .join("");
+      }
+
+      function clearLogs() {
+        state.logs = [];
+        renderLogs();
+        addLog("success", "Logs cleared");
+      }
+
+      function showError(message) {
+        const container = document.getElementById("errorContainer");
+        container.innerHTML = `<div class="error-message">⚠️ ${message}</div>`;
+        setTimeout(() => {
+          container.innerHTML = "";
+        }, 5000);
+      }
+    </script>
+
+    <!-- Chart.js library -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+  </body>
+</html>

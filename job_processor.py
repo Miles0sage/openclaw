@@ -1,0 +1,117 @@
+"""
+Job Processor - Polls queue and executes jobs autonomously
+"""
+
+import asyncio
+import json
+import os
+import sys
+import time
+import logging
+import threading
+from job_manager import get_pending_jobs, update_job_status, get_job
+import requests
+
+logger = logging.getLogger("job_processor")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(message)s')
+
+GATEWAY_URL = "http://localhost:18789"
+GATEWAY_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3")
+SLACK_RETRIES = 3
+SLACK_TIMEOUT = 15  # Increased timeout for slow connections
+
+def post_to_slack(message: str, job_id: str = None):
+    """Post update to Slack via gateway (non-blocking with retries)"""
+    def _post():
+        for attempt in range(SLACK_RETRIES):
+            try:
+                requests.post(
+                    f"{GATEWAY_URL}/api/chat",
+                    json={
+                        "content": f"🤖 Job {job_id}: {message}",
+                        "sessionKey": f"job:{job_id}",
+                        "agent_id": "project_manager"
+                    },
+                    headers={"X-Auth-Token": GATEWAY_TOKEN},
+                    timeout=SLACK_TIMEOUT
+                )
+                logger.info(f"✅ Slack notified for job {job_id}")
+                return
+            except Exception as e:
+                if attempt < SLACK_RETRIES - 1:
+                    logger.warning(f"Slack post attempt {attempt + 1} failed: {e}, retrying...")
+                    time.sleep(2)  # Wait before retry
+                else:
+                    logger.error(f"Failed to post to Slack after {SLACK_RETRIES} retries: {e}")
+
+    # Post in background thread so job processing doesn't wait
+    thread = threading.Thread(target=_post, daemon=True)
+    thread.start()
+
+def analyze_job(job: dict):
+    """Send job to agents for analysis"""
+    logger.info(f"📋 Analyzing job {job['id']}: {job['task']}")
+    
+    try:
+        # PM Agent: Strategic analysis
+        response = requests.post(
+            f"{GATEWAY_URL}/api/chat",
+            json={
+                "content": f"Job: {job['task']}\nProject: {job['project']}\nPriority: {job['priority']}\n\nBreak this down into actionable steps. Be concise.",
+                "sessionKey": f"job:{job['id']}",
+                "agent_id": "project_manager"
+            },
+            headers={"X-Auth-Token": GATEWAY_TOKEN},
+            timeout=30
+        ).json()
+        
+        logger.info(f"✅ Analysis complete for {job['id']}")
+        update_job_status(job['id'], "analyzing")
+        
+        return response.get("response", "Analysis complete")
+    except Exception as e:
+        logger.error(f"❌ Analysis failed: {e}")
+        return f"Error: {e}"
+
+def process_job(job: dict):
+    """Process a pending job"""
+    job_id = job['id']
+    logger.info(f"🚀 Processing job {job_id}: {job['task']}")
+    
+    update_job_status(job_id, "analyzing")
+    post_to_slack(f"Starting analysis of: {job['task']}", job_id)
+    
+    # Analyze
+    analysis = analyze_job(job)
+    update_job_status(job_id, "code_generated")
+    
+    # Post results
+    post_to_slack(f"✅ Analysis complete:\n{analysis[:500]}...", job_id)
+    
+    # Mark ready for human review
+    update_job_status(job_id, "pr_ready")
+    post_to_slack(f"🔍 Ready for review! Run: `approve_job('{job_id}')`", job_id)
+
+def job_processor_loop():
+    """Main job processor loop - runs every 30 seconds"""
+    logger.info("🤖 Job Processor started (checking queue every 30s)")
+    
+    while True:
+        try:
+            pending = get_pending_jobs()
+            
+            if pending:
+                job = pending[0]
+                logger.info(f"📦 Found pending job: {job['id']}")
+                process_job(job)
+            else:
+                logger.debug("No pending jobs")
+            
+            time.sleep(30)  # Check every 30 seconds
+        
+        except Exception as e:
+            logger.error(f"❌ Processor error: {e}")
+            time.sleep(30)
+
+if __name__ == "__main__":
+    job_processor_loop()

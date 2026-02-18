@@ -16,7 +16,7 @@ import hashlib
 import time
 from fastapi import FastAPI, WebSocket, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import anthropic
@@ -57,6 +57,9 @@ from complexity_classifier import (
     MODEL_RATE_LIMITS,
 )
 
+# Import metrics system
+from metrics import metrics
+
 # Import heartbeat monitor
 from heartbeat_monitor import (
     HeartbeatMonitor,
@@ -71,6 +74,13 @@ from agent_router import AgentRouter
 
 # Import workflow engine
 from workflow_engine import WorkflowEngine
+
+# Import job manager
+from job_manager import create_job, get_job, list_jobs, update_job_status
+
+# Import metrics
+from metrics_collector import init_metrics_collector, get_metrics_collector, record_metric
+from gateway_metrics_integration import setup_metrics, MetricsMiddleware
 from cost_gates import (
     get_cost_gates, init_cost_gates, check_cost_budget,
     record_cost, BudgetStatus
@@ -193,7 +203,7 @@ init_metrics_collector()
 static_dir = os.path.join(os.path.dirname(__file__), 'src', 'static')
 setup_metrics(app, static_dir=static_dir)
 
-n# Include audit routes
+# Include audit routes
 app.include_router(audit_router)
 # Authentication token - read from environment for security
 AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3")
@@ -201,11 +211,11 @@ AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK EXEMPTIONS: Allow webhooks without auth
-    exempt_paths = ["/", "/health", "/test-exempt", "/telegram/webhook", "/slack/events"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/telegram/webhook", "/slack/events", "/api/audit"]
     path = request.url.path
 
     # Debug logging (for troubleshooting only)
-    is_exempt = path in exempt_paths or path.startswith(("/telegram/", "/slack/"))
+    is_exempt = path in exempt_paths or path.startswith(("/telegram/", "/slack/", "/api/audit"))
     logger.info(f"AUTH_CHECK: path={path}, is_exempt={is_exempt}")
 
     # Exempt webhook paths
@@ -221,6 +231,32 @@ async def auth_middleware(request: Request, call_next):
 
     logger.info(f"✅ AUTH OK: {path}")
     return await call_next(request)
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Rate limiting middleware: max 30 requests per IP per minute"""
+    # Exempt metrics and health endpoints
+    path = request.url.path
+    if path in ["/health", "/metrics", "/test-exempt"]:
+        return await call_next(request)
+
+    # Get client IP
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Check rate limit
+    if not metrics.check_rate_limit(client_ip, max_requests=30, window_seconds=60):
+        logger.warning(f"⚠️  RATE LIMITED: {client_ip} ({path})")
+        return JSONResponse(
+            {"error": "Rate limit exceeded (max 30 req/min per IP)"},
+            status_code=429
+        )
+
+    # Record request
+    metrics.record_request(client_ip, path)
+
+    # Call next middleware
+    response = await call_next(request)
+    return response
 
 # Load config
 with open('config.json', 'r') as f:
@@ -251,6 +287,13 @@ chat_history: Dict[str, list] = {}
 @app.on_event("startup")
 async def startup_heartbeat_monitor():
     """Initialize heartbeat monitor on FastAPI startup"""
+    # Initialize metrics system
+    try:
+        metrics.load_from_disk()
+        logger.info(f"✅ Metrics system initialized (loaded costs from disk)")
+    except Exception as e:
+        logger.warning(f"⚠️  Could not load metrics from disk: {e}")
+
     # Initialize cost gates
     cost_gates_config = CONFIG.get("cost_gates", {})
     if cost_gates_config.get("enabled", True):
@@ -578,6 +621,11 @@ async def health():
         "timestamp": datetime.utcnow().isoformat()
     }
 
+@app.get("/metrics")
+async def metrics_endpoint():
+    """Prometheus metrics endpoint (no auth required for K8s scraping)"""
+    return PlainTextResponse(metrics.get_prometheus_metrics())
+
 @app.get("/test-exempt")
 async def test_exempt():
     """Test endpoint to verify auth exemptions work (no auth required)"""
@@ -751,6 +799,10 @@ async def chat_endpoint(message: Message):
             message.content,
             chat_history[session_key][-10:]
         )
+
+        # Record metrics
+        metrics.record_agent_call(agent_id)
+        metrics.record_session(session_key)
 
         # Update activity after getting response
         if heartbeat:
@@ -1686,6 +1738,79 @@ async def get_workflow_status(workflow_id: str):
         }
     except Exception as e:
         logger.error(f"❌ Workflow status error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# AUTONOMOUS JOB QUEUE ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/job/create")
+async def create_new_job(request: Request):
+    """Create a new autonomous job"""
+    try:
+        data = await request.json()
+        project = data.get("project", "unknown")
+        task = data.get("task", "")
+        priority = data.get("priority", "P1")
+        
+        if not task:
+            return JSONResponse({"error": "task required"}, status_code=400)
+        
+        job = create_job(project, task, priority)
+        logger.info(f"🆕 Job created: {job.id}")
+        
+        return {
+            "job_id": job.id,
+            "project": project,
+            "task": task,
+            "status": "pending",
+            "created_at": job.created_at
+        }
+    except Exception as e:
+        logger.error(f"Job creation error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/job/{job_id}")
+async def get_job_status(job_id: str):
+    """Get job status"""
+    try:
+        job = get_job(job_id)
+        if not job:
+            return JSONResponse({"error": "job not found"}, status_code=404)
+        
+        return job
+    except Exception as e:
+        logger.error(f"Job status error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/jobs")
+async def list_all_jobs():
+    """List all jobs"""
+    try:
+        jobs = list_jobs()
+        return {"jobs": jobs, "total": len(jobs)}
+    except Exception as e:
+        logger.error(f"List jobs error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/job/{job_id}/approve")
+async def approve_job(job_id: str, request: Request):
+    """Approve a job for merging"""
+    try:
+        data = await request.json()
+        approved_by = data.get("approved_by", "user")
+        
+        update_job_status(job_id, "approved", approved_by=approved_by)
+        logger.info(f"✅ Job approved: {job_id}")
+        
+        return {"job_id": job_id, "status": "approved", "approved_by": approved_by}
+    except Exception as e:
+        logger.error(f"Job approval error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
