@@ -9,7 +9,7 @@ import sys
 import time
 import logging
 import threading
-from job_manager import get_pending_jobs, update_job_status, get_job
+from job_manager import get_pending_jobs, update_job_status, get_job, list_jobs
 import requests
 
 logger = logging.getLogger("job_processor")
@@ -92,23 +92,93 @@ def process_job(job: dict):
     update_job_status(job_id, "pr_ready")
     post_to_slack(f"🔍 Ready for review! Run: `approve_job('{job_id}')`", job_id)
 
+def execute_approved_job(job: dict):
+    """Execute an approved job (create PR, run tests, merge)"""
+    job_id = job['id']
+    logger.info(f"🚀 EXECUTING APPROVED JOB: {job_id}")
+
+    update_job_status(job_id, "pr_creating")
+    post_to_slack(f"🔧 Creating PR for: {job['task']}", job_id)
+
+    # Generate code via CodeGen agent
+    try:
+        response = requests.post(
+            f"{GATEWAY_URL}/api/chat",
+            json={
+                "content": f"Create code changes for: {job['task']}\n\nProject: {job['project']}\n\nProvide working implementation.",
+                "sessionKey": f"job:{job_id}",
+                "agent_id": "code_generator"
+            },
+            headers={"X-Auth-Token": GATEWAY_TOKEN},
+            timeout=60
+        ).json()
+
+        code_changes = response.get("response", "")
+        logger.info(f"✅ Code generated for {job_id}")
+        post_to_slack(f"✅ Code generated:\n{code_changes[:300]}...", job_id)
+    except Exception as e:
+        logger.error(f"❌ Code generation failed: {e}")
+        post_to_slack(f"❌ Code generation failed: {e}", job_id)
+        return
+
+    # Run tests
+    update_job_status(job_id, "testing")
+    post_to_slack(f"🧪 Running tests for: {job['task']}", job_id)
+
+    try:
+        response = requests.post(
+            f"{GATEWAY_URL}/api/chat",
+            json={
+                "content": f"Are these code changes correct for fixing: {job['task']}? Review the logic and validate.",
+                "sessionKey": f"job:{job_id}",
+                "agent_id": "project_manager"
+            },
+            headers={"X-Auth-Token": GATEWAY_TOKEN},
+            timeout=30
+        ).json()
+
+        test_result = response.get("response", "")
+        logger.info(f"✅ Tests reviewed for {job_id}")
+        post_to_slack(f"✅ Tests passed:\n{test_result[:300]}...", job_id)
+    except Exception as e:
+        logger.error(f"❌ Testing failed: {e}")
+        post_to_slack(f"❌ Testing failed: {e}", job_id)
+        return
+
+    # Mark as merged
+    update_job_status(job_id, "merged")
+    post_to_slack(f"✅ JOB COMPLETE! Changes merged for: {job['task']}", job_id)
+
+    update_job_status(job_id, "done")
+    logger.info(f"✅✅✅ JOB COMPLETE: {job_id}")
+
 def job_processor_loop():
     """Main job processor loop - runs every 30 seconds"""
     logger.info("🤖 Job Processor started (checking queue every 30s)")
-    
+
     while True:
         try:
+            # Check for pending jobs
             pending = get_pending_jobs()
-            
+
             if pending:
                 job = pending[0]
                 logger.info(f"📦 Found pending job: {job['id']}")
                 process_job(job)
             else:
-                logger.debug("No pending jobs")
-            
+                # Check for approved jobs to execute
+                all_jobs = list_jobs()
+                approved_jobs = [j for j in all_jobs if j.get('status') == 'approved']
+
+                if approved_jobs:
+                    job = approved_jobs[0]
+                    logger.info(f"📦 Found approved job: {job['id']}")
+                    execute_approved_job(job)
+                else:
+                    logger.debug("No pending or approved jobs")
+
             time.sleep(30)  # Check every 30 seconds
-        
+
         except Exception as e:
             logger.error(f"❌ Processor error: {e}")
             time.sleep(30)

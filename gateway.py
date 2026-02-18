@@ -78,6 +78,14 @@ from workflow_engine import WorkflowEngine
 # Import job manager
 from job_manager import create_job, get_job, list_jobs, update_job_status
 
+# Import agent registry (auto-registration system)
+from agent_registry import (
+    init_agent_registry,
+    get_agent_registry,
+    register_agents_from_config,
+)
+
+
 # Import metrics
 from metrics_collector import init_metrics_collector, get_metrics_collector, record_metric
 from gateway_metrics_integration import setup_metrics, MetricsMiddleware
@@ -211,7 +219,7 @@ AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK EXEMPTIONS: Allow webhooks without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/telegram/webhook", "/slack/events", "/api/audit"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard.html", "/telegram/webhook", "/slack/events", "/api/audit"]
     path = request.url.path
 
     # Debug logging (for troubleshooting only)
@@ -306,7 +314,7 @@ async def startup_heartbeat_monitor():
         config = HeartbeatMonitorConfig(
             check_interval_ms=30000,  # 30 seconds
             stale_threshold_ms=5 * 60 * 1000,  # 5 minutes
-            timeout_threshold_ms=30 * 60 * 1000  # 30 minutes
+            timeout=60 minutes
         )
         monitor = await init_heartbeat_monitor(alert_manager=None, config=config)
         logger.info("✅ Heartbeat monitor initialized and started")
@@ -633,17 +641,23 @@ async def test_exempt():
 
 @app.get("/dashboard.html")
 async def dashboard():
-    """Simple HTML dashboard"""
-    return {
-        "status": "ready",
-        "dashboard_url": "Use /api/costs/summary for metrics",
-        "endpoints": {
-            "costs": "/api/costs/summary",
-            "agents": "/api/agents",
-            "chat": "POST /api/chat",
-            "routing": "/api/route"
-        }
-    }
+    """Serve HTML dashboard"""
+    try:
+        dashboard_path = "/root/openclaw/dashboard.html"
+        with open(dashboard_path, 'r') as f:
+            html_content = f.read()
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        return HTMLResponse(
+            content="<h1>Dashboard not found</h1><p>dashboard.html is missing</p>",
+            status_code=404
+        )
+    except Exception as e:
+        return HTMLResponse(
+            content=f"<h1>Error loading dashboard</h1><p>{str(e)}</p>",
+            status_code=500
+        )
 
 
 @app.get("/api/agents")
@@ -872,6 +886,77 @@ async def costs_text():
 # GET  /api/quotas/status    - Get current quota status for a project
 # GET  /api/quotas/config    - Get quota configuration
 # POST /api/quotas/check     - Check if request would be allowed
+
+@app.get("/api/quotas/status")
+async def global_quota_status():
+    """
+    Get global quota/budget status
+    Returns aggregate budget info across all projects
+    """
+    try:
+        quota_config = load_quota_config()
+        
+        if not quota_config.get("enabled", False):
+            return {
+                "success": True,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "data": {
+                    "quotas_enabled": False,
+                    "message": "Quotas are disabled"
+                }
+            }
+        
+        # Get cost metrics for all projects
+        metrics = get_cost_metrics()
+        
+        # Calculate aggregate spend
+        daily_spend = metrics.get("daily_total", 0.0)
+        monthly_spend = metrics.get("monthly_total", 0.0)
+        
+        daily_budget = quota_config.get("daily_limit_usd", 50)
+        monthly_budget = quota_config.get("monthly_limit_usd", 1000)
+        
+        daily_remaining = max(0, daily_budget - daily_spend)
+        monthly_remaining = max(0, monthly_budget - monthly_spend)
+        
+        daily_percent = (daily_spend / daily_budget * 100) if daily_budget > 0 else 0
+        monthly_percent = (monthly_spend / monthly_budget * 100) if monthly_budget > 0 else 0
+        
+        warning_threshold = quota_config.get("warning_threshold_percent", 80)
+        
+        # Determine status: healthy, warning, or critical
+        status = "healthy"
+        if daily_percent >= 100 or monthly_percent >= 100:
+            status = "critical"
+        elif daily_percent >= warning_threshold or monthly_percent >= warning_threshold:
+            status = "warning"
+        
+        return {
+            "success": True,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "data": {
+                "daily_budget": daily_budget,
+                "daily_used": round(daily_spend, 4),
+                "daily_remaining": round(daily_remaining, 4),
+                "daily_percent": round(daily_percent, 1),
+                "monthly_budget": monthly_budget,
+                "monthly_used": round(monthly_spend, 4),
+                "monthly_remaining": round(monthly_remaining, 4),
+                "monthly_percent": round(monthly_percent, 1),
+                "status": status,
+                "warning_threshold_percent": warning_threshold,
+                "quotas_enabled": True
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting global quota status: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+
+
 # ═══════════════════════════════════════════════════════════════════════
 
 @app.get("/api/quotas/status/{project_id}")

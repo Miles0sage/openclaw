@@ -106,8 +106,12 @@ def setup_metrics(app: FastAPI, static_dir: Optional[str] = None) -> None:
     @app.get("/dashboard.html")
     async def get_dashboard():
         """Serve dashboard HTML"""
-        static_dir = static_dir or os.path.join(os.path.dirname(__file__), 'src', 'static')
-        dashboard_path = os.path.join(static_dir, 'dashboard.html')
+        _static_dir = static_dir or os.path.join(os.path.dirname(__file__), 'src', 'static')
+        dashboard_path = os.path.join(_static_dir, 'dashboard.html')
+        
+        # Also try root directory
+        if not os.path.isfile(dashboard_path):
+            dashboard_path = os.path.join(os.path.dirname(__file__), 'dashboard.html')
         
         if os.path.isfile(dashboard_path):
             return FileResponse(dashboard_path, media_type="text/html")
