@@ -169,18 +169,25 @@ AUTH_TOKEN = "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK EXEMPTIONS: Allow webhooks without auth
-    exempt_paths = ["/", "/health", "/telegram/webhook", "/slack/events"]
+    exempt_paths = ["/", "/health", "/test-exempt", "/telegram/webhook", "/slack/events"]
     path = request.url.path
 
+    # Debug logging (for troubleshooting only)
+    is_exempt = path in exempt_paths or path.startswith(("/telegram/", "/slack/"))
+    logger.info(f"AUTH_CHECK: path={path}, is_exempt={is_exempt}")
+
     # Exempt webhook paths
-    if path in exempt_paths or path.startswith(("/telegram/", "/slack/")):
+    if is_exempt:
+        logger.info(f"✅ EXEMPT: {path}")
         return await call_next(request)
 
     # Check auth token
     token = request.headers.get("X-Auth-Token") or request.query_params.get("token")
     if token != AUTH_TOKEN:
+        logger.warning(f"❌ AUTH FAILED: {path} (no valid token)")
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
+    logger.info(f"✅ AUTH OK: {path}")
     return await call_next(request)
 
 # Load config
@@ -486,10 +493,15 @@ async def health():
     return {
         "status": "operational",
         "gateway": "OpenClaw-FIXED-2026-02-18",
-        "version": "2.0.1-WEBHOOK-EXEMPTIONS",
+        "version": "2.0.2-DEBUG-LOGGING",
         "agents_active": len(CONFIG.get("agents", {})),
         "timestamp": datetime.utcnow().isoformat()
     }
+
+@app.get("/test-exempt")
+async def test_exempt():
+    """Test endpoint to verify auth exemptions work (no auth required)"""
+    return {"message": "✅ Auth exemption working!", "path": "/test-exempt"}
 
 @app.get("/dashboard.html")
 async def dashboard():
