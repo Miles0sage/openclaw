@@ -5,7 +5,7 @@
   "channels": {
     "telegram": {
       "enabled": true,
-      "botToken": "8327486359:AAGECiQ1DsVUuBtrMgGzXnANhI_B9nfQZIQ",
+      "botToken": "${TELEGRAM_BOT_TOKEN}",
       "name": "Telegram Bot",
       "type": "messaging",
       "sessionKeyPrefix": "telegram"
@@ -508,7 +508,7 @@
     },
     "telegram": {
       "enabled": true,
-      "botToken": "8327486359:AAGECiQ1DsVUuBtrMgGzXnANhI_B9nfQZIQ"
+      "botToken": "${TELEGRAM_BOT_TOKEN}"
     },
     "discord": {
       "enabled": true,

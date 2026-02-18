@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: openclaw-gateway
-  namespace: default
+  namespace: openclaw
   labels:
     app: openclaw-gateway
     version: v1

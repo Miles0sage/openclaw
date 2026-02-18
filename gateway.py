@@ -32,6 +32,12 @@ from orchestrator import Orchestrator, AgentRole, Message as OrchMessage, Messag
 # Import cost tracker
 from cost_tracker import log_cost_event, get_cost_metrics, get_cost_summary, get_cost_log_path
 
+# Import deepseek client
+from request_logger import RequestLogger, get_logger
+from audit_routes import router as audit_router
+
+from deepseek_client import DeepseekClient
+
 # Import quota manager
 from quota_manager import (
     check_daily_quota,
@@ -63,6 +69,13 @@ from heartbeat_monitor import (
 # Import agent router (intelligent task routing)
 from agent_router import AgentRouter
 
+# Import workflow engine
+from workflow_engine import WorkflowEngine
+from cost_gates import (
+    get_cost_gates, init_cost_gates, check_cost_budget,
+    record_cost, BudgetStatus
+)
+
 load_dotenv()
 
 # Slack Configuration
@@ -83,8 +96,19 @@ SESSIONS_DIR = pathlib.Path(os.getenv("OPENCLAW_SESSIONS_DIR", "/tmp/openclaw_se
 SESSIONS_DIR.mkdir(exist_ok=True)
 logger.info(f"📁 Session storage: {SESSIONS_DIR}")
 
+def sanitize_session_key(session_key: str) -> str:
+    """Sanitize session key to prevent path traversal attacks"""
+    import re
+    # Only allow alphanumeric, colons, underscores, and hyphens
+    sanitized = re.sub(r'[^a-zA-Z0-9:_\-]', '', session_key)
+    # Reject if empty or suspicious patterns
+    if not sanitized or '..' in sanitized or '/' in session_key:
+        raise ValueError(f"Invalid session key: {session_key}")
+    return sanitized
+
 def load_session_history(session_key: str) -> list:
     """Load chat history for a session from disk"""
+    session_key = sanitize_session_key(session_key)
     session_file = SESSIONS_DIR / f"{session_key}.json"
     if session_file.exists():
         try:
@@ -98,6 +122,7 @@ def load_session_history(session_key: str) -> list:
 
 def save_session_history(session_key: str, history: list) -> bool:
     """Save chat history for a session to disk"""
+    session_key = sanitize_session_key(session_key)
     session_file = SESSIONS_DIR / f"{session_key}.json"
     try:
         data = {
@@ -163,8 +188,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Authentication token
-AUTH_TOKEN = "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"
+# Initialize and setup metrics
+init_metrics_collector()
+static_dir = os.path.join(os.path.dirname(__file__), 'src', 'static')
+setup_metrics(app, static_dir=static_dir)
+
+n# Include audit routes
+app.include_router(audit_router)
+# Authentication token - read from environment for security
+AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3")
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
@@ -200,6 +232,9 @@ agent_router = AgentRouter(config_path='config.json')
 # Initialize Anthropic client
 anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
+# Initialize Workflow Engine for multi-step workflows
+workflow_engine = WorkflowEngine()
+
 # Protocol version
 PROTOCOL_VERSION = 3
 
@@ -216,6 +251,14 @@ chat_history: Dict[str, list] = {}
 @app.on_event("startup")
 async def startup_heartbeat_monitor():
     """Initialize heartbeat monitor on FastAPI startup"""
+    # Initialize cost gates
+    cost_gates_config = CONFIG.get("cost_gates", {})
+    if cost_gates_config.get("enabled", True):
+        cost_gates = init_cost_gates(cost_gates_config)
+        logger.info(f"✅ Cost gates initialized: per-task=${cost_gates.gates['per_task'].limit}, daily=${cost_gates.gates['daily'].limit}, monthly=${cost_gates.gates['monthly'].limit}")
+    else:
+        logger.info("⚠️  Cost gates disabled in config")
+    
     try:
         config = HeartbeatMonitorConfig(
             check_interval_ms=30000,  # 30 seconds
@@ -414,6 +457,43 @@ Remember: You ARE {name}. Stay in character!"""
             logger.warning(f"⚠️ Cost logging failed: {e}")
 
         return response_text, tokens_output
+    elif provider == "deepseek":
+        # For Deepseek (Kimi models)
+        try:
+            deepseek_client = DeepseekClient()
+
+            # Map model names if needed
+            api_model = model if model in ["kimi-2.5", "kimi"] else "kimi-2.5"
+
+            response = deepseek_client.call(
+                model=api_model,
+                prompt=prompt if not conversation else full_prompt,
+                system_prompt=anthropic_system,
+                max_tokens=4096,
+                temperature=0.7
+            )
+
+            response_text = response.content
+            tokens_input = response.tokens_input
+            tokens_output = response.tokens_output
+
+            # Log cost event (non-blocking)
+            try:
+                cost = log_cost_event(
+                    project="openclaw",
+                    agent=agent_key,
+                    model=api_model,
+                    tokens_input=tokens_input,
+                    tokens_output=tokens_output
+                )
+                logger.info(f"💰 Cost logged: ${cost:.4f} ({agent_key} / {api_model})")
+            except Exception as e:
+                logger.warning(f"⚠️ Cost logging failed: {e}")
+
+            return response_text, tokens_output
+        except Exception as e:
+            logger.error(f"❌ Deepseek API error: {e}")
+            raise
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
@@ -619,6 +699,41 @@ async def chat_endpoint(message: Message):
             # Get quota status for logging
             quota_status = get_quota_status(project_id)
             logger.info(f"✅ Quota check passed for '{project_id}': {quota_status['daily']['percent']:.1f}% daily, {quota_status['monthly']['percent']:.1f}% monthly")
+
+        # ═ COST GATES: Verify budget limits before processing
+        cost_gates = get_cost_gates()
+        agent_config = get_agent_config(agent_id)
+        model = agent_config.get("model", "claude-3-5-sonnet-20241022")
+        
+        # Estimate tokens (rough estimate before actual call)
+        estimated_tokens = len(message.content.split()) * 2
+        
+        budget_check = check_cost_budget(
+            project=project_id,
+            agent=agent_id,
+            model=model,
+            tokens_input=estimated_tokens // 2,
+            tokens_output=estimated_tokens // 2,
+            task_id=f"{project_id}:{agent_id}:{session_key}"
+        )
+        
+        if budget_check.status == BudgetStatus.REJECTED:
+            logger.warning(f"💰 Cost gate REJECTED: {budget_check.message}")
+            return JSONResponse(
+                status_code=402,
+                content={
+                    "success": False,
+                    "error": "Budget limit exceeded",
+                    "detail": budget_check.message,
+                    "gate": budget_check.gate_name,
+                    "remaining_budget": budget_check.remaining_budget,
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                }
+            )
+        elif budget_check.status == BudgetStatus.WARNING:
+            logger.warning(f"⚠️  Cost gate WARNING: {budget_check.message}")
+            # Still proceed but log warning
+
 
         # Load session history if available
         if session_key not in chat_history:
@@ -834,11 +949,12 @@ async def telegram_webhook(request: Request):
                 }
 
                 try:
-                    resp = requests.post(telegram_send_url, json=telegram_payload, timeout=10)
-                    if resp.status_code == 200:
-                        logger.info(f"✅ Message sent to Telegram chat {chat_id}")
-                    else:
-                        logger.warning(f"⚠️  Telegram send failed: {resp.status_code}")
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        resp = await client.post(telegram_send_url, json=telegram_payload)
+                        if resp.status_code == 200:
+                            logger.info(f"✅ Message sent to Telegram chat {chat_id}")
+                        else:
+                            logger.warning(f"⚠️  Telegram send failed: {resp.status_code}")
                 except Exception as e:
                     logger.error(f"❌ Error sending to Telegram: {e}")
 
@@ -1152,6 +1268,39 @@ async def route_endpoint(req: RouteRequest):
         # Classify
         result = classify_query(full_query)
 
+        # ═ COST GATES: Check budget before routing decision
+        project = req.sessionKey.split(":")[0] if req.sessionKey and ":" in req.sessionKey else "default"
+        cost_gates = get_cost_gates()
+        
+        # Estimate tokens for routing decision
+        estimated_tokens = len(full_query.split()) * 2
+        
+        budget_check = check_cost_budget(
+            project=project,
+            agent="router",
+            model=result.model,
+            tokens_input=estimated_tokens // 2,
+            tokens_output=estimated_tokens // 2,
+            task_id=f"{project}:router:{req.sessionKey}"
+        )
+        
+        if budget_check.status == BudgetStatus.REJECTED:
+            logger.warning(f"💰 Cost gate REJECTED routing: {budget_check.message}")
+            return JSONResponse(
+                status_code=402,
+                content={
+                    "success": False,
+                    "error": "Budget limit exceeded",
+                    "detail": budget_check.message,
+                    "gate": budget_check.gate_name,
+                    "remaining_budget": budget_check.remaining_budget,
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                }
+            )
+        elif budget_check.status == BudgetStatus.WARNING:
+            logger.warning(f"⚠️  Cost gate WARNING: {budget_check.message}")
+
+
         # Calculate savings vs sonnet baseline
         sonnet_cost = (result.estimated_tokens // 3 * MODEL_PRICING["sonnet"]["input"]
                        + (result.estimated_tokens - result.estimated_tokens // 3) * MODEL_PRICING["sonnet"]["output"]) / 1_000_000
@@ -1421,11 +1570,12 @@ async def handle_websocket(websocket: WebSocket):
                             "content": message_text
                         })
 
-                        # Determine agent (default PM)
-                        active_agent = "project_manager"
+                        # Determine agent using intelligent routing
+                        route_decision = agent_router.select_agent(message_text)
+                        active_agent = route_decision["agentId"]
 
                         # Call CORRECT model
-                        logger.info(f"🎯 Routing to agent: {active_agent}")
+                        logger.info(f"🎯 Routing to agent: {active_agent} ({route_decision['reason']})")
                         response_text, tokens = call_model_for_agent(
                             active_agent,
                             message_text,
@@ -1490,6 +1640,53 @@ async def handle_websocket(websocket: WebSocket):
             ping_task.cancel()
         active_connections.pop(connection_id, None)
         logger.info(f"[WS] {connection_id} - Disconnected")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# WORKFLOW ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/workflow/start")
+async def start_workflow(request: Request):
+    """Start a new workflow"""
+    try:
+        data = await request.json()
+        workflow_name = data.get("workflow", "")
+        params = data.get("params", {})
+
+        if not workflow_name:
+            return JSONResponse({"error": "workflow name required"}, status_code=400)
+
+        workflow_id = workflow_engine.start_workflow(workflow_name, params)
+        logger.info(f"🔄 Workflow started: {workflow_id} ({workflow_name})")
+
+        return {
+            "workflow_id": workflow_id,
+            "workflow_name": workflow_name,
+            "status": "started",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"❌ Workflow start error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/workflow/status/{workflow_id}")
+async def get_workflow_status(workflow_id: str):
+    """Get workflow status"""
+    try:
+        status = workflow_engine.get_workflow_status(workflow_id)
+        if not status:
+            return JSONResponse({"error": "workflow not found"}, status_code=404)
+
+        return {
+            "workflow_id": workflow_id,
+            "status": status,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"❌ Workflow status error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: openclaw-gateway-hpa
-  namespace: default
+  namespace: openclaw
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -62,7 +62,7 @@ spec:
 # kind: ScaledObject
 # metadata:
 #   name: openclaw-gateway-queue
-#   namespace: default
+#   namespace: openclaw
 # spec:
 #   scaleTargetRef:
 #     name: openclaw-gateway

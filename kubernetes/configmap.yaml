@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: openclaw-config
-  namespace: default
+  namespace: openclaw
 data:
   log-level: "info"
   config.json: |

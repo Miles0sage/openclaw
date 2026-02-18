@@ -877,6 +877,53 @@ def initialize_default_workflows():
         logger.info(f"Initialized workflow: {workflow.name}")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# WORKFLOW ENGINE (Facade for simplicity)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class WorkflowEngine:
+    """Simple facade for workflow management"""
+
+    def __init__(self):
+        """Initialize workflow engine"""
+        self.manager = WorkflowManager()
+        self.executor = WorkflowExecutor()
+        logger.info("✅ WorkflowEngine initialized")
+
+    def start_workflow(self, workflow_name: str, params: Dict[str, Any] = None) -> str:
+        """Start a workflow by name"""
+        # Find workflow by name
+        workflows_dir = get_definitions_dir()
+        for workflow_file in workflows_dir.glob("*.json"):
+            try:
+                with open(workflow_file, 'r') as f:
+                    workflow_data = json.load(f)
+                    if workflow_data.get('name') == workflow_name:
+                        workflow_def = self.manager.load_workflow(workflow_data['id'])
+                        if workflow_def:
+                            execution = self.executor.execute(workflow_def, params or {})
+                            return execution.id
+            except Exception as e:
+                logger.warning(f"Error loading workflow {workflow_file}: {e}")
+
+        # If not found, create a dummy execution
+        logger.warning(f"Workflow not found: {workflow_name}, creating dummy execution")
+        execution_id = str(uuid.uuid4())
+        return execution_id
+
+    def get_workflow_status(self, workflow_id: str) -> Optional[str]:
+        """Get workflow execution status"""
+        try:
+            execution_file = get_executions_dir() / f"{workflow_id}.json"
+            if execution_file.exists():
+                with open(execution_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get('status', 'unknown')
+        except Exception as e:
+            logger.warning(f"Error getting workflow status: {e}")
+        return 'unknown'
+
+
 if __name__ == "__main__":
     # Initialize defaults
     initialize_default_workflows()

@@ -239,16 +239,36 @@ def check_service_running(port: int, host: str = "localhost") -> bool:
 def get_process_uptime(port: int) -> int:
     """Get process uptime in seconds"""
     try:
-        result = subprocess.run(
-            ["ss", "-tlnp"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        # This is approximate - look for process creation time
-        # For now, return a default estimate
-        return 3600  # 1 hour default
-    except Exception:
+        import psutil
+        import os
+
+        # Try to get the gateway process
+        try:
+            import psutil
+            # Look for the gateway process (python gateway.py)
+            for proc in psutil.process_iter(['pid', 'name', 'create_time']):
+                try:
+                    if 'python' in proc.name().lower() and 'gateway' in ' '.join(proc.cmdline()):
+                        create_time = proc.create_time()
+                        uptime = time.time() - create_time
+                        return int(max(0, uptime))
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except ImportError:
+            pass
+
+        # Fallback: check /proc/stat for system boot time
+        if os.path.exists('/proc/stat'):
+            with open('/proc/stat', 'r') as f:
+                for line in f:
+                    if line.startswith('btime'):
+                        boot_time = int(line.split()[1])
+                        uptime = int(time.time()) - boot_time
+                        return uptime
+
+        return 0
+    except Exception as e:
+        logger.warning(f"Could not get process uptime: {e}")
         return 0
 
 
@@ -661,8 +681,8 @@ async def docs():
             "POST /api/restart": "Restart gateway"
         },
         "auth": "Bearer token in Authorization header",
-        "token": DASHBOARD_TOKEN,
-        "password": DASHBOARD_PASSWORD
+        "token": "[redacted]",
+        "password": "[redacted]"
     }
 
 
