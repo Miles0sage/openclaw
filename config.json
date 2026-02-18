@@ -503,7 +503,7 @@
     },
     "telegram": {
       "enabled": true,
-      "botToken": "${TELEGRAM_BOT_TOKEN}"
+      "botToken": "8327486359:AAGECiQ1DsVUuBtrMgGzXnANhI_B9nfQZIQ"
     },
     "discord": {
       "enabled": true,

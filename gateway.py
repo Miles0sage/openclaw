@@ -824,6 +824,7 @@ async def telegram_webhook(request: Request):
 
             # Send response back to Telegram
             telegram_token = CONFIG.get("channels", {}).get("telegram", {}).get("botToken", "")
+            logger.info(f"🔍 DEBUG: telegram_token length={len(telegram_token)}, starts with: {telegram_token[:20] if telegram_token else 'EMPTY'}")
             if telegram_token:
                 telegram_send_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
                 telegram_payload = {
