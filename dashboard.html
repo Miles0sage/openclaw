@@ -239,6 +239,7 @@
           <button class="nav-tab" onclick="switchTab('metrics')">📈 Metrics</button>
           <button class="nav-tab" onclick="switchTab('mobile')">📱 Mobile</button>
           <button class="nav-tab" onclick="switchTab('3d')">🎯 3D Visualization</button>
+          <button class="nav-tab" onclick="switchTab('secrets')">🔐 Secrets Manager</button>
           <button class="nav-tab" onclick="switchTab('docs')">📚 Documentation</button>
         </div>
       </div>
@@ -378,6 +379,19 @@
         </div>
         <div class="iframe-container" style="height: 800px">
           <iframe src="dashboard_3d.html" title="3D Visualization"></iframe>
+        </div>
+      </div>
+
+      <!-- Secrets Manager Tab -->
+      <div id="secrets" class="tab-content">
+        <div class="glass rounded-lg p-6 mb-8">
+          <h2 class="text-xl font-bold text-cyan-400 mb-2">🔐 Secrets Manager</h2>
+          <p class="text-slate-400 text-sm mb-4">
+            Manage API keys and environment variables securely
+          </p>
+        </div>
+        <div class="iframe-container" style="height: 800px">
+          <iframe src="dashboard_secrets.html" title="Secrets Manager"></iframe>
         </div>
       </div>
 
