@@ -483,6 +483,17 @@ async def root():
         }
     }
 
+@app.get("/test-version")
+async def test_version():
+    """Test endpoint to verify deployed version"""
+    return {
+        "status": "deployed",
+        "timestamp": datetime.now().isoformat(),
+        "auth_middleware": "active_with_exemptions",
+        "exempt_paths": ["/", "/health", "/telegram/webhook", "/slack/events"],
+        "version": "fixed-2026-02-18"
+    }
+
 @app.get("/health")
 async def health():
     """Health check endpoint"""
