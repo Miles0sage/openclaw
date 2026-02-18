@@ -499,8 +499,8 @@ async def health():
     """Health check endpoint"""
     return {
         "status": "operational",
-        "gateway": "OpenClaw",
-        "version": "2.0.0",
+        "gateway": "OpenClaw-FIXED-2026-02-18",
+        "version": "2.0.1-WEBHOOK-EXEMPTIONS",
         "agents_active": len(CONFIG.get("agents", {})),
         "timestamp": datetime.utcnow().isoformat()
     }
