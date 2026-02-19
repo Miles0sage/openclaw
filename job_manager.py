@@ -14,6 +14,7 @@ import logging
 logger = logging.getLogger("job_manager")
 
 JOBS_DIR = Path("/tmp/openclaw_jobs")
+JOBS_DIR.mkdir(parents=True, exist_ok=True)
 JOBS_FILE = JOBS_DIR / "jobs.jsonl"
 
 class Job:

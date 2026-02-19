@@ -142,6 +142,7 @@ class JobProgress:
     error: str = ""
     retries: int = 0
     cancelled: bool = False
+    workspace: str = ""                 # isolated per-job workspace directory
 
     def to_dict(self):
         return {
@@ -156,6 +157,7 @@ class JobProgress:
             "error": self.error,
             "retries": self.retries,
             "cancelled": self.cancelled,
+            "workspace": self.workspace,
         }
 
 
@@ -252,6 +254,11 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
     they are passed to the Claude API for tool_use; the agent iterates
     until it stops requesting tool calls.
 
+    CRITICAL FIX: When tools are required (execute, verify, deliver phases),
+    we ALWAYS use Claude Haiku with Anthropic provider, since only Anthropic
+    supports native tool_use. Non-Anthropic agents (Kimi, MiniMax, Deepseek)
+    are used for text-only phases (research, plan).
+
     Returns: {"text": str, "tokens": int, "tool_calls": list[dict], "cost_usd": float}
     """
     # Import here to avoid circular imports at module level
@@ -266,9 +273,18 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
     all_tool_calls = []
     final_text = ""
 
-    # Only Anthropic supports native tool_use; for other providers, fall back
-    # to a simple text call and parse tool requests from the response.
-    if provider == "anthropic" and tools:
+    # CRITICAL FIX: If tools are required, use Claude Haiku (Anthropic) for actual execution
+    # This ensures tool_use actually runs, not just gets described.
+    if tools:
+        # For tool-executing phases (execute, verify, deliver), ALWAYS use Claude Haiku
+        # It's the cheapest Anthropic model with native tool_use support ($0.25/$1.25 per 1M tokens)
+        if provider != "anthropic":
+            logger.info(
+                f"Tool execution required but provider='{provider}' doesn't support tool_use. "
+                f"Switching to claude-haiku-4-5-20251001 for phase={phase}, assigned_agent={agent_key}"
+            )
+            model = "claude-haiku-4-5-20251001"
+            provider = "anthropic"
         # Build messages
         messages = list(conversation or [])
         messages.append({"role": "user", "content": prompt})
@@ -354,7 +370,20 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                 })
 
             # Append assistant response + tool results to messages for next iteration
-            messages.append({"role": "assistant", "content": response.content})
+            # IMPORTANT: Serialize response.content to dicts (not SDK objects) to avoid JSON serialization errors
+            serialized_content = []
+            for block in response.content:
+                if block.type == "text":
+                    serialized_content.append({"type": "text", "text": block.text})
+                elif block.type == "tool_use":
+                    serialized_content.append({
+                        "type": "tool_use",
+                        "id": block.id,
+                        "name": block.name,
+                        "input": block.input
+                    })
+
+            messages.append({"role": "assistant", "content": serialized_content})
             messages.append({"role": "user", "content": tool_results})
 
         return {
@@ -370,11 +399,13 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
         response_text, tokens = await loop.run_in_executor(
             None, call_model_for_agent, agent_key, prompt, conversation
         )
+        # Estimate cost for non-Anthropic models based on tokens
+        est_cost = calculate_cost(model, tokens // 2, tokens // 2) if tokens else 0.0
         return {
             "text": response_text,
             "tokens": tokens,
             "tool_calls": [],
-            "cost_usd": 0.0,  # cost already logged inside call_model_for_agent
+            "cost_usd": est_cost,
         }
 
 
@@ -394,11 +425,15 @@ async def _research_phase(job: dict, agent_key: str, progress: JobProgress) -> s
 
     task = job["task"]
     project = job.get("project", "unknown")
+    workspace = progress.workspace
 
     prompt = (
         f"You are researching a task before planning and executing it.\n\n"
         f"PROJECT: {project}\n"
         f"TASK: {task}\n\n"
+        f"WORKSPACE DIRECTORY: {workspace}\n"
+        f"This is your isolated working directory for this job. Any files you need to\n"
+        f"clone, download, or create during research should go inside {workspace}/\n\n"
         f"Gather all the context you need:\n"
         f"1. Use research_task to understand the domain/technology involved\n"
         f"2. Use glob_files and grep_search to find relevant existing code\n"
@@ -531,6 +566,7 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
     tools = _filter_tools_for_phase(Phase.EXECUTE)
     results = []
     conversation_context = []
+    workspace = progress.workspace
 
     for step in plan.steps:
         if progress.cancelled:
@@ -546,6 +582,12 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
             f"You are executing step {step.index + 1} of {len(plan.steps)} for a job.\n\n"
             f"PROJECT: {job.get('project', 'unknown')}\n"
             f"OVERALL TASK: {job['task']}\n\n"
+            f"WORKSPACE DIRECTORY: {workspace}\n"
+            f"IMPORTANT: All file operations must be done inside your workspace directory: {workspace}\n"
+            f"- Clone repos there (e.g. git clone <url> {workspace}/repo)\n"
+            f"- Create new files there (e.g. file_write with path starting with {workspace}/)\n"
+            f"- Run shell commands from there (set cwd={workspace})\n"
+            f"Use absolute paths starting with {workspace}/ for all file operations.\n\n"
             f"RESEARCH CONTEXT:\n{research[:3000]}\n\n"
             f"CURRENT STEP: {step.description}\n"
             f"SUGGESTED TOOLS: {', '.join(step.tool_hints)}\n\n"
@@ -717,6 +759,7 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
     _save_progress(progress)
 
     project = job.get("project", "unknown")
+    workspace = progress.workspace
 
     # Map projects to repo paths
     project_paths = {
@@ -745,7 +788,10 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
         f"The task is complete and verified. Now deliver the results.\n\n"
         f"PROJECT: {project}\n"
         f"TASK: {job['task']}\n"
-        f"REPO PATH: {repo_path}\n\n"
+        f"REPO PATH: {repo_path}\n"
+        f"WORKSPACE DIRECTORY: {workspace}\n"
+        f"All output files from execution are located inside {workspace}/\n"
+        f"Copy or move files from {workspace}/ to {repo_path}/ as needed before committing.\n\n"
         f"Delivery steps:\n"
         f"1. Use git_operations with action='status' to see what changed (repo_path='{repo_path}')\n"
         f"2. Use git_operations with action='add' to stage the changes (repo_path='{repo_path}')\n"
@@ -780,12 +826,138 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
             "summary": deliver_text[:500],
         }
 
+    # ------------------------------------------------------------------
+    # Auto-delivery: GitHub PR creation
+    # After the agent has done its git work (commit/push via tools),
+    # we also imperatively call deliver_job_to_github() if the job has
+    # a delivery_config.repo set so a PR is always created.
+    # ------------------------------------------------------------------
+    pr_url = ""
+    deploy_url = ""
+
+    job_data = get_job(progress.job_id) or job
+    delivery_config = job_data.get("delivery_config", {}) if isinstance(job_data, dict) else {}
+    repo = delivery_config.get("repo", "")
+
+    if repo:
+        try:
+            from github_integration import deliver_job_to_github as _deliver_to_github
+
+            # Collect workspace files so the PR body lists what changed.
+            ws_path = Path(f"/tmp/openclaw_job_runs/{progress.job_id}/workspace")
+            files_changed: dict = {}
+            if ws_path.exists():
+                for f in ws_path.rglob("*"):
+                    if f.is_file() and not f.name.startswith("."):
+                        rel = str(f.relative_to(ws_path))
+                        files_changed[rel] = "Modified by OpenClaw autonomous job"
+
+            if files_changed:
+                logger.info(
+                    f"Auto-delivering job {progress.job_id} to GitHub repo={repo} "
+                    f"({len(files_changed)} files)"
+                )
+                pr_result = await _deliver_to_github(
+                    job_id=progress.job_id,
+                    repo=repo,
+                    files_changed=files_changed,
+                    auto_merge=delivery_config.get("auto_merge", False),
+                )
+                pr_url = pr_result.get("pr_url", "")
+                delivery["pr_url"] = pr_url
+                delivery["pr_number"] = pr_result.get("pr_number", 0)
+                delivery["branch"] = pr_result.get("branch", "")
+                _log_phase(progress.job_id, "deliver", {
+                    "event": "github_pr_created",
+                    "pr_url": pr_url,
+                    "branch": pr_result.get("branch", ""),
+                    "files_count": len(files_changed),
+                })
+                logger.info(f"GitHub PR created for job {progress.job_id}: {pr_url}")
+            else:
+                logger.info(
+                    f"Job {progress.job_id}: delivery_config.repo set but no workspace "
+                    f"files found — skipping GitHub PR creation"
+                )
+        except Exception as e:
+            logger.warning(f"Auto-delivery to GitHub failed for {progress.job_id}: {e}")
+            _log_phase(progress.job_id, "deliver", {
+                "event": "github_pr_failed",
+                "error": str(e),
+            })
+
+    # ------------------------------------------------------------------
+    # Auto-deploy: Vercel deployment
+    # Triggered when workspace contains vercel.json, or package.json AND
+    # delivery_config has deploy_vercel=True.
+    # ------------------------------------------------------------------
+    ws_path = Path(f"/tmp/openclaw_job_runs/{progress.job_id}/workspace")
+    vercel_json = ws_path / "vercel.json"
+    package_json = ws_path / "package.json"
+
+    if vercel_json.exists() or (
+        package_json.exists() and delivery_config.get("deploy_vercel", False)
+    ):
+        try:
+            logger.info(
+                f"Auto-deploying job {progress.job_id} to Vercel from {ws_path}"
+            )
+            loop = asyncio.get_event_loop()
+            raw_deploy = await loop.run_in_executor(
+                None, execute_tool, "vercel_deploy", {
+                    "action": "deploy",
+                    "project_path": str(ws_path),
+                }
+            )
+            deploy_url = str(raw_deploy)[:500]
+            delivery["vercel_deploy"] = deploy_url
+            _log_phase(progress.job_id, "deliver", {
+                "event": "vercel_deployed",
+                "result": deploy_url,
+            })
+            logger.info(
+                f"Vercel deploy complete for job {progress.job_id}: {deploy_url}"
+            )
+        except Exception as e:
+            logger.warning(f"Vercel auto-deploy failed for {progress.job_id}: {e}")
+            _log_phase(progress.job_id, "deliver", {
+                "event": "vercel_deploy_failed",
+                "error": str(e),
+            })
+
+    # ------------------------------------------------------------------
+    # Update intake job record with final delivery URLs
+    # ------------------------------------------------------------------
+    try:
+        from intake_routes import update_job_status as intake_update_status
+        parts = []
+        if pr_url:
+            parts.append(f"PR={pr_url}")
+        if deploy_url:
+            parts.append(f"Deploy={deploy_url[:120]}")
+        log_msg = f"Delivered: {', '.join(parts)}" if parts else "Delivered (no URLs)"
+        intake_update_status(
+            progress.job_id,
+            "done",
+            log_message=log_msg,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to update intake status for {progress.job_id}: {e}")
+
+    # Persist delivery URLs into the delivery dict so result.json is complete
+    delivery["delivery_urls"] = {
+        "pr_url": pr_url,
+        "deploy_url": deploy_url,
+    }
+
     progress.phase_status = "done"
     _save_progress(progress)
 
     _log_phase(job["id"], "deliver", {
         "event": "phase_complete",
         "delivered": delivery.get("delivered", True),
+        "pr_url": pr_url,
+        "deploy_url": deploy_url,
         "cost_usd": result["cost_usd"],
     })
 
@@ -1017,10 +1189,17 @@ class AutonomousRunner:
         agent_key = _select_agent_for_job(job)
         logger.info(f"Job {job_id}: agent={agent_key}, project={job.get('project','?')}")
 
+        # Create an isolated workspace directory for this job so concurrent jobs
+        # cannot interfere with each other's files on the shared VPS filesystem.
+        workspace = Path(f"/tmp/openclaw_job_runs/{job_id}/workspace")
+        workspace.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Job {job_id}: workspace created at {workspace}")
+
         # Initialize progress tracking
         progress = JobProgress(
             job_id=job_id,
             started_at=started_at,
+            workspace=str(workspace),
         )
         self._progress[job_id] = progress
         _save_progress(progress)
@@ -1117,6 +1296,39 @@ class AutonomousRunner:
                 f"Job {job_id} COMPLETED: success={result['success']}, "
                 f"cost=${progress.cost_usd:.4f}"
             )
+
+            # Cross-channel notification: post to Slack + broadcast SSE event
+            try:
+                from gateway import send_slack_message, broadcast_event
+                task_desc = job.get("task", "")[:100]
+                pr_url = result.get("phases", {}).get("deliver", {}).get("pr_url", "")
+                deploy_url = result.get("phases", {}).get("deliver", {}).get("vercel_deploy", "")
+
+                slack_msg = (
+                    f"✅ *Job Completed*\n"
+                    f"*Task:* {task_desc}\n"
+                    f"*Agent:* {result.get('agent', 'unknown')}\n"
+                    f"*Cost:* ${progress.cost_usd:.4f}\n"
+                    f"*Status:* {'Success' if result['success'] else 'Failed'}"
+                )
+                if pr_url:
+                    slack_msg += f"\n*PR:* {pr_url}"
+                if deploy_url:
+                    slack_msg += f"\n*Deploy:* {deploy_url}"
+
+                await send_slack_message("", slack_msg)
+
+                broadcast_event({
+                    "type": "job_completed",
+                    "job_id": job_id,
+                    "success": result["success"],
+                    "cost": progress.cost_usd,
+                    "task": task_desc,
+                    "agent": result.get("agent", ""),
+                    "timestamp": _now_iso(),
+                })
+            except Exception as notify_err:
+                logger.warning(f"Job completion notification failed: {notify_err}")
 
         except BudgetExceededError as e:
             result["error"] = str(e)

@@ -283,6 +283,7 @@ async def cancel_job(job_id: str = Path(..., description="The job UUID")) -> Dic
         )
 
     now = _now_iso()
+    old_status = job["status"]
     job["status"] = "cancelled"
     job["current_phase"] = "cancelled"
     job["updated_at"] = now
@@ -290,6 +291,13 @@ async def cancel_job(job_id: str = Path(..., description="The job UUID")) -> Dic
     _save_jobs(jobs)
 
     logger.info("Job %s cancelled", job_id[:8])
+
+    # Trigger email notification (non-blocking)
+    try:
+        from email_notifications import notify_status_change
+        notify_status_change(job_id, old_status, "cancelled", job)
+    except Exception as e:
+        logger.error("Failed to trigger email notification: %s", e)
 
     return {"job_id": job_id, "status": "cancelled", "message": "Job cancelled successfully"}
 
@@ -405,6 +413,14 @@ def update_job_status(job_id: str, status: str, log_message: str = None, cost_de
 
     _save_jobs(jobs)
     logger.info("Job %s: %s -> %s", job_id[:8], old_status, status)
+
+    # Trigger email notification (non-blocking)
+    try:
+        from email_notifications import notify_status_change
+        notify_status_change(job_id, old_status, status, job)
+    except Exception as e:
+        logger.error("Failed to trigger email notification: %s", e)
+
     return True
 
 

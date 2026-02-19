@@ -97,6 +97,18 @@ from output_verifier import OutputVerifier
 # Import client intake routes
 from intake_routes import router as intake_router
 
+# Import client auth & billing
+from client_auth import router as client_auth_router
+
+# Import GitHub PR integration
+from github_integration import router as github_router
+
+# Import email notifications
+from email_notifications import router as email_router, EmailNotifier
+
+# Import error recovery
+from error_recovery import ErrorRecoveryManager, init_error_recovery
+
 # Import agent registry (auto-registration system)
 from agent_registry import (
     init_agent_registry,
@@ -381,13 +393,22 @@ app.include_router(audit_router)
 
 # Include client intake routes
 app.include_router(intake_router)
+
+# Include client auth & billing routes
+app.include_router(client_auth_router)
+
+# Include GitHub PR integration routes
+app.include_router(github_router)
+
+# Include email notification routes
+app.include_router(email_router)
 # Authentication token - read from environment for security
 AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3")
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard.html", "/monitoring", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard.html", "/monitoring", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/api/health/detailed", "/api/health/circuit-breakers", "/api/health/alerts"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
@@ -542,6 +563,14 @@ async def startup_autonomous_runner():
         logger.info("✅ Review cycle engine + output verifier initialized")
     except Exception as err:
         logger.error(f"Failed to init review/verifier: {err}")
+
+    # Initialize error recovery system
+    try:
+        recovery = await init_error_recovery()
+        app.include_router(recovery.create_routes())
+        logger.info("✅ Error recovery system initialized (circuit breakers + crash recovery)")
+    except Exception as err:
+        logger.error(f"Failed to init error recovery: {err}")
 
 
 @app.on_event("shutdown")
@@ -1287,9 +1316,23 @@ async def chat_endpoint(message: Message):
             with open(TASKS_FILE, 'w') as f:
                 json.dump(tasks, f, indent=2)
 
+            # Also enqueue in the autonomous runner so chat-created tasks get executed
+            jm_job_id = None
+            try:
+                jm_job = create_job(
+                    project=new_task.get("title", "chat-task"),
+                    task=message.content,
+                    priority="P1"
+                )
+                jm_job_id = jm_job.id
+                logger.info(f"✅ Runner job created for chat task: {jm_job_id}")
+            except Exception as _je:
+                logger.warning(f"Runner job creation failed (non-fatal): {_je}")
+
             task_response = (
                 f"Task created: **{task_match[:200]}**\n"
-                f"ID: `{new_task['id']}`\n"
+                f"ID: `{new_task['id']}`"
+                + (f" | Runner job: `{jm_job_id}`" if jm_job_id else "") + "\n"
                 f"Assigned to: {routing.get('agentId', 'project_manager')} "
                 f"({routing.get('reason', '')})\n\n— Overseer"
             )
@@ -1305,6 +1348,7 @@ async def chat_endpoint(message: Message):
                              "timestamp": datetime.utcnow().isoformat()})
 
             return {"response": task_response, "agent": "project_manager", "task_created": new_task,
+                    "runner_job_id": jm_job_id,
                     "sessionKey": session_key, "historyLength": len(chat_history[session_key])}
         except Exception as e:
             logger.error(f"Task creation failed: {e}")
@@ -1995,9 +2039,23 @@ async def telegram_webhook(request: Request):
                 with open(TASKS_FILE, 'w') as f:
                     json.dump(tasks, f, indent=2)
 
+                # Also enqueue in the autonomous runner so Telegram-created tasks get executed
+                tg_jm_job_id = None
+                try:
+                    tg_jm_job = create_job(
+                        project=new_task.get("title", "telegram-task"),
+                        task=text,
+                        priority="P1"
+                    )
+                    tg_jm_job_id = tg_jm_job.id
+                    logger.info(f"✅ Runner job created for Telegram task: {tg_jm_job_id}")
+                except Exception as _tje:
+                    logger.warning(f"Runner job creation failed for Telegram task (non-fatal): {_tje}")
+
                 task_response = (
                     f"Task created: {tg_task_match[:200]}\n"
-                    f"ID: {new_task['id']}\n"
+                    f"ID: {new_task['id']}"
+                    + (f" | Runner job: {tg_jm_job_id}" if tg_jm_job_id else "") + "\n"
                     f"Assigned to: {routing.get('agentId', 'project_manager')}"
                 )
                 broadcast_event({"type": "task_created", "agent": "project_manager",
@@ -2211,9 +2269,23 @@ async def slack_events(request: Request):
                     with open(TASKS_FILE, 'w') as f:
                         json.dump(tasks, f, indent=2)
 
+                    # Also enqueue in the autonomous runner so Slack-created tasks get executed
+                    sl_jm_job_id = None
+                    try:
+                        sl_jm_job = create_job(
+                            project=new_task.get("title", "slack-task"),
+                            task=text,
+                            priority="P1"
+                        )
+                        sl_jm_job_id = sl_jm_job.id
+                        logger.info(f"✅ Runner job created for Slack task: {sl_jm_job_id}")
+                    except Exception as _sje:
+                        logger.warning(f"Runner job creation failed for Slack task (non-fatal): {_sje}")
+
                     task_response = (
                         f"Task created: *{sl_task_match[:200]}*\n"
-                        f"ID: `{new_task['id']}`\n"
+                        f"ID: `{new_task['id']}`"
+                        + (f" | Runner job: `{sl_jm_job_id}`" if sl_jm_job_id else "") + "\n"
                         f"Assigned to: {routing.get('agentId', 'project_manager')}"
                     )
                     broadcast_event({"type": "task_created", "agent": "project_manager",
