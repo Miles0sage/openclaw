@@ -70,7 +70,7 @@ async function gatewayFetch(env: Env, path: string, options: RequestInit = {}): 
   const url = `${env.GATEWAY_URL}${path}`;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${env.GATEWAY_TOKEN}`,
+    "X-Auth-Token": env.GATEWAY_TOKEN,
     ...(options.headers as Record<string, string> | undefined),
   };
 
@@ -234,10 +234,9 @@ app.post("/api/chat", async (c) => {
   const gatewayResp = await gatewayFetch(c.env, "/api/chat", {
     method: "POST",
     body: JSON.stringify({
-      message,
+      content: message,
       sessionKey: key,
-      agent: agent || undefined,
-      model: model || undefined,
+      agent_id: agent || "pm",
     }),
   });
 

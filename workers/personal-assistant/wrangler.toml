@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 # Environment variables (override via wrangler secret for production)
 [vars]
 GATEWAY_URL = "https://gateway.overseerclaw.uk"
-GATEWAY_TOKEN = "moltbot-secure-token-2026"
+GATEWAY_TOKEN = "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"
 ENVIRONMENT = "development"
 RATE_LIMIT_PER_MINUTE = "30"
 
