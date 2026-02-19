@@ -30,6 +30,7 @@ Agents traverse this graph to make decisions. Each file is a standalone claim wi
 - [[bug-fix-workflow]] — issue triage → fix → test → deploy
 - [[security-audit-workflow]] — full OWASP audit process
 - [[deployment-workflow]] — staging → testing → production
+- [[incident-response]] — production outage playbook
 
 ## Tools & Integrations
 
@@ -44,3 +45,9 @@ Agents traverse this graph to make decisions. Each file is a standalone claim wi
 - [[model-pricing]] — per-token costs for each model
 - [[budget-enforcement]] — daily/monthly limits, alerts
 - [[cost-optimization-patterns]] — reduce spend without losing quality
+
+## Operations
+
+- [[testing-strategy]] — what to test, when tests gate deployment
+- [[client-communication]] — tone, channel, timing for client interactions
+- [[agent-onboarding]] — how to add a new agent to the system
