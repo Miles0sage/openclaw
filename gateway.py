@@ -594,6 +594,57 @@ def get_agent_config(agent_key: str) -> Dict:
     return CONFIG.get("agents", {}).get(agent_key, {})
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# AUTO-ESCALATION CHAIN — If cheap agent fails, retry with more capable one
+# ═══════════════════════════════════════════════════════════════════════
+
+ESCALATION_CHAIN = {
+    # agent_id -> fallback agent_id (cheaper → more capable)
+    "coder_agent": "elite_coder",      # Kimi 2.5 → MiniMax M2.5
+    "elite_coder": "project_manager",   # MiniMax M2.5 → Claude Opus
+    "hacker_agent": "project_manager",  # Kimi Reasoner → Claude Opus
+    "database_agent": None,             # Already on Opus, no escalation
+    "project_manager": None,            # Top of chain
+}
+
+def call_model_with_escalation(agent_key: str, prompt: str, conversation: list = None, max_escalations: int = 2) -> tuple[str, int, str]:
+    """
+    Call model with automatic escalation on failure.
+    Returns: (response_text, tokens, actual_agent_used)
+    """
+    current_agent = agent_key
+    attempts = 0
+
+    while current_agent and attempts <= max_escalations:
+        try:
+            response_text, tokens = call_model_for_agent(current_agent, prompt, conversation)
+            if attempts > 0:
+                logger.info(f"⬆️ Escalation success: {agent_key} → {current_agent} (attempt {attempts + 1})")
+                broadcast_event({
+                    "type": "escalation_success",
+                    "agent": current_agent,
+                    "message": f"Escalated from {agent_key} → {current_agent} (succeeded)",
+                })
+            return response_text, tokens, current_agent
+        except Exception as e:
+            logger.warning(f"⚠️ Agent {current_agent} failed: {e}")
+            broadcast_event({
+                "type": "escalation_attempt",
+                "agent": current_agent,
+                "message": f"{current_agent} failed: {str(e)[:60]}. Escalating...",
+            })
+            next_agent = ESCALATION_CHAIN.get(current_agent)
+            if next_agent:
+                logger.info(f"⬆️ Escalating: {current_agent} → {next_agent}")
+                current_agent = next_agent
+                attempts += 1
+            else:
+                raise  # No escalation path, propagate error
+
+    # Should not reach here, but just in case
+    raise RuntimeError(f"Escalation chain exhausted for {agent_key} after {attempts} attempts")
+
+
 def call_model_for_agent(agent_key: str, prompt: str, conversation: list = None) -> tuple[str, int]:
     """
     Route to correct model based on agent config
@@ -1282,12 +1333,15 @@ async def chat_endpoint(message: Message):
                          "message": f"{agent_id} is thinking...",
                          "timestamp": datetime.utcnow().isoformat()})
 
-        # Call model with last 10 messages for context
-        response_text, tokens = call_model_for_agent(
+        # Call model with last 10 messages for context (with auto-escalation)
+        response_text, tokens, actual_agent = call_model_with_escalation(
             agent_id,
             message.content,
             chat_history[session_key][-10:]
         )
+        if actual_agent != agent_id:
+            logger.info(f"⬆️ Chat escalated: {agent_id} → {actual_agent}")
+            agent_id = actual_agent  # Use the agent that actually responded
 
         # Store in cache
         if response_cache:
@@ -1312,32 +1366,59 @@ async def chat_endpoint(message: Message):
         save_session_history(session_key, chat_history[session_key])
 
         # ═ DELEGATION: Check if PM wants to delegate sub-tasks to specialists
+        # With memory sharing (session context) and auto-escalation
         delegation_results = []
         if agent_id in ("project_manager", "pm"):
             delegations = agent_router.auto_delegate(response_text, message.content)
             if delegations:
                 logger.info(f"🤝 Delegation: {len(delegations)} sub-tasks from PM")
+
+                # Build shared context from session for memory sharing
+                session_context = ""
+                recent_history = chat_history.get(session_key, [])[-6:]  # Last 3 exchanges
+                if recent_history:
+                    context_parts = []
+                    for msg in recent_history:
+                        role = msg.get("role", "user")
+                        content = msg.get("content", "")[:500]  # Truncate for cost
+                        context_parts.append(f"{role}: {content}")
+                    session_context = (
+                        "\n--- SESSION CONTEXT (shared by Overseer) ---\n"
+                        + "\n".join(context_parts)
+                        + "\n--- END CONTEXT ---\n\n"
+                    )
+
                 for delegation in delegations:
                     try:
                         broadcast_event({"type": "delegation_start", "agent": delegation["agent_id"],
                                          "message": f"Delegated by PM: {delegation['task'][:80]}..."})
-                        delegate_response, delegate_tokens = call_model_for_agent(
-                            delegation["agent_id"], delegation["task"], conversation=None)
+
+                        # Inject session context into delegation task (memory sharing)
+                        enriched_task = session_context + delegation["task"] if session_context else delegation["task"]
+
+                        # Use auto-escalation — if target agent fails, escalate up
+                        delegate_response, delegate_tokens, actual_agent = call_model_with_escalation(
+                            delegation["agent_id"], enriched_task, conversation=None)
                         delegation_results.append({
-                            "agent": delegation["agent_id"],
+                            "agent": actual_agent,
+                            "original_agent": delegation["agent_id"],
                             "task": delegation["task"],
                             "response": delegate_response,
-                            "tokens": delegate_tokens
+                            "tokens": delegate_tokens,
+                            "escalated": actual_agent != delegation["agent_id"]
                         })
-                        broadcast_event({"type": "delegation_end", "agent": delegation["agent_id"],
-                                         "message": f"{delegation['agent_id']} completed delegation ({delegate_tokens} tokens)"})
+                        broadcast_event({"type": "delegation_end", "agent": actual_agent,
+                                         "message": f"{actual_agent} completed delegation ({delegate_tokens} tokens)"
+                                         + (f" [escalated from {delegation['agent_id']}]" if actual_agent != delegation["agent_id"] else "")})
                     except Exception as e:
-                        logger.error(f"Delegation to {delegation['agent_id']} failed: {e}")
+                        logger.error(f"Delegation to {delegation['agent_id']} failed (all escalations exhausted): {e}")
                         delegation_results.append({
                             "agent": delegation["agent_id"],
+                            "original_agent": delegation["agent_id"],
                             "task": delegation["task"],
-                            "response": f"[Delegation failed: {str(e)}]",
-                            "tokens": 0
+                            "response": f"[Delegation failed after escalation: {str(e)}]",
+                            "tokens": 0,
+                            "escalated": False
                         })
 
                 # Synthesize specialist responses via PM
@@ -1754,6 +1835,67 @@ async def telegram_webhook(request: Request):
 
         logger.info(f"📱 Telegram message from {user_id} in chat {chat_id}: {text[:50]}")
 
+        # ═ TASK CREATION: Detect "create task:", "todo:", etc. from Telegram
+        import re as _re_tg
+        _TG_TASK_PATTERNS = [
+            r'^create task[:\s]+(.+)', r'^todo[:\s]+(.+)', r'^add task[:\s]+(.+)',
+            r'^remind me to[:\s]+(.+)', r'^new task[:\s]+(.+)',
+        ]
+        tg_task_match = None
+        for _p in _TG_TASK_PATTERNS:
+            _m = _re_tg.match(_p, text.strip(), _re_tg.IGNORECASE)
+            if _m:
+                tg_task_match = _m.group(1).strip()
+                break
+
+        if tg_task_match:
+            try:
+                if TASKS_FILE.exists():
+                    with open(TASKS_FILE, 'r') as f:
+                        tasks = json.load(f)
+                else:
+                    tasks = []
+                routing = agent_router.select_agent(tg_task_match)
+                new_task = {
+                    "id": str(uuid.uuid4())[:8],
+                    "title": tg_task_match[:200],
+                    "description": text,
+                    "status": "todo",
+                    "agent": routing.get("agentId", "project_manager"),
+                    "created_at": datetime.utcnow().isoformat() + "Z",
+                    "updated_at": datetime.utcnow().isoformat() + "Z",
+                    "source": "telegram",
+                    "session_key": session_key
+                }
+                tasks.append(new_task)
+                with open(TASKS_FILE, 'w') as f:
+                    json.dump(tasks, f, indent=2)
+
+                task_response = (
+                    f"Task created: {tg_task_match[:200]}\n"
+                    f"ID: {new_task['id']}\n"
+                    f"Assigned to: {routing.get('agentId', 'project_manager')}"
+                )
+                broadcast_event({"type": "task_created", "agent": "project_manager",
+                                 "message": f"Task from Telegram: {tg_task_match[:80]}"})
+
+                # Send confirmation to Telegram
+                telegram_token = CONFIG.get("channels", {}).get("telegram", {}).get("botToken", "")
+                if telegram_token.startswith("${") and telegram_token.endswith("}"):
+                    telegram_token = os.getenv(telegram_token[2:-1], "")
+                if not telegram_token:
+                    telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+                if telegram_token:
+                    async with httpx.AsyncClient(timeout=10) as tg_client:
+                        await tg_client.post(
+                            f"https://api.telegram.org/bot{telegram_token}/sendMessage",
+                            json={"chat_id": chat_id, "text": task_response, "reply_to_message_id": message["message_id"]}
+                        )
+                return {"ok": True}
+            except Exception as e:
+                logger.error(f"Telegram task creation failed: {e}")
+                # Fall through to normal processing
+
         # Route message through OpenClaw chat endpoint
         try:
             # Create message for chat endpoint
@@ -1908,6 +2050,55 @@ async def slack_events(request: Request):
             session_key = f"slack:{user_id}:{channel_id}"
 
             logger.info(f"💬 Slack message from {user_id} in {channel_id}: {text[:50]}")
+
+            # ═ TASK CREATION: Detect "create task:", "todo:", etc. from Slack
+            import re as _re_sl
+            _SL_TASK_PATTERNS = [
+                r'^create task[:\s]+(.+)', r'^todo[:\s]+(.+)', r'^add task[:\s]+(.+)',
+                r'^remind me to[:\s]+(.+)', r'^new task[:\s]+(.+)',
+            ]
+            sl_task_match = None
+            for _p in _SL_TASK_PATTERNS:
+                _m = _re_sl.match(_p, text.strip(), _re_sl.IGNORECASE)
+                if _m:
+                    sl_task_match = _m.group(1).strip()
+                    break
+
+            if sl_task_match:
+                try:
+                    if TASKS_FILE.exists():
+                        with open(TASKS_FILE, 'r') as f:
+                            tasks = json.load(f)
+                    else:
+                        tasks = []
+                    routing = agent_router.select_agent(sl_task_match)
+                    new_task = {
+                        "id": str(uuid.uuid4())[:8],
+                        "title": sl_task_match[:200],
+                        "description": text,
+                        "status": "todo",
+                        "agent": routing.get("agentId", "project_manager"),
+                        "created_at": datetime.utcnow().isoformat() + "Z",
+                        "updated_at": datetime.utcnow().isoformat() + "Z",
+                        "source": "slack",
+                        "session_key": session_key
+                    }
+                    tasks.append(new_task)
+                    with open(TASKS_FILE, 'w') as f:
+                        json.dump(tasks, f, indent=2)
+
+                    task_response = (
+                        f"Task created: *{sl_task_match[:200]}*\n"
+                        f"ID: `{new_task['id']}`\n"
+                        f"Assigned to: {routing.get('agentId', 'project_manager')}"
+                    )
+                    broadcast_event({"type": "task_created", "agent": "project_manager",
+                                     "message": f"Task from Slack: {sl_task_match[:80]}"})
+                    await send_slack_message(channel_id, task_response, thread_ts)
+                    return {"ok": True}
+                except Exception as e:
+                    logger.error(f"Slack task creation failed: {e}")
+                    # Fall through to normal processing
 
             try:
                 # Route message through agent router
@@ -3122,6 +3313,64 @@ async def list_workflows_endpoint():
     return {"success": True, "workflows": workflows, "total": len(workflows)}
 
 
+@app.get("/api/workflows/templates")
+async def list_workflow_templates():
+    """List available workflow templates"""
+    templates = {
+        name: {"name": t["name"], "description": t["description"], "steps_count": len(t["steps"])}
+        for name, t in WORKFLOW_TEMPLATES.items()
+    }
+    return {"success": True, "templates": templates, "total": len(templates)}
+
+
+@app.post("/api/workflows/templates/{template_name}")
+async def create_workflow_from_template(template_name: str, request: Request):
+    """Create and start a workflow from a template. Optionally pass context in request body."""
+    if template_name not in WORKFLOW_TEMPLATES:
+        raise HTTPException(status_code=404, detail=f"Template '{template_name}' not found. Available: {', '.join(WORKFLOW_TEMPLATES.keys())}")
+
+    template = WORKFLOW_TEMPLATES[template_name]
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    context = body.get("context", "")
+    auto_start = body.get("auto_start", True)
+
+    steps = []
+    for i, step in enumerate(template["steps"]):
+        new_step = dict(step)
+        if i == 0 and context:
+            new_step["task"] = f"Context: {context}\n\n{new_step['task']}"
+        steps.append(new_step)
+
+    workflow_id = str(uuid.uuid4())[:8]
+    workflow = {
+        "id": workflow_id,
+        "name": f"{template['name']} ({workflow_id})",
+        "template": template_name,
+        "steps": steps,
+        "status": "created",
+        "created_at": datetime.utcnow().isoformat() + "Z",
+        "results": [],
+        "current_step": 0,
+        "context": context[:500] if context else ""
+    }
+
+    workflows = _load_workflows()
+    workflows.append(workflow)
+    _save_workflows(workflows)
+
+    if auto_start:
+        asyncio.create_task(_execute_workflow(workflow_id))
+        workflow["status"] = "running"
+
+    broadcast_event({"type": "workflow_created", "agent": "system",
+                     "message": f"Template '{template_name}' started ({len(steps)} steps)"})
+
+    return {"success": True, "workflow": workflow}
+
+
 @app.get("/api/workflows/{workflow_id}")
 async def get_workflow_endpoint(workflow_id: str):
     """Get workflow status and results"""
@@ -3270,6 +3519,63 @@ async def _execute_workflow(workflow_id: str):
 
     broadcast_event({"type": "workflow_completed", "agent": "system",
                      "message": f"Workflow '{workflow.get('name', workflow_id)}' completed"})
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# WORKFLOW TEMPLATES — Pre-built workflows callable by name
+# ═══════════════════════════════════════════════════════════════════════
+
+WORKFLOW_TEMPLATES = {
+    "security-audit": {
+        "name": "Security Audit",
+        "description": "Full OWASP security audit with remediation plan",
+        "steps": [
+            {"agent": "hacker_agent", "task": "Conduct a comprehensive OWASP Top 10 security audit. Identify all vulnerabilities, rate severity (Critical/High/Medium/Low), and provide specific attack vectors."},
+            {"agent": "coder_agent", "task": "Based on the security findings above, write code fixes for each vulnerability. Include before/after code snippets with explanations."},
+            {"agent": "project_manager", "task": "Synthesize the security audit and code fixes into a prioritized remediation plan with timeline estimates and cost impact."}
+        ]
+    },
+    "code-review": {
+        "name": "Code Review",
+        "description": "Multi-agent code review (quality + security + architecture)",
+        "steps": [
+            {"agent": "elite_coder", "task": "Review the code for architecture quality, design patterns, performance issues, and maintainability. Provide specific improvement suggestions."},
+            {"agent": "hacker_agent", "task": "Review the code for security vulnerabilities, injection risks, auth bypass, and data leakage. Flag anything OWASP-relevant."},
+            {"agent": "project_manager", "task": "Combine the code quality and security reviews into a single report with prioritized action items."}
+        ]
+    },
+    "deploy-pipeline": {
+        "name": "Deploy Pipeline",
+        "description": "Build → Test → Security Check → Deploy preparation",
+        "steps": [
+            {"agent": "coder_agent", "task": "Verify the build succeeds. Check for TypeScript errors, missing dependencies, and test failures. Report build status."},
+            {"agent": "hacker_agent", "task": "Run a pre-deployment security check. Verify no secrets in code, check dependency vulnerabilities, and confirm auth is configured."},
+            {"agent": "project_manager", "task": "Create a deployment checklist based on the build and security results. Include rollback plan and monitoring steps."}
+        ]
+    },
+    "full-website": {
+        "name": "Full Website Build",
+        "description": "Plan → Build → Security Audit → QA",
+        "steps": [
+            {"agent": "project_manager", "task": "Break down the website requirements into specific tasks: pages needed, components, API endpoints, database schema, and timeline."},
+            {"agent": "elite_coder", "task": "Implement the website based on the project plan above. Write all components, pages, API routes, and database queries."},
+            {"agent": "hacker_agent", "task": "Audit the implementation for security issues: XSS, CSRF, SQL injection, auth bypass, insecure headers."},
+            {"agent": "project_manager", "task": "Quality check: verify all requirements are met, security issues addressed, and create a final delivery summary."}
+        ]
+    },
+    "database-audit": {
+        "name": "Database Audit",
+        "description": "Schema review + security audit + optimization",
+        "steps": [
+            {"agent": "database_agent", "task": "Analyze the database schema: table structure, indexes, relationships, and data types. Identify normalization issues and missing indexes."},
+            {"agent": "hacker_agent", "task": "Audit the database for security: RLS policies, exposed data, injection risks, and access control gaps."},
+            {"agent": "project_manager", "task": "Combine findings into an optimization and security hardening plan with priority rankings."}
+        ]
+    }
+}
+
+
+# (Workflow template endpoints are registered above, before {workflow_id} routes)
 
 
 # ═══════════════════════════════════════════════════════════════════════
