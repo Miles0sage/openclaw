@@ -287,7 +287,7 @@ AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard.html", "/telegram/webhook", "/slack/events", "/api/audit"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard.html", "/monitoring", "/telegram/webhook", "/slack/events", "/api/audit"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI)
@@ -877,6 +877,27 @@ async def dashboard(request: Request):
     except Exception as e:
         return HTMLResponse(
             content=f"<h1>Error loading dashboard</h1><p>{str(e)}</p>",
+            status_code=500
+        )
+
+
+@app.get("/monitoring")
+async def monitoring_dashboard(request: Request):
+    """Serve the monitoring dashboard from static/dashboard.html (no auth required)"""
+    try:
+        dashboard_path = os.path.join(os.path.dirname(__file__), "static", "dashboard.html")
+        with open(dashboard_path, 'r') as f:
+            html_content = f.read()
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        return HTMLResponse(
+            content="<h1>Monitoring dashboard not found</h1><p>static/dashboard.html is missing</p>",
+            status_code=404
+        )
+    except Exception as e:
+        return HTMLResponse(
+            content=f"<h1>Error loading monitoring dashboard</h1><p>{str(e)}</p>",
             status_code=500
         )
 

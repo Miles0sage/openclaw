@@ -6,10 +6,11 @@ Uses asyncio + threading for background execution. Replaces the need
 for the native TypeScript cron system.
 
 Built-in jobs:
-  - morning_briefing  (7 AM daily)
-  - stale_task_sweep   (every 30 min)
-  - weekly_review      (Friday 5 PM)
-  - health_check       (every 5 min)
+  - morning_briefing   (7 AM daily)
+  - stale_task_sweep    (every 30 min)
+  - weekly_review       (Friday 5 PM)
+  - health_check        (every 5 min)
+  - cost_alert          (every hour)
 """
 
 import asyncio
@@ -19,7 +20,8 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import requests
@@ -29,6 +31,10 @@ logger = logging.getLogger("cron-scheduler")
 GATEWAY_URL = "http://localhost:18789"
 SLACK_CHANNEL = "C0AFE4QHKH7"
 CRON_LOG_PATH = "/tmp/openclaw_cron.jsonl"
+JOBS_FILE = Path("/tmp/openclaw_jobs/jobs.jsonl")
+COST_LOG_PATH = "/tmp/openclaw_costs.jsonl"
+DAILY_BUDGET_LIMIT = 20.0  # $20/day
+COST_ALERT_THRESHOLD = 0.80  # 80% of daily limit
 
 # ---------------------------------------------------------------------------
 # Cron expression parser
@@ -267,65 +273,211 @@ def _post_slack(text: str) -> None:
 # Built-in job callbacks
 # ---------------------------------------------------------------------------
 
-def _morning_briefing() -> None:
-    """7 AM daily: pending jobs, proposals, budget status."""
-    jobs = _get("/api/jobs") or []
-    proposals = _get("/api/proposals") or []
-    costs = _get("/api/costs/summary") or {}
+def _read_jobs_file() -> List[Dict[str, Any]]:
+    """Read jobs directly from the JSONL file on disk."""
+    if not JOBS_FILE.exists():
+        return []
+    jobs = []
+    try:
+        with open(JOBS_FILE, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        jobs.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+    except OSError:
+        pass
+    return jobs
 
-    pending_jobs = [j for j in jobs if isinstance(j, dict) and j.get("status") in ("pending", "queued")]
+
+def _read_todays_costs() -> float:
+    """Sum today's costs from the cost log file."""
+    if not os.path.exists(COST_LOG_PATH):
+        return 0.0
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    total = 0.0
+    try:
+        with open(COST_LOG_PATH, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    ts = entry.get("timestamp", "")
+                    if ts.startswith(today_str):
+                        total += entry.get("cost", 0.0)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+    except OSError:
+        pass
+    return round(total, 4)
+
+
+def _morning_briefing() -> None:
+    """7 AM daily: real briefing with jobs, stale tasks, costs, health."""
+    now = datetime.now()
+    now_str = now.strftime("%A, %B %d %Y")
+
+    # --- Jobs analysis ---
+    jobs = _read_jobs_file()
+    pending = [j for j in jobs if j.get("status") in ("pending", "queued")]
+    analyzing = [j for j in jobs if j.get("status") in ("analyzing", "code_generated")]
+    completed_today = []
+    failed_today = []
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    for j in jobs:
+        completed_at = j.get("completed_at", "")
+        if completed_at and completed_at.startswith(today_str):
+            if j.get("status") in ("done", "merged", "approved"):
+                completed_today.append(j)
+            elif j.get("status") == "failed":
+                failed_today.append(j)
+
+    # --- Stale detection ---
+    stale_count = 0
+    for j in analyzing:
+        updated = j.get("updated_at") or j.get("created_at", "")
+        if updated:
+            try:
+                ts = datetime.fromisoformat(updated.replace("Z", "+00:00")).replace(tzinfo=None)
+                if (now - ts).total_seconds() > 1800:
+                    stale_count += 1
+            except (ValueError, TypeError):
+                pass
+
+    # --- Costs ---
+    daily_cost = _read_todays_costs()
+    budget_pct = (daily_cost / DAILY_BUDGET_LIMIT * 100) if DAILY_BUDGET_LIMIT > 0 else 0
+
+    # --- Proposals ---
+    proposals = _get("/api/proposals") or []
     pending_proposals = [p for p in proposals if isinstance(p, dict) and p.get("status") == "pending"]
 
-    now = datetime.now().strftime("%A, %B %d %Y")
-    lines = [
-        f"*Morning Briefing* -- {now}",
-        "",
-        f"Pending jobs: *{len(pending_jobs)}*",
-        f"Pending proposals: *{len(pending_proposals)}*",
-    ]
-    if costs:
-        total = costs.get("total_cost", costs.get("totalCost", 0))
-        lines.append(f"Budget spent: *${total:.2f}*" if isinstance(total, (int, float)) else f"Budget: {total}")
+    # --- Health ---
+    health_data = _get("/health", timeout=5)
+    health_status = "OK" if health_data and health_data.get("status") == "operational" else "DEGRADED"
 
-    if pending_jobs:
+    # --- Build briefing ---
+    lines = [
+        f"*Morning Briefing* -- {now_str}",
+        "",
+        f"Gateway: *{health_status}*",
+        "",
+        "*Job Queue:*",
+        f"  Pending: *{len(pending)}*  |  In-Progress: *{len(analyzing)}*  |  Stale: *{stale_count}*",
+        f"  Completed today: *{len(completed_today)}*  |  Failed today: *{len(failed_today)}*",
+        f"  Total all-time: *{len(jobs)}*",
+        "",
+        f"*Budget:* ${daily_cost:.2f} / ${DAILY_BUDGET_LIMIT:.2f} ({budget_pct:.0f}% used)",
+    ]
+
+    if budget_pct >= 80:
+        lines.append(f"  :warning: Daily budget at {budget_pct:.0f}% -- slow down or switch to Kimi")
+
+    if pending_proposals:
+        lines.append("")
+        lines.append(f"*Pending Proposals:* {len(pending_proposals)}")
+        for p in pending_proposals[:3]:
+            lines.append(f"  - {p.get('title', p.get('id', '?'))}")
+
+    if stale_count > 0:
+        lines.append("")
+        lines.append(f":warning: *{stale_count} stale task(s)* stuck >30 min -- sweep will auto-fail them")
+
+    if pending:
         lines.append("")
         lines.append("_Top pending jobs:_")
-        for j in pending_jobs[:5]:
-            lines.append(f"  - {j.get('id', '?')}: {j.get('description', j.get('title', 'untitled'))}")
+        for j in pending[:5]:
+            lines.append(f"  - `{j.get('id', '?')}`: {j.get('task', j.get('description', 'untitled'))}")
 
     _post_slack("\n".join(lines))
 
 
 def _stale_task_sweep() -> None:
-    """Every 30 min: find jobs stuck in analyzing/code_generated >30 min."""
-    jobs = _get("/api/jobs") or []
-    now = datetime.now()
-    stale = []
+    """Every 30 min: read jobs.jsonl, find stuck jobs, auto-fail them, notify Slack."""
+    if not JOBS_FILE.exists():
+        return
 
+    now = datetime.utcnow()
+    stale_threshold_min = 30
+    jobs = []
+    stale = []
+    modified = False
+
+    # Read all jobs
+    try:
+        with open(JOBS_FILE, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    jobs.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError as exc:
+        logger.warning(f"stale_task_sweep: cannot read jobs file: {exc}")
+        return
+
+    # Check each job for staleness
     for j in jobs:
-        if not isinstance(j, dict):
-            continue
         status = j.get("status", "")
-        if status not in ("analyzing", "code_generated"):
+        if status not in ("analyzing", "code_generated", "pending"):
             continue
-        updated = j.get("updated_at") or j.get("updatedAt") or j.get("created_at") or j.get("createdAt")
+
+        # Use updated_at or created_at to determine age
+        updated = j.get("updated_at") or j.get("created_at", "")
         if not updated:
             continue
+
         try:
             ts = datetime.fromisoformat(updated.replace("Z", "+00:00")).replace(tzinfo=None)
             elapsed_min = (now - ts).total_seconds() / 60
-            if elapsed_min > 30:
-                stale.append((j, elapsed_min))
         except (ValueError, TypeError):
             continue
+
+        if elapsed_min > stale_threshold_min:
+            stale.append((j, elapsed_min))
+            # Auto-fail the job
+            j["status"] = "failed"
+            j["updated_at"] = now.isoformat()
+            j["failure_reason"] = f"Auto-failed by stale_task_sweep: stuck for {int(elapsed_min)} min"
+            modified = True
+
+            # Emit event if event engine available
+            try:
+                from event_engine import get_event_engine
+                engine = get_event_engine()
+                engine.emit("job.failed", {
+                    "job_id": j.get("id", "unknown"),
+                    "agent": j.get("agent", "unknown"),
+                    "reason": j["failure_reason"],
+                    "task_type": j.get("task", ""),
+                    "auto_sweep": True,
+                })
+            except Exception:
+                pass
+
+    # Rewrite jobs file if we modified anything
+    if modified:
+        try:
+            with open(JOBS_FILE, "w") as f:
+                for j in jobs:
+                    f.write(json.dumps(j) + "\n")
+        except OSError as exc:
+            logger.error(f"stale_task_sweep: failed to rewrite jobs file: {exc}")
 
     if not stale:
         return
 
-    lines = [f"*Stale Task Sweep* -- {len(stale)} stuck task(s) found"]
+    lines = [f"*Stale Task Sweep* -- {len(stale)} stuck task(s) auto-failed"]
     for j, mins in stale:
         job_id = j.get("id", "?")
-        lines.append(f"  - `{job_id}` stuck in *{j.get('status')}* for {int(mins)} min -- marking failed")
+        task = j.get("task", j.get("description", "untitled"))[:60]
+        lines.append(f"  - `{job_id}` was *{j.get('status', '?')}* for {int(mins)} min -> *failed*  ({task})")
 
     _post_slack("\n".join(lines))
 
@@ -359,15 +511,177 @@ def _weekly_review() -> None:
     _post_slack("\n".join(lines))
 
 
+# Track health check state to avoid spamming Slack on repeated failures
+_health_state = {"consecutive_failures": 0, "last_alert_time": None, "alert_cooldown_min": 15}
+
+
 def _health_check() -> None:
-    """Every 5 min: verify gateway is operational."""
+    """Every 5 min: hit /health, report to Slack only on state change or degradation."""
+    global _health_state
+
+    now = datetime.now()
     data = _get("/health", timeout=5)
+
     if data is None:
-        _post_slack("*ALERT*: Gateway health check failed -- no response from /health")
+        _health_state["consecutive_failures"] += 1
+        fail_count = _health_state["consecutive_failures"]
+
+        # Only alert on first failure, then every 15 min (3 checks)
+        last_alert = _health_state.get("last_alert_time")
+        cooldown = _health_state["alert_cooldown_min"]
+        should_alert = (
+            fail_count == 1
+            or last_alert is None
+            or (now - last_alert).total_seconds() > cooldown * 60
+        )
+        if should_alert:
+            _post_slack(
+                f":red_circle: *ALERT*: Gateway health check failed "
+                f"({fail_count} consecutive failure{'s' if fail_count > 1 else ''}). "
+                f"No response from /health."
+            )
+            _health_state["last_alert_time"] = now
+
+            # Emit event
+            try:
+                from event_engine import get_event_engine
+                get_event_engine().emit("agent.timeout", {
+                    "agent": "gateway",
+                    "reason": f"Health check unreachable ({fail_count}x)",
+                })
+            except Exception:
+                pass
         return
+
     status = data.get("status", "unknown")
+
+    # If we were in failure state and recovered, notify
+    if _health_state["consecutive_failures"] > 0:
+        _post_slack(
+            f":large_green_circle: *RECOVERED*: Gateway health check passed after "
+            f"{_health_state['consecutive_failures']} failure(s). Status: *{status}*"
+        )
+        _health_state["consecutive_failures"] = 0
+        _health_state["last_alert_time"] = None
+        return
+
+    _health_state["consecutive_failures"] = 0
+
     if status != "operational":
-        _post_slack(f"*ALERT*: Gateway health status is *{status}* (expected operational)")
+        _post_slack(
+            f":warning: *DEGRADED*: Gateway health status is *{status}* (expected operational)"
+        )
+        try:
+            from event_engine import get_event_engine
+            get_event_engine().emit("agent.stale", {
+                "agent": "gateway",
+                "reason": f"Health status: {status}",
+            })
+        except Exception:
+            pass
+
+
+# Track cost alert state to avoid duplicate alerts within same hour
+_cost_alert_state = {"last_alert_hour": None, "last_alert_pct": 0}
+
+
+def _cost_alert() -> None:
+    """Hourly: check if daily spend > 80% of $20 limit, post to Slack."""
+    global _cost_alert_state
+
+    daily_cost = _read_todays_costs()
+    budget_pct = (daily_cost / DAILY_BUDGET_LIMIT * 100) if DAILY_BUDGET_LIMIT > 0 else 0
+    current_hour = datetime.utcnow().strftime("%Y-%m-%d-%H")
+
+    # Skip if we already alerted this hour at the same severity tier
+    tier = 0
+    if budget_pct >= 100:
+        tier = 3
+    elif budget_pct >= 90:
+        tier = 2
+    elif budget_pct >= COST_ALERT_THRESHOLD * 100:
+        tier = 1
+
+    if tier == 0:
+        return  # Under threshold, no alert
+
+    # Only alert if tier escalated or new hour
+    last_hour = _cost_alert_state.get("last_alert_hour")
+    last_tier = _cost_alert_state.get("last_alert_pct", 0)
+    if last_hour == current_hour and last_tier >= tier:
+        return
+
+    _cost_alert_state["last_alert_hour"] = current_hour
+    _cost_alert_state["last_alert_pct"] = tier
+
+    # Build cost breakdown by reading the cost log
+    by_agent = {}
+    by_model = {}
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    try:
+        if os.path.exists(COST_LOG_PATH):
+            with open(COST_LOG_PATH, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        ts = entry.get("timestamp", "")
+                        if ts.startswith(today_str):
+                            cost = entry.get("cost", 0.0)
+                            agent = entry.get("agent", "unknown")
+                            model = entry.get("model", "unknown")
+                            by_agent[agent] = by_agent.get(agent, 0.0) + cost
+                            by_model[model] = by_model.get(model, 0.0) + cost
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+    except OSError:
+        pass
+
+    if budget_pct >= 100:
+        icon = ":rotating_light:"
+        severity = "BUDGET EXCEEDED"
+    elif budget_pct >= 90:
+        icon = ":red_circle:"
+        severity = "CRITICAL"
+    else:
+        icon = ":warning:"
+        severity = "WARNING"
+
+    lines = [
+        f"{icon} *Cost Alert ({severity})* -- ${daily_cost:.2f} / ${DAILY_BUDGET_LIMIT:.2f} ({budget_pct:.0f}%)",
+    ]
+
+    if by_agent:
+        lines.append("")
+        lines.append("_Spend by agent:_")
+        for agent, cost in sorted(by_agent.items(), key=lambda x: -x[1])[:5]:
+            lines.append(f"  {agent}: ${cost:.4f}")
+
+    if by_model:
+        lines.append("")
+        lines.append("_Spend by model:_")
+        for model, cost in sorted(by_model.items(), key=lambda x: -x[1])[:5]:
+            lines.append(f"  {model}: ${cost:.4f}")
+
+    if budget_pct >= 90:
+        lines.append("")
+        lines.append("_Recommendation:_ Route all tasks to Kimi until tomorrow's budget reset.")
+
+    _post_slack("\n".join(lines))
+
+    # Emit cost event
+    try:
+        from event_engine import get_event_engine
+        get_event_engine().emit("cost.threshold_exceeded", {
+            "daily_cost": daily_cost,
+            "daily_limit": DAILY_BUDGET_LIMIT,
+            "percent_used": round(budget_pct, 1),
+            "severity": severity,
+        })
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -386,9 +700,10 @@ def init_cron_scheduler() -> CronScheduler:
     scheduler.add_job("stale_task_sweep", "*/30 * * * *", _stale_task_sweep)
     scheduler.add_job("weekly_review", "0 17 * * 5", _weekly_review)
     scheduler.add_job("health_check", "*/5 * * * *", _health_check)
+    scheduler.add_job("cost_alert", "0 * * * *", _cost_alert)
 
     _scheduler_instance = scheduler
-    logger.info("CronScheduler: initialized with 4 built-in jobs")
+    logger.info("CronScheduler: initialized with 5 built-in jobs")
     return scheduler
 
 

@@ -1,11 +1,13 @@
 """
 Mem0-inspired persistent memory system for OpenClaw agents.
 
-Stores structured memories with tags, importance scoring, and keyword search.
+Stores structured memories with tags, importance scoring, and TF-IDF search.
 Provides context injection for agent system prompts.
+Auto-extracts lessons learned from failed jobs and completed job results.
 """
 
 import json
+import math
 import os
 import re
 import uuid
@@ -16,6 +18,7 @@ from collections import Counter
 
 MEMORY_DIR = Path("/tmp/openclaw_memories")
 INDEX_FILE = MEMORY_DIR / "index.json"
+JOBS_FILE = Path("/tmp/openclaw_jobs/jobs.jsonl")
 
 _lock = threading.Lock()
 _instance = None
@@ -106,33 +109,84 @@ class MemoryManager:
         """Split text into lowercase word tokens."""
         return re.findall(r"[a-z0-9]+", text.lower())
 
-    def _score(self, memory_id, query_tokens):
-        """TF-IDF-like relevance score: tag matches weighted 3x, content matches 1x."""
+    def _build_idf(self):
+        """Compute IDF (inverse document frequency) for all tokens across all memories."""
+        doc_count = len(self._index)
+        if doc_count == 0:
+            return {}
+        # Count how many documents contain each token
+        doc_freq = Counter()
+        for entry in self._index.values():
+            tokens_in_doc = set()
+            for tag in entry.get("tags", []):
+                tokens_in_doc.update(self._tokenize(tag))
+            tokens_in_doc.update(self._tokenize(entry.get("content_preview", "")))
+            for t in tokens_in_doc:
+                doc_freq[t] += 1
+        # IDF = log(N / df) + 1  (smoothed)
+        idf = {}
+        for token, df in doc_freq.items():
+            idf[token] = math.log(doc_count / df) + 1.0
+        return idf
+
+    def _score(self, memory_id, query_tokens, idf=None):
+        """TF-IDF relevance score with tag boost and importance weighting.
+
+        Tags get 3x weight. IDF down-weights common tokens (like 'the', 'code').
+        Importance and recency provide additional boosting.
+        """
         entry = self._index.get(memory_id)
         if not entry:
             return 0.0
+
         tag_tokens = set()
         for tag in entry.get("tags", []):
             tag_tokens.update(self._tokenize(tag))
         preview_tokens = Counter(self._tokenize(entry.get("content_preview", "")))
+
         score = 0.0
         for qt in query_tokens:
+            token_idf = idf.get(qt, 1.0) if idf else 1.0
+            # Tag match: TF=1 (binary), weight 3x
             if qt in tag_tokens:
-                score += 3.0
-            score += preview_tokens.get(qt, 0) * 1.0
+                score += 3.0 * token_idf
+            # Content match: TF from counter, weight 1x
+            tf = preview_tokens.get(qt, 0)
+            if tf > 0:
+                # Sublinear TF: 1 + log(tf)
+                score += (1.0 + math.log(tf)) * token_idf
+
+        # Importance boost (1.0 to 1.5)
         importance = entry.get("importance", 5)
-        score *= (1 + importance / 20.0)
+        score *= (1.0 + importance / 20.0)
+
+        # Recency boost: memories accessed in last 7 days get up to 1.2x
+        accessed = entry.get("accessed_at", "")
+        if accessed:
+            try:
+                acc_dt = datetime.fromisoformat(accessed)
+                days_ago = (datetime.utcnow() - acc_dt).total_seconds() / 86400
+                if days_ago < 7:
+                    score *= (1.0 + 0.2 * (1.0 - days_ago / 7.0))
+            except (ValueError, TypeError):
+                pass
+
+        # Lessons learned get a slight boost for relevance
+        if "lessons-learned" in entry.get("tags", []):
+            score *= 1.15
+
         return score
 
     def search_memories(self, query, limit=10):
-        """Keyword search across all memories, ranked by relevance."""
+        """TF-IDF keyword search across all memories, ranked by relevance."""
         query_tokens = self._tokenize(query)
         if not query_tokens:
             return []
         scored = []
         with self._lock:
+            idf = self._build_idf()
             for mid in self._index:
-                s = self._score(mid, query_tokens)
+                s = self._score(mid, query_tokens, idf=idf)
                 if s > 0:
                     scored.append((s, mid))
         scored.sort(key=lambda x: -x[0])
@@ -260,6 +314,164 @@ class MemoryManager:
                     )
                     created.append(mid)
         return created
+
+    # ---- Auto-extraction from completed job results ----
+
+    def extract_from_job_result(self, job: dict) -> list:
+        """Extract memories from a completed job's results.
+
+        Captures: which agent handled it, task description, outcome,
+        cost, and any error patterns. Returns list of memory IDs created.
+        """
+        created = []
+        job_id = job.get("id", "unknown")
+        status = job.get("status", "")
+        task = job.get("task", job.get("description", ""))
+        agent = job.get("agent", job.get("agent_id", "unknown"))
+        project = job.get("project", "openclaw")
+
+        if not task:
+            return created
+
+        if status in ("done", "merged", "approved", "completed"):
+            # Successful job -> remember the task-agent-project pattern
+            content = (
+                f"Job {job_id} completed successfully: '{task}' "
+                f"handled by {agent} for project {project}."
+            )
+            pr_url = job.get("pr_url")
+            if pr_url:
+                content += f" PR: {pr_url}"
+
+            mid = self.add_memory(
+                content,
+                tags=["job-result", "success", project, agent],
+                source="job_completion",
+                agent_id=agent,
+                importance=5,
+            )
+            created.append(mid)
+
+        elif status == "failed":
+            # Failed job -> capture as lesson learned
+            reason = job.get("failure_reason", job.get("error", "unknown error"))
+            created.extend(
+                self.record_lesson_learned(
+                    task=task,
+                    error=reason,
+                    agent_id=agent,
+                    project=project,
+                    job_id=job_id,
+                )
+            )
+
+        return created
+
+    def scan_jobs_for_extraction(self) -> list:
+        """Scan the jobs file for completed/failed jobs not yet extracted.
+
+        Uses a marker file to track which jobs have been processed.
+        Returns list of memory IDs created.
+        """
+        if not JOBS_FILE.exists():
+            return []
+
+        marker_file = self.memory_dir / "extracted_jobs.json"
+        extracted_ids = set()
+        if marker_file.exists():
+            try:
+                extracted_ids = set(json.loads(marker_file.read_text()))
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        created = []
+        newly_extracted = []
+
+        try:
+            with open(JOBS_FILE, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        job = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    job_id = job.get("id", "")
+                    if not job_id or job_id in extracted_ids:
+                        continue
+                    status = job.get("status", "")
+                    if status in ("done", "merged", "approved", "completed", "failed"):
+                        ids = self.extract_from_job_result(job)
+                        created.extend(ids)
+                        newly_extracted.append(job_id)
+        except OSError:
+            pass
+
+        if newly_extracted:
+            extracted_ids.update(newly_extracted)
+            try:
+                marker_file.write_text(json.dumps(list(extracted_ids)))
+            except OSError:
+                pass
+
+        return created
+
+    # ---- Lessons learned from failures ----
+
+    def record_lesson_learned(self, task: str, error: str, agent_id: str = "system",
+                              project: str = "openclaw", job_id: str = "") -> list:
+        """Record a lesson learned from a failure.
+
+        Captures the task, error, and creates a high-importance memory
+        tagged as 'lessons-learned' so future routing can avoid the same mistake.
+        """
+        created = []
+
+        # Core lesson
+        content = (
+            f"LESSON LEARNED (job {job_id}): Task '{task}' failed on agent {agent_id}. "
+            f"Error: {error}"
+        )
+        mid = self.add_memory(
+            content,
+            tags=["lessons-learned", "failure", project, agent_id],
+            source="lesson_learned",
+            agent_id=agent_id,
+            importance=7,  # High importance so it surfaces in future searches
+        )
+        created.append(mid)
+
+        # Check for repeated failure pattern
+        existing = self.search_memories(f"LESSON LEARNED {task} {agent_id}", limit=5)
+        similar_failures = [
+            m for m in existing
+            if "lessons-learned" in m.get("tags", [])
+            and m.get("id") != mid
+            and agent_id in m.get("content", "")
+        ]
+
+        if len(similar_failures) >= 1:
+            # Pattern detected: same agent keeps failing on similar tasks
+            pattern_content = (
+                f"PATTERN: Agent {agent_id} has failed {len(similar_failures) + 1}x "
+                f"on similar tasks (latest: '{task}'). "
+                f"Consider routing to a different agent or escalating to Opus."
+            )
+            pattern_mid = self.add_memory(
+                pattern_content,
+                tags=["lessons-learned", "failure-pattern", project, agent_id],
+                source="pattern_detection",
+                agent_id="system",
+                importance=9,  # Very high importance
+            )
+            created.append(pattern_mid)
+
+        return created
+
+    def get_lessons_learned(self, limit=20) -> list:
+        """Return all lessons learned, sorted by importance and recency."""
+        return self.get_by_tag("lessons-learned")[:limit]
 
     def prune_old(self, days=30):
         """Remove memories not accessed in `days` days with importance < 3."""

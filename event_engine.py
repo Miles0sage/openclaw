@@ -40,7 +40,9 @@ VALID_EVENT_TYPES = frozenset([
     "proposal.created",
     "proposal.approved",
     "proposal.rejected",
+    "proposal.auto_approved",
     "cost.alert",
+    "cost.threshold_exceeded",
     "agent.stale",
     "agent.timeout",
 ])
@@ -50,7 +52,9 @@ SLACK_NOTIFY_EVENTS = frozenset([
     "job.completed",
     "job.failed",
     "proposal.approved",
+    "proposal.auto_approved",
     "cost.alert",
+    "cost.threshold_exceeded",
     "agent.timeout",
 ])
 
@@ -78,13 +82,25 @@ def _make_event_record(event_type: str, data: dict) -> dict:
 
 
 class EventEngine:
-    """Thread-safe event emission and subscription engine with persistent logging."""
+    """Thread-safe event emission and subscription engine with persistent logging
+    and deduplication."""
+
+    # Deduplication window in seconds (5 minutes)
+    DEDUP_WINDOW_SEC = 300
 
     def __init__(self) -> None:
         self._subscribers: Dict[str, List[Callable]] = {}
         self._lock = threading.Lock()
         self._log_path = EVENT_LOG_PATH
         self._running = True
+
+        # Deduplication: track (event_type, dedup_key) -> last_emit_time
+        self._dedup_cache: Dict[str, float] = {}
+        self._dedup_lock = threading.Lock()
+
+        # Failure tracking for smart escalation: task_key -> [failure records]
+        self._failure_tracker: Dict[str, List[dict]] = {}
+        self._failure_lock = threading.Lock()
 
         # Register built-in subscribers
         self.subscribe("*", self._log_event)
@@ -93,19 +109,55 @@ class EventEngine:
         self.subscribe("job.completed", self._reaction_handler)
         self.subscribe("job.failed", self._reaction_handler)
 
-        logger.info("EventEngine initialized with built-in subscribers")
+        logger.info("EventEngine initialized with built-in subscribers + deduplication")
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def emit(self, event_type: str, data: dict) -> str:
+    def _dedup_key(self, event_type: str, data: dict) -> str:
+        """Generate a deduplication key from event type + stable data fields."""
+        # Use job_id, agent, and task_type as stable identifiers
+        parts = [event_type]
+        for field in ("job_id", "id", "agent", "task_type", "title", "severity"):
+            val = data.get(field)
+            if val:
+                parts.append(str(val))
+        return "|".join(parts)
+
+    def _is_duplicate(self, dedup_key: str) -> bool:
+        """Check if this event was already emitted within the dedup window."""
+        now = time.time()
+        with self._dedup_lock:
+            # Clean old entries
+            expired = [k for k, t in self._dedup_cache.items()
+                       if now - t > self.DEDUP_WINDOW_SEC]
+            for k in expired:
+                del self._dedup_cache[k]
+
+            last_time = self._dedup_cache.get(dedup_key)
+            if last_time and (now - last_time) < self.DEDUP_WINDOW_SEC:
+                return True
+            self._dedup_cache[dedup_key] = now
+            return False
+
+    def emit(self, event_type: str, data: dict, skip_dedup: bool = False) -> str:
         """Fire an event to all subscribers. Non-blocking (runs in a thread).
 
-        Returns the generated event_id.
+        Deduplicates events with the same type+key within a 5-minute window.
+        Set skip_dedup=True to force emission regardless.
+
+        Returns the generated event_id, or empty string if deduplicated.
         """
         if event_type not in VALID_EVENT_TYPES:
             logger.warning("Unknown event type: %s (emitting anyway)", event_type)
+
+        # Deduplication check
+        if not skip_dedup:
+            dk = self._dedup_key(event_type, data)
+            if self._is_duplicate(dk):
+                logger.debug("Deduplicated event: %s (%s)", event_type, dk[:60])
+                return ""
 
         record = _make_event_record(event_type, data)
         event_id = record["event_id"]
@@ -248,10 +300,12 @@ class EventEngine:
             logger.warning("Slack notify failed for %s: %s", event_type, exc)
 
     def _reaction_handler(self, record: dict) -> None:
-        """Automatic reactions to job lifecycle events.
+        """Smart automatic reactions to job lifecycle events.
 
         - job.completed + code task  -> emit proposal.created for "run tests"
-        - job.failed                 -> emit proposal.created for "retry with higher priority"
+        - job.completed              -> extract memories from result
+        - job.failed (1st time)      -> propose retry on same agent
+        - job.failed (2nd time same task) -> escalate to Opus instead of retrying on Kimi
         """
         event_type = record.get("event_type")
         data = record.get("data", {})
@@ -261,7 +315,21 @@ class EventEngine:
             job_id = data.get("job_id", data.get("id", "unknown"))
             agent = data.get("agent", "unknown")
 
-            # Only react to code-related tasks
+            # Extract memories from completed job
+            try:
+                from memory_manager import get_memory_manager
+                mm = get_memory_manager()
+                mm.extract_from_job_result({
+                    "id": job_id,
+                    "status": "completed",
+                    "task": task_type,
+                    "agent": agent,
+                    "project": data.get("project", "openclaw"),
+                })
+            except Exception as exc:
+                logger.debug("Memory extraction failed for job %s: %s", job_id, exc)
+
+            # Only propose test run for code-related tasks
             code_indicators = {"code", "build", "deploy", "implement", "fix", "refactor"}
             if any(kw in task_type.lower() for kw in code_indicators):
                 self.emit("proposal.created", {
@@ -281,19 +349,88 @@ class EventEngine:
             job_id = data.get("job_id", data.get("id", "unknown"))
             agent = data.get("agent", "unknown")
             reason = data.get("reason", data.get("error", "unknown error"))
+            task_type = data.get("task_type", data.get("task", ""))
 
-            self.emit("proposal.created", {
-                "title": f"Retry failed job {job_id} with higher priority",
-                "description": (
-                    f"Agent {agent} failed: {reason}. "
-                    "Proposing retry with elevated priority."
-                ),
-                "source_event_id": record.get("event_id"),
-                "source_job_id": job_id,
-                "priority": "high",
-                "proposed_action": "retry",
+            # Track failures per task key for escalation detection
+            task_key = f"{task_type}|{data.get('project', 'default')}"
+            failure_count = self._track_failure(task_key, {
+                "job_id": job_id,
+                "agent": agent,
+                "reason": reason,
+                "timestamp": record.get("timestamp", ""),
             })
-            logger.info("Reaction: proposed retry for failed job %s", job_id)
+
+            # Record lesson learned in memory
+            try:
+                from memory_manager import get_memory_manager
+                mm = get_memory_manager()
+                mm.record_lesson_learned(
+                    task=task_type or "unknown task",
+                    error=reason,
+                    agent_id=agent,
+                    project=data.get("project", "openclaw"),
+                    job_id=job_id,
+                )
+            except Exception as exc:
+                logger.debug("Lesson recording failed for job %s: %s", job_id, exc)
+
+            if failure_count >= 2:
+                # ESCALATION: same task failed 2+ times -> route to Opus
+                self.emit("proposal.created", {
+                    "title": f"Escalate job {job_id} to Claude Opus (2x failure on {agent})",
+                    "description": (
+                        f"Task '{task_type}' has failed {failure_count}x "
+                        f"(last agent: {agent}, reason: {reason}). "
+                        "Escalating to Claude Opus for higher reasoning capability."
+                    ),
+                    "source_event_id": record.get("event_id"),
+                    "source_job_id": job_id,
+                    "priority": "critical",
+                    "proposed_action": "escalate_to_opus",
+                    "target_agent": "overseer",
+                    "target_model": "claude-opus-4-6",
+                    "failure_count": failure_count,
+                }, skip_dedup=True)
+                logger.warning(
+                    "Reaction: ESCALATING job %s to Opus after %d failures on %s",
+                    job_id, failure_count, agent,
+                )
+            else:
+                # First failure: propose retry on same agent
+                self.emit("proposal.created", {
+                    "title": f"Retry failed job {job_id} with higher priority",
+                    "description": (
+                        f"Agent {agent} failed: {reason}. "
+                        "Proposing retry with elevated priority."
+                    ),
+                    "source_event_id": record.get("event_id"),
+                    "source_job_id": job_id,
+                    "priority": "high",
+                    "proposed_action": "retry",
+                })
+                logger.info("Reaction: proposed retry for failed job %s", job_id)
+
+    def _track_failure(self, task_key: str, failure_record: dict) -> int:
+        """Track failures per task key. Returns total failure count for this task.
+
+        Failures older than 1 hour are pruned to avoid stale escalation.
+        """
+        now = time.time()
+        with self._failure_lock:
+            if task_key not in self._failure_tracker:
+                self._failure_tracker[task_key] = []
+
+            # Prune failures older than 1 hour
+            one_hour_ago = now - 3600
+            self._failure_tracker[task_key] = [
+                f for f in self._failure_tracker[task_key]
+                if f.get("_tracked_at", 0) > one_hour_ago
+            ]
+
+            failure_record["_tracked_at"] = now
+            self._failure_tracker[task_key].append(failure_record)
+
+            return len(self._failure_tracker[task_key])
 
     # ------------------------------------------------------------------
     # Helpers
@@ -308,7 +445,9 @@ class EventEngine:
             "job.completed": "[OK]",
             "job.failed": "[FAIL]",
             "proposal.approved": "[APPROVED]",
+            "proposal.auto_approved": "[AUTO-OK]",
             "cost.alert": "[COST]",
+            "cost.threshold_exceeded": "[BUDGET]",
             "agent.timeout": "[TIMEOUT]",
         }
         prefix = prefix_map.get(event_type, "[EVENT]")
