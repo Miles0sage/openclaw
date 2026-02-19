@@ -63,6 +63,19 @@ class AgentRouter:
                 "function_calling", "git_automation"
             ]
         },
+        "elite_coder": {
+            "id": "elite_coder",
+            "name": "CodeGen Elite",
+            "model": "minimax-m2.5",  # SOTA coding, 98% cheaper than Opus
+            "cost_per_token": 0.0003,  # $0.30/M input tokens
+            "cost_tier": "standard",
+            "skills": [
+                "complex_coding", "multi_file_refactor", "architecture_implementation",
+                "nextjs", "fastapi", "typescript", "python", "full_stack",
+                "swe_bench", "deep_reasoning", "code_review", "system_design",
+                "large_codebase", "debugging_complex"
+            ]
+        },
         "hacker_agent": {
             "id": "hacker_agent",
             "name": "Pentest AI",
@@ -105,7 +118,9 @@ class AgentRouter:
         "nextjs", "database", "query", "schema", "testing", "test",
         "deploy", "deployment", "frontend", "backend", "full-stack",
         "refactor", "refactoring", "clean_code", "git", "repository",
-        "json", "yaml", "xml", "rest", "graphql", "websocket"
+        "json", "yaml", "xml", "rest", "graphql", "websocket",
+        "console", "log", "debug", "print", "component", "page", "route",
+        "css", "html", "style", "render", "hook", "state", "props"
     ]
 
     DATABASE_KEYWORDS = [
@@ -121,6 +136,16 @@ class AgentRouter:
         "design", "approach", "workflow", "process", "milestone", "deadline",
         "estimate", "estimation", "breakdown", "decompose", "coordinate",
         "manage", "organize", "project", "phase", "sprint", "agile"
+    ]
+
+    COMPLEX_CODE_KEYWORDS = [
+        "refactor", "architecture", "redesign", "multi-file", "system design",
+        "complex", "large", "rewrite", "migrate", "optimize", "performance",
+        "algorithm", "data structure", "design pattern", "abstraction",
+        "inheritance", "polymorphism", "interface", "module", "package",
+        "monorepo", "microservice", "integration", "full-stack", "end-to-end",
+        "debug complex", "race condition", "memory leak", "deadlock",
+        "concurrent", "async", "parallel", "distributed"
     ]
 
     def __init__(self, config_path: str = "/root/openclaw/config.json", enable_caching: bool = True):
@@ -452,6 +477,8 @@ class AgentRouter:
         """Infer primary intent for an agent based on skills"""
         if "security" in agent_id.lower() or agent_id == "hacker_agent":
             return "security"
+        elif agent_id == "elite_coder":
+            return "development"  # Complex development, same embedding space
         elif "coder" in agent_id.lower() or agent_id == "coder_agent":
             return "development"
         elif "database" in agent_id.lower():
@@ -490,7 +517,7 @@ class AgentRouter:
             if is_simple and agent_id == "database_agent":
                 # Database agent is best for simple queries
                 cost_scores[agent_id] = 0.95 * cost_factor
-            elif is_moderate and agent_id in ["coder_agent", "hacker_agent"]:
+            elif is_moderate and agent_id in ["coder_agent", "hacker_agent", "elite_coder"]:
                 # Standard agents good for moderate tasks
                 cost_scores[agent_id] = 0.85 * cost_factor
             elif is_complex and agent_id == "project_manager":
@@ -589,12 +616,19 @@ class AgentRouter:
 
     def _classify_intent(self, query: str) -> str:
         """
-        Classify query intent as: security_audit, development, database, planning, or general
+        Classify query intent as: security_audit, complex_development, development, database, planning, or general
+        3-tier code routing: simple code → coder_agent, complex code → elite_coder, architecture → project_manager
         """
         security_count = sum(1 for kw in self.SECURITY_KEYWORDS if self.match_keyword(query, kw))
         dev_count = sum(1 for kw in self.DEVELOPMENT_KEYWORDS if self.match_keyword(query, kw))
         db_count = sum(1 for kw in self.DATABASE_KEYWORDS if self.match_keyword(query, kw))
         planning_count = sum(1 for kw in self.PLANNING_KEYWORDS if self.match_keyword(query, kw))
+        complex_code_count = sum(1 for kw in self.COMPLEX_CODE_KEYWORDS if self.match_keyword(query, kw))
+
+        # Complex code gets highest priority when 2+ complex keywords detected
+        # (signals multi-file refactors, architecture changes, deep debugging)
+        if complex_code_count >= 2:
+            return "complex_development"
 
         # Prioritize database queries
         if db_count > 0 and db_count >= dev_count and db_count >= security_count:
@@ -602,7 +636,13 @@ class AgentRouter:
         elif security_count > 0 and security_count >= dev_count and security_count >= planning_count:
             return "security_audit"
         elif dev_count > 0 and dev_count >= planning_count:
+            # Single complex keyword + dev keywords → still complex
+            if complex_code_count > 0:
+                return "complex_development"
             return "development"
+        elif complex_code_count > 0:
+            # Complex keywords without other dev keywords → complex development
+            return "complex_development"
         elif planning_count > 0:
             return "planning"
         else:
@@ -611,7 +651,7 @@ class AgentRouter:
     def _extract_keywords(self, query: str) -> List[str]:
         """Extract all matching keywords from query"""
         keywords = []
-        for kw in self.SECURITY_KEYWORDS + self.DEVELOPMENT_KEYWORDS + self.DATABASE_KEYWORDS + self.PLANNING_KEYWORDS:
+        for kw in self.SECURITY_KEYWORDS + self.DEVELOPMENT_KEYWORDS + self.DATABASE_KEYWORDS + self.PLANNING_KEYWORDS + self.COMPLEX_CODE_KEYWORDS:
             if self.match_keyword(query, kw):
                 keywords.append(kw)
         return keywords
@@ -667,9 +707,25 @@ class AgentRouter:
             else:
                 return 0.2
 
+        elif intent == "complex_development":
+            # Complex coding → elite_coder (MiniMax M2.5, SOTA)
+            if agent_id == "elite_coder":
+                return 0.95
+            elif agent_id == "coder_agent":
+                return 0.5  # Can handle but not ideal
+            elif agent_id == "project_manager":
+                return 0.4  # May need coordination
+            elif agent_id == "hacker_agent":
+                return 0.3
+            else:
+                return 0.2
+
         elif intent == "development":
+            # Simple/standard coding → coder_agent (Kimi 2.5, cheapest)
             if agent_id == "coder_agent":
                 return 1.0
+            elif agent_id == "elite_coder":
+                return 0.4  # Overkill for simple tasks
             elif agent_id == "database_agent":
                 return 0.5  # Database schema design
             elif agent_id == "hacker_agent":
@@ -729,8 +785,10 @@ class AgentRouter:
         agent_name = self.AGENTS[agent_id]["name"]
         intent_desc = {
             "security_audit": "Security audit requested",
+            "complex_development": "Complex coding task routed to CodeGen Elite (MiniMax M2.5, SOTA benchmarks)",
             "development": "Development task",
             "planning": "Planning/coordination task",
+            "database": "Database query",
             "general": "General inquiry"
         }.get(intent, "Query matched")
 

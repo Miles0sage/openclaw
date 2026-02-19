@@ -16,7 +16,7 @@ import hashlib
 import time
 from fastapi import FastAPI, WebSocket, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import anthropic
@@ -37,6 +37,10 @@ from request_logger import RequestLogger, get_logger
 from audit_routes import router as audit_router
 
 from deepseek_client import DeepseekClient
+from minimax_client import MiniMaxClient
+
+# Import response cache
+from response_cache import init_response_cache, get_response_cache
 
 # Import agent tools (GitHub, web search, job management)
 from agent_tools import AGENT_TOOLS, execute_tool
@@ -416,6 +420,13 @@ async def startup_heartbeat_monitor():
     except Exception as err:
         logger.error(f"Failed to initialize memory manager: {err}")
 
+    # Initialize response cache
+    try:
+        cache = init_response_cache(default_ttl=30, max_entries=1000)
+        logger.info("Response cache initialized (TTL=30s, max=1000)")
+    except Exception as err:
+        logger.error(f"Failed to initialize response cache: {err}")
+
 
 @app.on_event("shutdown")
 async def shutdown_heartbeat_monitor():
@@ -675,6 +686,43 @@ Remember: You ARE {name}. Stay in character!
             return response_text, tokens_output
         except Exception as e:
             logger.error(f"❌ Deepseek API error: {e}")
+            raise
+    elif provider == "minimax":
+        # For MiniMax (M2.5 models)
+        try:
+            minimax_client = MiniMaxClient()
+
+            # Map model names if needed
+            api_model = model if model in ["m2.5", "m2.5-lightning"] else "m2.5"
+
+            response = minimax_client.call(
+                model=api_model,
+                prompt=prompt if not conversation else full_prompt,
+                system_prompt=anthropic_system,
+                max_tokens=16384,
+                temperature=0.3
+            )
+
+            response_text = response.content
+            tokens_input = response.tokens_input
+            tokens_output = response.tokens_output
+
+            # Log cost event (non-blocking)
+            try:
+                cost = log_cost_event(
+                    project="openclaw",
+                    agent=agent_key,
+                    model=api_model,
+                    tokens_input=tokens_input,
+                    tokens_output=tokens_output
+                )
+                logger.info(f"💰 Cost logged: ${cost:.4f} ({agent_key} / {api_model})")
+            except Exception as e:
+                logger.warning(f"⚠️ Cost logging failed: {e}")
+
+            return response_text, tokens_output
+        except Exception as e:
+            logger.error(f"❌ MiniMax API error: {e}")
             raise
     else:
         raise ValueError(f"Unknown provider: {provider}")
@@ -1043,6 +1091,27 @@ async def chat_endpoint(message: Message):
         if session_key not in chat_history:
             chat_history[session_key] = load_session_history(session_key)
 
+        # Check cache first
+        response_cache = get_response_cache()
+        if response_cache:
+            cached = response_cache.get(message.content, agent_id, session_key)
+            if cached:
+                # Cache hit - return cached response
+                chat_history[session_key].append({"role": "user", "content": message.content})
+                chat_history[session_key].append({"role": "assistant", "content": cached.response})
+                save_session_history(session_key, chat_history[session_key])
+                return {
+                    "agent": cached.agent_id,
+                    "response": cached.response,
+                    "provider": agent_config.get("apiProvider"),
+                    "model": cached.model,
+                    "tokens": 0,
+                    "sessionKey": session_key,
+                    "historyLength": len(chat_history[session_key]),
+                    "cached": True,
+                    "tokens_saved": cached.tokens_saved
+                }
+
         # Add user message to history
         chat_history[session_key].append({
             "role": "user",
@@ -1055,6 +1124,11 @@ async def chat_endpoint(message: Message):
             message.content,
             chat_history[session_key][-10:]
         )
+
+        # Store in cache
+        if response_cache:
+            response_cache.put(message.content, response_text, agent_id, model,
+                      agent_config.get("apiProvider", ""), tokens, session_key=session_key)
 
         # Record metrics
         metrics.record_agent_call(agent_id)
@@ -1093,6 +1167,160 @@ async def chat_endpoint(message: Message):
             heartbeat.unregister_agent(agent_id)
 
 
+@app.post("/api/chat/stream")
+async def chat_stream_endpoint(message: Message):
+    """REST chat with SSE streaming for real-time token delivery.
+    Returns Server-Sent Events with types: start, token, done, error"""
+    session_key = message.sessionKey or "default"
+    project_id = message.project_id or "default"
+
+    # Agent routing (same as /api/chat)
+    if message.agent_id:
+        agent_id = message.agent_id
+    else:
+        if CONFIG.get("routing", {}).get("agent_routing_enabled", True):
+            route_decision = agent_router.select_agent(message.content)
+            agent_id = route_decision["agentId"]
+        else:
+            agent_id = "project_manager"
+
+    heartbeat = get_heartbeat_monitor()
+    if heartbeat:
+        heartbeat.register_agent(agent_id, session_key)
+
+    # Quota check
+    quota_config = load_quota_config()
+    if quota_config.get("enabled", False):
+        quotas_ok, quota_error = check_all_quotas(project_id)
+        if not quotas_ok:
+            return JSONResponse(status_code=429, content={"success": False, "error": quota_error})
+
+    # Cost gate check
+    agent_config = get_agent_config(agent_id)
+    model = agent_config.get("model", "claude-sonnet-4-5-20250929")
+    provider = agent_config.get("apiProvider", "anthropic")
+
+    estimated_tokens = len(message.content.split()) * 2
+    budget_check = check_cost_budget(
+        project=project_id, agent=agent_id, model=model,
+        tokens_input=estimated_tokens // 2, tokens_output=estimated_tokens // 2,
+        task_id=f"{project_id}:{agent_id}:{session_key}"
+    )
+    if budget_check.status == BudgetStatus.REJECTED:
+        return JSONResponse(status_code=402, content={"success": False, "error": budget_check.message})
+
+    # Load session
+    if session_key not in chat_history:
+        chat_history[session_key] = load_session_history(session_key)
+    chat_history[session_key].append({"role": "user", "content": message.content})
+
+    # Build system prompt
+    persona = agent_config.get("persona", "")
+    name = agent_config.get("name", "Agent")
+    emoji = agent_config.get("emoji", "")
+    signature = agent_config.get("signature", "")
+
+    identity_context = ""
+    gateway_dir = os.path.dirname(os.path.abspath(__file__))
+    for identity_file in ["SOUL.md", "USER.md", "AGENTS.md"]:
+        filepath = os.path.join(gateway_dir, identity_file)
+        try:
+            with open(filepath, "r") as f:
+                identity_context += f"\n\n{f.read()}"
+        except FileNotFoundError:
+            pass
+
+    system_prompt = f"""You are {name} {emoji} in the Cybershield AI Agency.
+
+{persona}
+
+IMPORTANT RULES:
+- ALWAYS end your messages with your signature: {signature}
+- Follow your character consistently
+- Reference real project names (Barber CRM, Delhi Palace, OpenClaw, PrestressCalc, Concrete Canoe)
+
+Remember: You ARE {name}. Stay in character!
+
+--- IDENTITY & CONTEXT ---
+{identity_context}"""
+
+    # Intelligent routing for Anthropic models
+    router_enabled = CONFIG.get("routing", {}).get("enabled", False)
+    if router_enabled and provider == "anthropic":
+        try:
+            classification = classify_query(message.content)
+            routed_model = MODEL_ALIASES.get(classification.model, model)
+            model = routed_model
+        except Exception:
+            pass
+
+    async def generate():
+        """SSE generator that streams tokens from the model"""
+        full_response = ""
+        tokens_used = 0
+
+        try:
+            yield f"data: {json.dumps({'type': 'start', 'agent': agent_id, 'model': model, 'provider': provider})}\n\n"
+
+            if provider == "anthropic":
+                with anthropic_client.messages.stream(
+                    model=model, max_tokens=8192, system=system_prompt,
+                    messages=chat_history[session_key][-10:]
+                ) as stream:
+                    for text in stream.text_stream:
+                        full_response += text
+                        yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+                    final = stream.get_final_message()
+                    tokens_used = final.usage.output_tokens
+
+            elif provider == "deepseek":
+                ds_client = DeepseekClient()
+                api_model = model if model in ["kimi-2.5", "kimi"] else "kimi-2.5"
+                for chunk in ds_client.stream(model=api_model, prompt=message.content,
+                                              system_prompt=system_prompt, max_tokens=8192):
+                    full_response += chunk
+                    yield f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
+
+            elif provider == "minimax":
+                mm_client = MiniMaxClient()
+                api_model = model if model in ["m2.5", "m2.5-lightning"] else "m2.5"
+                for chunk in mm_client.stream(model=api_model, prompt=message.content,
+                                              system_prompt=system_prompt, max_tokens=16384):
+                    full_response += chunk
+                    yield f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
+
+            # Save to session
+            chat_history[session_key].append({"role": "assistant", "content": full_response})
+            save_session_history(session_key, chat_history[session_key])
+
+            # Log cost
+            try:
+                log_cost_event(project="openclaw", agent=agent_id, model=model,
+                              tokens_input=len(message.content.split()) * 2,
+                              tokens_output=tokens_used or len(full_response.split()) * 2)
+            except Exception:
+                pass
+
+            # Record metrics
+            metrics.record_agent_call(agent_id)
+            metrics.record_session(session_key)
+
+            yield f"data: {json.dumps({'type': 'done', 'agent': agent_id, 'tokens': tokens_used, 'sessionKey': session_key})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            if heartbeat:
+                heartbeat.unregister_agent(agent_id)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
+    )
+
+
 @app.get("/api/costs/summary")
 async def costs_summary():
     """Get cost metrics summary"""
@@ -1121,6 +1349,40 @@ async def costs_text():
     except Exception as e:
         logger.error(f"Error getting cost summary: {e}")
         return {"success": False, "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# RESPONSE CACHE ENDPOINTS
+# GET  /api/cache/stats    - Get cache statistics (hit rate, savings)
+# POST /api/cache/clear    - Clear all cached responses
+# POST /api/cache/cleanup  - Remove expired cache entries
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/cache/stats")
+async def cache_stats():
+    """Get response cache statistics"""
+    cache = get_response_cache()
+    if not cache:
+        return {"success": False, "error": "Cache not initialized"}
+    return {"success": True, "data": cache.get_stats()}
+
+@app.post("/api/cache/clear")
+async def cache_clear():
+    """Clear response cache"""
+    cache = get_response_cache()
+    if not cache:
+        return {"success": False, "error": "Cache not initialized"}
+    count = cache.invalidate()
+    return {"success": True, "cleared": count}
+
+@app.post("/api/cache/cleanup")
+async def cache_cleanup():
+    """Remove expired cache entries"""
+    cache = get_response_cache()
+    if not cache:
+        return {"success": False, "error": "Cache not initialized"}
+    count = cache.cleanup_expired()
+    return {"success": True, "expired_removed": count}
 
 
 # ═══════════════════════════════════════════════════════════════════════

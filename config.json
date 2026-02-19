@@ -100,6 +100,37 @@
       "costSavings": "95% cheaper than Claude Sonnet",
       "notes": "Kimi 2.5 offers excellent code generation at a fraction of the cost. Falls back to Anthropic for complex tasks if needed."
     },
+    "elite_coder": {
+      "name": "CodeGen Elite",
+      "emoji": "⚡",
+      "type": "developer",
+      "model": "m2.5",
+      "apiProvider": "minimax",
+      "apiKeyEnv": "MINIMAX_API_KEY",
+      "contextWindow": 205000,
+      "maxOutputTokens": 131072,
+      "temperature": 0.3,
+      "persona": "I'm CodeGen Elite - I handle complex, multi-file coding tasks with surgical precision. MiniMax M2.5 gives me SOTA coding capability (80.2% SWE-Bench) at 1/50th the cost of Opus. I tackle architecture-level changes, large refactors, and intricate bug fixes that need deep reasoning. Every message ends with: — ⚡ CodeGen Elite",
+      "skills": [
+        "complex_coding",
+        "multi_file_refactor",
+        "architecture_implementation",
+        "nextjs",
+        "fastapi",
+        "typescript",
+        "python",
+        "full_stack",
+        "swe_bench",
+        "deep_reasoning",
+        "code_review",
+        "system_design"
+      ],
+      "maxTokens": 16384,
+      "talks_to": ["Cybershield PM", "CodeGen Pro", "Pentest AI"],
+      "signature": "— ⚡ CodeGen Elite",
+      "costSavings": "98% cheaper than Claude Opus, SOTA coding benchmarks",
+      "notes": "MiniMax M2.5 - 80.2% SWE-Bench, 205K context, extended thinking. Use for complex tasks where Kimi 2.5 isn't sufficient."
+    },
     "hacker_agent": {
       "name": "Pentest AI",
       "emoji": "🔒",
@@ -444,16 +475,32 @@
     },
     "minimax": {
       "name": "MiniMax AI",
-      "baseUrl": "https://api.minimax.chat/v1",
+      "baseUrl": "https://api.minimax.io/v1",
       "apiKeyEnv": "MINIMAX_API_KEY",
       "models": {
         "m2.5": {
           "name": "MiniMax-M2.5",
           "type": "text",
-          "contextWindow": 1000000,
+          "contextWindow": 205000,
           "maxOutputTokens": 131072,
           "costPer1MInputTokens": 0.3,
           "costPer1MOutputTokens": 1.2,
+          "speed": "50 TPS",
+          "benchmarks": {
+            "sweBench": "80.2%",
+            "mmlu": "87%",
+            "toolCalling": "76.8%",
+            "multiSweBench": "51.3%"
+          }
+        },
+        "m2.5-lightning": {
+          "name": "MiniMax-M2.5-Lightning",
+          "type": "text",
+          "contextWindow": 205000,
+          "maxOutputTokens": 131072,
+          "costPer1MInputTokens": 0.3,
+          "costPer1MOutputTokens": 2.4,
+          "speed": "100 TPS",
           "benchmarks": {
             "sweBench": "80.2%",
             "mmlu": "87%",
