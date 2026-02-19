@@ -633,6 +633,16 @@ Remember: You ARE {name}. Stay in character!"""
 
 def build_agent_system_prompt(agent_role: AgentRole) -> str:
     """Build system prompt with agent identity"""
+    # Load identity stack
+    soul_context = ""
+    for identity_file in ["SOUL.md", "USER.md", "AGENTS.md"]:
+        filepath = os.path.join(os.path.dirname(__file__), identity_file)
+        try:
+            with open(filepath, "r") as f:
+                soul_context += f"\n\n{f.read()}"
+        except FileNotFoundError:
+            pass
+
     identity_context = orchestrator.get_agent_context(agent_role)
     agent_config = orchestrator.config["agents"].get(agent_role.value, {})
     persona = agent_config.get("persona", "")
@@ -668,11 +678,23 @@ REMEMBER:
 
 Now respond as {orchestrator.agents[agent_role].name} {orchestrator.agents[agent_role].emoji}!
 """
+    if soul_context:
+        base_prompt += f"\n\n--- IDENTITY & CONTEXT ---\n{soul_context[:3000]}"
     return base_prompt
 
 
 def build_channel_system_prompt(agent_config: dict) -> str:
     """Build a rich system prompt for channel handlers (Telegram, Slack) with tools and project context."""
+    # Load identity stack
+    soul_context = ""
+    for identity_file in ["SOUL.md", "USER.md", "AGENTS.md"]:
+        filepath = os.path.join(os.path.dirname(__file__), identity_file)
+        try:
+            with open(filepath, "r") as f:
+                soul_context += f"\n\n{f.read()}"
+        except FileNotFoundError:
+            pass
+
     name = agent_config.get("name", "Agent")
     emoji = agent_config.get("emoji", "")
     persona = agent_config.get("persona", "You are a helpful assistant.")
@@ -719,6 +741,9 @@ BEHAVIOR:
 - Reference specific projects when relevant
 
 Always sign off with: {signature}"""
+
+    if soul_context:
+        prompt += f"\n\n--- IDENTITY & CONTEXT ---\n{soul_context[:3000]}"
 
     # Inject relevant memories
     try:
