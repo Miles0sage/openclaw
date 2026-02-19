@@ -368,7 +368,7 @@ async def startup_heartbeat_monitor():
         config = HeartbeatMonitorConfig(
             check_interval_ms=30000,  # 30 seconds
             stale_threshold_ms=5 * 60 * 1000,  # 5 minutes
-            timeout=60 * 60
+            timeout_threshold_ms=60 * 60 * 1000  # 1 hour
         )
         monitor = await init_heartbeat_monitor(alert_manager=None, config=config)
         logger.info("✅ Heartbeat monitor initialized and started")
@@ -385,7 +385,7 @@ async def startup_heartbeat_monitor():
     # Initialize cron scheduler
     try:
         cron = init_cron_scheduler()
-        await cron.start()
+        cron.start()
         logger.info(f"✅ Cron scheduler initialized ({len(cron.list_jobs())} jobs)")
     except Exception as err:
         logger.error(f"Failed to initialize cron scheduler: {err}")
