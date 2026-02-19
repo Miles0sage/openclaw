@@ -18,8 +18,8 @@ MODEL_PRICING = {
 }
 
 MODEL_ALIASES = {
-    "haiku": "claude-3-5-haiku-20241022",
-    "sonnet": "claude-3-5-sonnet-20241022",
+    "haiku": "claude-haiku-4-5-20251001",
+    "sonnet": "claude-sonnet-4-20250514",
     "opus": "claude-opus-4-6",
 }
 

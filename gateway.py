@@ -1214,7 +1214,7 @@ async def chat_endpoint(message: Message):
         # ═ COST GATES: Verify budget limits before processing
         cost_gates = get_cost_gates()
         agent_config = get_agent_config(agent_id)
-        model = agent_config.get("model", "claude-3-5-sonnet-20241022")
+        model = agent_config.get("model", "claude-sonnet-4-20250514")
         
         # Estimate tokens (rough estimate before actual call)
         estimated_tokens = len(message.content.split()) * 2

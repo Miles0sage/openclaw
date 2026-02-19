@@ -12,11 +12,11 @@ from typing import Optional
 # Pricing constants (Feb 2026 Claude API rates + Deepseek Kimi)
 PRICING = {
     # Claude Models
-    "claude-3-5-haiku-20241022": {
+    "claude-haiku-4-5-20251001": {
         "input": 0.8,      # $0.80 per million input tokens
         "output": 4.0,     # $4.00 per million output tokens
     },
-    "claude-3-5-sonnet-20241022": {
+    "claude-sonnet-4-20250514": {
         "input": 3.0,      # $3.00 per million input tokens
         "output": 15.0,    # $15.00 per million output tokens
     },
@@ -24,7 +24,9 @@ PRICING = {
         "input": 15.0,     # $15.00 per million input tokens
         "output": 75.0,    # $75.00 per million output tokens
     },
-    # Claude Aliases
+    # Claude Aliases (old + new)
+    "claude-3-5-haiku-20241022": {"input": 0.8, "output": 4.0},
+    "claude-3-5-sonnet-20241022": {"input": 3.0, "output": 15.0},
     "claude-3-5-haiku": {"input": 0.8, "output": 4.0},
     "claude-3-5-sonnet": {"input": 3.0, "output": 15.0},
     "claude-opus": {"input": 15.0, "output": 75.0},

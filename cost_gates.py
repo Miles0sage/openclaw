@@ -25,11 +25,11 @@ PRICING = {
         "output": 2.19,     # $2.19 per million output tokens
     },
     # Claude Models
-    "claude-3-5-haiku-20241022": {
+    "claude-haiku-4-5-20251001": {
         "input": 0.8,       # $0.80 per million input tokens
         "output": 4.0,      # $4.00 per million output tokens
     },
-    "claude-3-5-sonnet-20241022": {
+    "claude-sonnet-4-20250514": {
         "input": 3.0,       # $3.00 per million input tokens
         "output": 15.0,     # $15.00 per million output tokens
     },
@@ -37,6 +37,9 @@ PRICING = {
         "input": 15.0,      # $15.00 per million input tokens
         "output": 60.0,     # $60.00 per million output tokens
     },
+    # Old aliases for backward compat
+    "claude-3-5-haiku-20241022": {"input": 0.8, "output": 4.0},
+    "claude-3-5-sonnet-20241022": {"input": 3.0, "output": 15.0},
 }
 
 class BudgetStatus(Enum):
