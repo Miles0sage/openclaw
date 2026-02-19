@@ -25,6 +25,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import traceback
 import uuid
@@ -290,7 +291,7 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
     they are passed to the Claude API for tool_use; the agent iterates
     until it stops requesting tool calls.
 
-    CRITICAL FIX: When tools are required (execute, verify, deliver phases),
+    CRITICAL: When tools are required (execute, verify, deliver phases),
     we ALWAYS use Claude Haiku with Anthropic provider, since only Anthropic
     supports native tool_use. Non-Anthropic agents (Kimi, MiniMax, Deepseek)
     are used for text-only phases (research, plan).
@@ -309,11 +310,13 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
     all_tool_calls = []
     final_text = ""
 
-    # CRITICAL FIX: If tools are required, use Claude Haiku (Anthropic) for actual execution
-    # This ensures tool_use actually runs, not just gets described.
+    # When tools are required, use Claude Haiku (Anthropic) for actual execution.
+    # Only Anthropic natively supports tool_use content blocks that we can dispatch
+    # to execute_tool(). Non-Anthropic providers (Kimi/deepseek, MiniMax/minimax)
+    # write tool calls as prose/code in their text response, which never executes.
     if tools:
-        # For tool-executing phases (execute, verify, deliver), ALWAYS use Claude Haiku
-        # It's the cheapest Anthropic model with native tool_use support ($0.25/$1.25 per 1M tokens)
+        # For tool-executing phases (execute, verify, deliver), ALWAYS use Claude Haiku.
+        # It's the cheapest Anthropic model with native tool_use support.
         if provider != "anthropic":
             logger.info(
                 f"Tool execution required but provider='{provider}' doesn't support tool_use. "
@@ -321,22 +324,47 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
             )
             model = "claude-haiku-4-5-20251001"
             provider = "anthropic"
+
+        # Minimal system prompt for job execution context.
+        # The full agent persona/identity is deliberately kept short here to
+        # reduce cost — the execution prompt already contains full task context.
+        system_prompt = (
+            "You are an autonomous AI agent executing a task step-by-step using tools. "
+            "When you need to perform an action (read/write files, run shell commands, "
+            "git operations, etc.), you MUST use the provided tools — do NOT describe "
+            "actions in text. Call tools directly. After all actions are complete, "
+            "summarize what was done and the outcome."
+        )
+
         # Build messages
         messages = list(conversation or [])
         messages.append({"role": "user", "content": prompt})
 
-        # Tool-use loop: agent may request tools multiple times
+        # Get the event loop once before the iteration loop (Python 3.10+ compatible)
+        loop = asyncio.get_running_loop()
+
+        # Tool-use loop: agent may request tools multiple times.
+        # Loop continues until Claude returns stop_reason="end_turn" with no tool_use blocks.
         iterations = 0
         while iterations < MAX_TOOL_ITERATIONS:
             iterations += 1
 
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(None, lambda: anthropic_client.messages.create(
-                model=model,
-                max_tokens=8192,
-                messages=messages,
-                tools=tools,
-            ))
+            # Snapshot current messages list length to avoid lambda closure mutation issues
+            _current_messages = list(messages)
+            _current_model = model
+            _current_tools = tools
+            _current_system = system_prompt
+
+            response = await loop.run_in_executor(
+                None,
+                lambda: anthropic_client.messages.create(
+                    model=_current_model,
+                    max_tokens=8192,
+                    system=_current_system,
+                    messages=_current_messages,
+                    tools=_current_tools,
+                )
+            )
 
             tokens_in = response.usage.input_tokens
             tokens_out = response.usage.output_tokens
@@ -430,8 +458,8 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
         }
 
     else:
-        # Non-tool call path (or non-Anthropic provider)
-        loop = asyncio.get_event_loop()
+        # Non-tool call path (text-only, non-Anthropic provider)
+        loop = asyncio.get_running_loop()
         response_text, tokens = await loop.run_in_executor(
             None, call_model_for_agent, agent_key, prompt, conversation
         )
@@ -770,6 +798,48 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
             "issues": [],
         }
 
+    # ------------------------------------------------------------------
+    # Cross-check verify_data against actual tool results.
+    # If shell_execute ran tests and returned a non-zero exit code, mark
+    # verification as failed even if the LLM claimed it passed.
+    # ------------------------------------------------------------------
+    test_failures_detected = False
+    shell_outputs = []
+
+    for tc in result.get("tool_calls", []):
+        if tc.get("tool") == "shell_execute":
+            tool_result = tc.get("result", "")
+            shell_outputs.append(tool_result)
+            # Detect test runner failures from exit code or error patterns
+            if "[EXIT CODE]: " in tool_result:
+                exit_match = re.search(r'\[EXIT CODE\]: (\d+)', tool_result)
+                if exit_match and exit_match.group(1) != "0":
+                    test_failures_detected = True
+            # Detect common test failure patterns
+            if any(pat in tool_result for pat in [
+                "FAILED", "failed", "ERROR", "AssertionError",
+                "Test Suites: ", "Tests:.*fail",
+            ]):
+                # Check if it's actually a failure (not a pass with "failed" in test name)
+                if "failed" in tool_result.lower() and (
+                    "passed" not in tool_result.lower() or
+                    tool_result.lower().index("failed") < tool_result.lower().index("passed")
+                ):
+                    test_failures_detected = True
+
+    if test_failures_detected and verify_data.get("passed", True):
+        logger.warning(
+            f"Verify phase: LLM claimed passed=True but shell tool outputs indicate failures. "
+            f"Overriding to passed=False."
+        )
+        verify_data["passed"] = False
+        verify_data["issues"] = verify_data.get("issues", []) + [
+            "Test runner exit code was non-zero (actual failure detected from shell output)"
+        ]
+
+    # Record that actual tool calls were made (not just LLM narration)
+    verify_data["tool_calls_made"] = len(result.get("tool_calls", []))
+
     progress.phase_status = "done"
     _save_progress(progress)
 
@@ -777,6 +847,7 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
         "event": "phase_complete",
         "passed": verify_data.get("passed", True),
         "issues_count": len(verify_data.get("issues", [])),
+        "tool_calls_made": verify_data["tool_calls_made"],
         "cost_usd": result["cost_usd"],
     })
 
@@ -846,7 +917,7 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
 
     progress.cost_usd += result["cost_usd"]
 
-    # Parse delivery result
+    # Parse delivery result from LLM text (used as fallback/summary only)
     deliver_text = result["text"].strip()
     delivery = None
     for attempt_str in [deliver_text, _extract_json_block(deliver_text)]:
@@ -861,6 +932,53 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
             "delivered": True,
             "summary": deliver_text[:500],
         }
+
+    # ------------------------------------------------------------------
+    # Override delivery data with ground truth from actual tool results.
+    # The LLM text response may contain fabricated commit hashes or false
+    # status claims. We parse real tool outputs to get authoritative values.
+    # ------------------------------------------------------------------
+    real_commit_hash = ""
+    git_pushed = False
+    git_status_output = ""
+
+    for tc in result.get("tool_calls", []):
+        tool_name = tc.get("tool", "")
+        tool_result = tc.get("result", "")
+        tool_input = tc.get("input", {})
+
+        if tool_name == "git_operations":
+            action = tool_input.get("action", "")
+
+            if action == "commit":
+                # Real commit output looks like: "[main abc1234] message"
+                # Extract the short hash from the commit output
+                commit_match = re.search(r'\[[\w/\-]+ ([0-9a-f]{5,40})\]', tool_result)
+                if commit_match:
+                    real_commit_hash = commit_match.group(1)
+                    logger.info(f"Deliver phase: real commit hash extracted: {real_commit_hash}")
+
+            elif action == "push":
+                # Push succeeded if exit code line is 0 or output contains success indicators
+                if "[EXIT CODE]: 0" in tool_result or "master" in tool_result or "main" in tool_result:
+                    if "error" not in tool_result.lower() and "fatal" not in tool_result.lower():
+                        git_pushed = True
+
+            elif action == "status":
+                git_status_output = tool_result[:500]
+
+    # Apply real values to delivery dict, overriding LLM fabrications
+    if real_commit_hash:
+        delivery["commit_hash"] = real_commit_hash
+        delivery["delivered"] = True
+    if git_pushed:
+        delivery["pushed"] = True
+    if git_status_output:
+        delivery["git_status"] = git_status_output
+
+    # If any tool calls were made, mark as actually delivered (not just narrated)
+    delivery["tool_calls_made"] = len(result.get("tool_calls", []))
+    delivery["actual_execution"] = delivery["tool_calls_made"] > 0
 
     # ------------------------------------------------------------------
     # Auto-delivery: GitHub PR creation
@@ -938,8 +1056,7 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
             logger.info(
                 f"Auto-deploying job {progress.job_id} to Vercel from {ws_path}"
             )
-            loop = asyncio.get_event_loop()
-            raw_deploy = await loop.run_in_executor(
+            raw_deploy = await asyncio.get_running_loop().run_in_executor(
                 None, execute_tool, "vercel_deploy", {
                     "action": "deploy",
                     "project_path": str(ws_path),
@@ -1006,7 +1123,6 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
 
 def _extract_json_block(text: str) -> Optional[str]:
     """Extract JSON from a response that may contain markdown fences."""
-    import re
     # Try ```json ... ```
     match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
     if match:
@@ -1167,7 +1283,7 @@ class AutonomousRunner:
         logger.info("Poll loop started")
         while self._running:
             try:
-                pending = await asyncio.get_event_loop().run_in_executor(
+                pending = await asyncio.get_running_loop().run_in_executor(
                     None, get_pending_jobs
                 )
 
