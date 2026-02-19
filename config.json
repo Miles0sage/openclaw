@@ -514,6 +514,11 @@
       "notes": "OpenAI-compatible API. Alternative for high-throughput coding tasks."
     }
   },
+  "slack_alerts": {
+    "enabled": true,
+    "thresholds": [80, 90, 100],
+    "dedupe_hours": 24
+  },
   "quotas": {
     "enabled": true,
     "daily_limit_usd": 50,

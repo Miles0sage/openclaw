@@ -267,6 +267,44 @@ class AgentRouter:
         return decision
 
     # ═══════════════════════════════════════════════════════════════════════
+    # DELEGATION — Parse Overseer responses for agent hand-offs
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def auto_delegate(self, overseer_response: str, original_query: str) -> List[Dict]:
+        """
+        Parse Overseer's response for delegation markers and return delegation tasks.
+
+        Delegation markers in Overseer response:
+        [DELEGATE:agent_id]task description[/DELEGATE]
+
+        Returns: list of {"agent_id": str, "task": str, "routing": dict}
+        """
+        pattern = r'\[DELEGATE:(\w+)\](.*?)\[/DELEGATE\]'
+        matches = re.findall(pattern, overseer_response, re.DOTALL)
+
+        delegations = []
+        valid_agents = set(self.AGENTS.keys()) | set((self.config.get("agents", {}) or {}).keys())
+
+        for agent_id, task in matches:
+            agent_id = agent_id.strip()
+            task = task.strip()
+
+            if not task or agent_id not in valid_agents:
+                continue
+
+            delegations.append({
+                "agent_id": agent_id,
+                "task": task,
+                "routing": {
+                    "source": "delegation",
+                    "delegated_by": "project_manager",
+                    "original_query": original_query[:200]
+                }
+            })
+
+        return delegations
+
+    # ═══════════════════════════════════════════════════════════════════════
     # CACHING METHODS (Sub-50ms latency for repeated queries)
     # ═══════════════════════════════════════════════════════════════════════
 

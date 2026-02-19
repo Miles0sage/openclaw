@@ -971,29 +971,7 @@
             skills: ["Database", "Queries", "Schema Design"],
           },
         ],
-        tasks: JSON.parse(localStorage.getItem("tasks")) || [
-          {
-            id: 1,
-            title: "Implement routing logic",
-            agent: "Overseer",
-            status: "in-progress",
-            timestamp: Date.now() - 300000,
-          },
-          {
-            id: 2,
-            title: "Write unit tests",
-            agent: "CodeGen Pro",
-            status: "todo",
-            timestamp: Date.now() - 600000,
-          },
-          {
-            id: 3,
-            title: "Deploy to production",
-            agent: "Overseer",
-            status: "done",
-            timestamp: Date.now() - 1800000,
-          },
-        ],
+        tasks: [],
         memories: [
           {
             key: "session:user:123",
@@ -1232,22 +1210,40 @@
       // ============================================
       // TASKS TAB (KANBAN)
       // ============================================
+      async function loadTasksFromAPI() {
+        try {
+          const url = STATE.gatewayUrl + "/api/tasks";
+          const headers = STATE.authToken ? { Authorization: "Bearer " + STATE.authToken } : {};
+          const res = await fetch(url, { headers });
+          const data = await res.json();
+          if (data.success && data.tasks) {
+            STATE.tasks = data.tasks.map((t) => ({
+              id: t.id,
+              title: t.title || "Untitled",
+              agent: t.agent || "Overseer",
+              status: t.status || "todo",
+              timestamp: new Date(t.created_at || Date.now()).getTime(),
+            }));
+          }
+        } catch (e) {
+          console.error("Failed to load tasks from API:", e);
+        }
+      }
+
       function renderTasks() {
         const board = document.getElementById("kanbanBoard");
         const columns = [
-          { id: "todo", title: "📝 Todo", label: "Todo" },
-          { id: "in-progress", title: "⚙️ In Progress", label: "In Progress" },
-          { id: "done", title: "✅ Done", label: "Done" },
+          { id: "todo", title: "📝 Todo", label: "todo" },
+          { id: "in-progress", title: "⚙️ In Progress", label: "in-progress" },
+          { id: "done", title: "✅ Done", label: "done" },
         ];
 
         board.innerHTML = columns
           .map((col) => {
-            const tasks = STATE.tasks.filter(
-              (t) => t.status === col.label.toLowerCase().replace(" ", "-"),
-            );
+            const tasks = STATE.tasks.filter((t) => t.status === col.label);
             return `
-                    <div class="kanban-column" data-status="${col.label.toLowerCase().replace(" ", "-")}">
-                        <div class="kanban-title">${col.title}</div>
+                    <div class="kanban-column" data-status="${col.label}">
+                        <div class="kanban-title">${col.title} (${tasks.length})</div>
                         <div class="kanban-tasks">
                             ${tasks
                               .map(
@@ -1291,16 +1287,29 @@
             col.style.borderColor = "var(--border)";
           });
 
-          col.addEventListener("drop", (e) => {
+          col.addEventListener("drop", async (e) => {
             e.preventDefault();
             col.style.borderColor = "var(--border)";
-            const taskId = parseInt(e.dataTransfer.getData("taskId"));
+            const taskId = e.dataTransfer.getData("taskId");
             const newStatus = col.dataset.status;
 
-            const task = STATE.tasks.find((t) => t.id === taskId);
+            // Update via API
+            try {
+              const url = STATE.gatewayUrl + "/api/tasks/" + taskId;
+              const headers = { "Content-Type": "application/json" };
+              if (STATE.authToken) headers["Authorization"] = "Bearer " + STATE.authToken;
+              await fetch(url, {
+                method: "PATCH",
+                headers,
+                body: JSON.stringify({ status: newStatus }),
+              });
+            } catch (e) {
+              console.error("Task update failed:", e);
+            }
+
+            const task = STATE.tasks.find((t) => t.id === taskId || t.id === parseInt(taskId));
             if (task) {
               task.status = newStatus;
-              localStorage.setItem("tasks", JSON.stringify(STATE.tasks));
               renderTasks();
               showSuccess("Task moved!");
             }
@@ -1308,24 +1317,37 @@
         });
       }
 
-      document.getElementById("addTaskBtn").addEventListener("click", () => {
+      document.getElementById("addTaskBtn").addEventListener("click", async () => {
         const title = prompt("Task title:");
         if (!title) return;
         const agents = STATE.agents.map((a) => a.name).join(", ");
         const agent = prompt(`Agent (${agents}):`, STATE.agents[0].name);
 
-        const newTask = {
-          id: Math.max(0, ...STATE.tasks.map((t) => t.id)) + 1,
-          title,
-          agent: agent || STATE.agents[0].name,
-          status: "todo",
-          timestamp: Date.now(),
-        };
-
-        STATE.tasks.push(newTask);
-        localStorage.setItem("tasks", JSON.stringify(STATE.tasks));
-        renderTasks();
-        showSuccess("Task created!");
+        try {
+          const url = STATE.gatewayUrl + "/api/tasks";
+          const headers = { "Content-Type": "application/json" };
+          if (STATE.authToken) headers["Authorization"] = "Bearer " + STATE.authToken;
+          const res = await fetch(url, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ title, agent: agent || "project_manager", status: "todo" }),
+          });
+          const data = await res.json();
+          if (data.success && data.task) {
+            STATE.tasks.push({
+              id: data.task.id,
+              title: data.task.title,
+              agent: data.task.agent || agent || STATE.agents[0].name,
+              status: "todo",
+              timestamp: Date.now(),
+            });
+            renderTasks();
+            showSuccess("Task created!");
+          }
+        } catch (e) {
+          console.error("Task creation failed:", e);
+          showSuccess("Task creation failed!");
+        }
       });
 
       // ============================================
@@ -1456,8 +1478,9 @@
           // Render tab content
           if (tabName === "overview") renderOverview();
           else if (tabName === "agents") renderAgents();
-          else if (tabName === "tasks") renderTasks();
-          else if (tabName === "memory") renderMemory();
+          else if (tabName === "tasks") {
+            loadTasksFromAPI().then(() => renderTasks());
+          } else if (tabName === "memory") renderMemory();
           else if (tabName === "costs") renderCosts();
         });
       });
@@ -1496,11 +1519,83 @@
       });
 
       // ============================================
+      // SSE REAL-TIME ACTIVITY STREAM
+      // ============================================
+      let _eventSource = null;
+
+      function connectActivityStream() {
+        if (_eventSource) _eventSource.close();
+        try {
+          _eventSource = new EventSource(STATE.gatewayUrl + "/api/events/stream");
+          _eventSource.onmessage = function (event) {
+            try {
+              const data = JSON.parse(event.data);
+              addActivityItem(data);
+            } catch (e) {}
+          };
+          _eventSource.onerror = function () {
+            _eventSource.close();
+            setTimeout(connectActivityStream, 5000);
+          };
+        } catch (e) {
+          setTimeout(connectActivityStream, 5000);
+        }
+      }
+
+      function addActivityItem(data) {
+        const log = document.getElementById("activityLog");
+        if (!log) return;
+
+        const item = document.createElement("div");
+        item.style.cssText =
+          "padding:0.5rem;border-bottom:1px solid var(--border);font-size:0.85rem;animation:fadeIn 0.3s";
+        const time = new Date(data.timestamp || Date.now()).toLocaleTimeString();
+        const typeIcon =
+          {
+            response_start: "⚡",
+            response_end: "✅",
+            delegation_start: "🤝",
+            delegation_end: "🤝",
+            workflow_started: "🔄",
+            workflow_completed: "🏁",
+            workflow_step_start: "▶️",
+            workflow_step_end: "⏹️",
+            task_created: "📋",
+            cost_alert: "💰",
+            workflow_failed: "❌",
+          }[data.type] || "📌";
+        item.innerHTML = `<span style="color:var(--text-secondary)">${time}</span> ${typeIcon} <strong>${data.agent || "system"}</strong>: ${data.message || data.type || ""}`;
+        log.prepend(item);
+        while (log.children.length > 50) log.removeChild(log.lastChild);
+
+        // Update agent card status
+        if (data.type === "response_start") {
+          const cards = document.querySelectorAll(".agent-card");
+          cards.forEach((c) => {
+            if (c.textContent.includes(data.agent)) c.style.borderColor = "var(--accent)";
+          });
+        } else if (data.type === "response_end") {
+          const cards = document.querySelectorAll(".agent-card");
+          cards.forEach((c) => {
+            if (c.textContent.includes(data.agent)) c.style.borderColor = "var(--border)";
+          });
+        }
+      }
+
+      // ============================================
       // INITIALIZATION
       // ============================================
       function init() {
         renderOverview();
         updateStatus("online");
+
+        // Load tasks from API on startup
+        loadTasksFromAPI().then(() => {
+          if (STATE.currentTab === "tasks") renderTasks();
+        });
+
+        // Connect SSE activity stream
+        connectActivityStream();
 
         // Auto-refresh metrics every 30 seconds
         setInterval(() => {

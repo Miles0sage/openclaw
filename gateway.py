@@ -131,6 +131,84 @@ logger.info(f"📁 Session storage: {SESSIONS_DIR}")
 # Tasks storage for Mission Control
 TASKS_FILE = pathlib.Path("/tmp/openclaw_tasks.json")
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# SSE EVENT STREAM — Real-time event broadcasting for Mission Control
+# ═══════════════════════════════════════════════════════════════════════
+
+_event_log = []  # Ring buffer of recent events (max 200)
+
+def broadcast_event(event_data: dict):
+    """Broadcast an event to SSE subscribers via ring buffer"""
+    event_data.setdefault("timestamp", datetime.utcnow().isoformat() + "Z")
+    _event_log.append(event_data)
+    while len(_event_log) > 200:
+        _event_log.pop(0)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COST ALERTS — Slack webhook notifications when budgets are hit
+# ═══════════════════════════════════════════════════════════════════════
+
+_cost_alerts_sent = {}  # {threshold_key: timestamp} for dedup
+
+def send_cost_alert_if_needed():
+    """Check cost thresholds and send Slack alerts if needed"""
+    try:
+        slack_config = CONFIG.get("slack_alerts", {})
+    except NameError:
+        slack_config = {}
+    webhook_url = os.getenv("SLACK_WEBHOOK_URL", "")
+
+    if not webhook_url:
+        return
+
+    try:
+        cost_data = get_cost_metrics()
+        quota_status = get_quota_status("default")
+
+        daily_spend = cost_data.get("today_usd", 0)
+        monthly_spend = cost_data.get("month_usd", 0)
+        daily_limit = quota_status.get("daily", {}).get("limit", 50)
+        monthly_limit = quota_status.get("monthly", {}).get("limit", 1000)
+
+        thresholds = [80, 90, 100]
+        alerts = []
+
+        if daily_limit > 0:
+            daily_pct = (daily_spend / daily_limit) * 100
+            for threshold in thresholds:
+                if daily_pct >= threshold:
+                    key = f"daily_{threshold}_{datetime.utcnow().strftime('%Y-%m-%d')}"
+                    if key not in _cost_alerts_sent:
+                        alerts.append(f"Daily spend at ${daily_spend:.2f}/${daily_limit:.2f} ({daily_pct:.0f}%)")
+                        _cost_alerts_sent[key] = time.time()
+
+        if monthly_limit > 0:
+            monthly_pct = (monthly_spend / monthly_limit) * 100
+            for threshold in thresholds:
+                if monthly_pct >= threshold:
+                    key = f"monthly_{threshold}_{datetime.utcnow().strftime('%Y-%m')}"
+                    if key not in _cost_alerts_sent:
+                        alerts.append(f"Monthly spend at ${monthly_spend:.2f}/${monthly_limit:.2f} ({monthly_pct:.0f}%)")
+                        _cost_alerts_sent[key] = time.time()
+
+        for alert_msg in alerts:
+            try:
+                requests.post(webhook_url, json={
+                    "text": f"[COST ALERT] {alert_msg}",
+                    "username": "OpenClaw Cost Monitor",
+                    "icon_emoji": ":money_with_wings:"
+                }, timeout=5)
+                logger.info(f"💰 Cost alert sent: {alert_msg}")
+                broadcast_event({"type": "cost_alert", "agent": "system", "message": alert_msg})
+            except Exception as e:
+                logger.error(f"Failed to send Slack alert: {e}")
+
+    except Exception as e:
+        logger.warning(f"Cost alert check failed: {e}")
+
+
 def sanitize_session_key(session_key: str) -> str:
     """Sanitize session key to prevent path traversal attacks"""
     import re
@@ -298,7 +376,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -561,6 +639,21 @@ def call_model_for_agent(agent_key: str, prompt: str, conversation: list = None)
     except FileNotFoundError:
         logger.warning(f"Skill graph index not found: {skills_index_path}")
 
+    # Delegation capability for PM agent
+    delegation_instructions = ""
+    if agent_key == "project_manager":
+        delegation_instructions = """
+
+DELEGATION: When a task requires specialist work, you can delegate by including markers in your response:
+[DELEGATE:elite_coder]detailed task description here[/DELEGATE]
+[DELEGATE:coder_agent]simple coding task here[/DELEGATE]
+[DELEGATE:hacker_agent]security review task here[/DELEGATE]
+[DELEGATE:database_agent]database query task here[/DELEGATE]
+
+Only delegate when the task clearly needs a specialist. For planning, coordination, and general questions, handle directly.
+After delegation results come back, synthesize them into a final response for the user.
+"""
+
     # Full system prompt for Anthropic (handles long prompts well)
     anthropic_system = f"""You are {name} {emoji} in the Cybershield AI Agency.
 
@@ -572,7 +665,7 @@ IMPORTANT RULES:
 - Follow the communication and behavior rules in the identity documents below
 - Reference real project names (Barber CRM, Delhi Palace, OpenClaw, PrestressCalc, Concrete Canoe)
 - NEVER invent fake project names like "DataGuard Enterprise" or "SecureShield"
-
+{delegation_instructions}
 Remember: You ARE {name}. Stay in character!
 
 --- IDENTITY & CONTEXT ---
@@ -1012,6 +1105,69 @@ async def chat_endpoint(message: Message):
     session_key = message.sessionKey or "default"
     project_id = message.project_id or "default"
 
+    # ═ TASK CREATION: Detect "create task:", "todo:", etc. in user message
+    import re as _re
+    _TASK_PATTERNS = [
+        r'^create task[:\s]+(.+)',
+        r'^todo[:\s]+(.+)',
+        r'^add task[:\s]+(.+)',
+        r'^remind me to[:\s]+(.+)',
+        r'^new task[:\s]+(.+)',
+    ]
+    task_match = None
+    for _pattern in _TASK_PATTERNS:
+        _m = _re.match(_pattern, message.content.strip(), _re.IGNORECASE)
+        if _m:
+            task_match = _m.group(1).strip()
+            break
+
+    if task_match:
+        try:
+            if TASKS_FILE.exists():
+                with open(TASKS_FILE, 'r') as f:
+                    tasks = json.load(f)
+            else:
+                tasks = []
+
+            routing = agent_router.select_agent(task_match)
+            new_task = {
+                "id": str(uuid.uuid4())[:8],
+                "title": task_match[:200],
+                "description": message.content,
+                "status": "todo",
+                "agent": routing.get("agentId", "project_manager"),
+                "created_at": datetime.utcnow().isoformat() + "Z",
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+                "source": "chat",
+                "session_key": session_key
+            }
+            tasks.append(new_task)
+            with open(TASKS_FILE, 'w') as f:
+                json.dump(tasks, f, indent=2)
+
+            task_response = (
+                f"Task created: **{task_match[:200]}**\n"
+                f"ID: `{new_task['id']}`\n"
+                f"Assigned to: {routing.get('agentId', 'project_manager')} "
+                f"({routing.get('reason', '')})\n\n— Overseer"
+            )
+
+            if session_key not in chat_history:
+                chat_history[session_key] = load_session_history(session_key)
+            chat_history[session_key].append({"role": "user", "content": message.content})
+            chat_history[session_key].append({"role": "assistant", "content": task_response})
+            save_session_history(session_key, chat_history[session_key])
+
+            broadcast_event({"type": "task_created", "agent": "project_manager",
+                             "message": f"Task created: {task_match[:80]}",
+                             "timestamp": datetime.utcnow().isoformat()})
+
+            return {"response": task_response, "agent": "project_manager", "task_created": new_task,
+                    "sessionKey": session_key, "historyLength": len(chat_history[session_key])}
+        except Exception as e:
+            logger.error(f"Task creation failed: {e}")
+            # Fall through to normal chat if task creation fails
+
     # ═ AGENT ROUTING: Use intelligent router if no explicit agent_id
     if message.agent_id:
         # Explicit agent_id takes precedence
@@ -1121,6 +1277,11 @@ async def chat_endpoint(message: Message):
             "content": message.content
         })
 
+        # Broadcast start event for SSE
+        broadcast_event({"type": "response_start", "agent": agent_id,
+                         "message": f"{agent_id} is thinking...",
+                         "timestamp": datetime.utcnow().isoformat()})
+
         # Call model with last 10 messages for context
         response_text, tokens = call_model_for_agent(
             agent_id,
@@ -1150,9 +1311,65 @@ async def chat_endpoint(message: Message):
         # Save session to disk
         save_session_history(session_key, chat_history[session_key])
 
+        # ═ DELEGATION: Check if PM wants to delegate sub-tasks to specialists
+        delegation_results = []
+        if agent_id in ("project_manager", "pm"):
+            delegations = agent_router.auto_delegate(response_text, message.content)
+            if delegations:
+                logger.info(f"🤝 Delegation: {len(delegations)} sub-tasks from PM")
+                for delegation in delegations:
+                    try:
+                        broadcast_event({"type": "delegation_start", "agent": delegation["agent_id"],
+                                         "message": f"Delegated by PM: {delegation['task'][:80]}..."})
+                        delegate_response, delegate_tokens = call_model_for_agent(
+                            delegation["agent_id"], delegation["task"], conversation=None)
+                        delegation_results.append({
+                            "agent": delegation["agent_id"],
+                            "task": delegation["task"],
+                            "response": delegate_response,
+                            "tokens": delegate_tokens
+                        })
+                        broadcast_event({"type": "delegation_end", "agent": delegation["agent_id"],
+                                         "message": f"{delegation['agent_id']} completed delegation ({delegate_tokens} tokens)"})
+                    except Exception as e:
+                        logger.error(f"Delegation to {delegation['agent_id']} failed: {e}")
+                        delegation_results.append({
+                            "agent": delegation["agent_id"],
+                            "task": delegation["task"],
+                            "response": f"[Delegation failed: {str(e)}]",
+                            "tokens": 0
+                        })
+
+                # Synthesize specialist responses via PM
+                if delegation_results:
+                    synthesis_parts = []
+                    for r in delegation_results:
+                        synthesis_parts.append(f"### {r['agent']} response:\n{r['response']}")
+                    synthesis_prompt = (
+                        f"You delegated tasks to specialists. Here are their results:\n\n"
+                        f"{''.join(synthesis_parts)}\n\n"
+                        f"Original user request: {message.content}\n\n"
+                        f"Synthesize these specialist responses into a single, coherent response for the user. "
+                        f"Remove any delegation markers. Be concise."
+                    )
+                    response_text, extra_tokens = call_model_for_agent("project_manager", synthesis_prompt)
+                    tokens += extra_tokens + sum(r["tokens"] for r in delegation_results)
+
+                    # Update session with synthesized response
+                    chat_history[session_key][-1] = {"role": "assistant", "content": response_text}
+                    save_session_history(session_key, chat_history[session_key])
+
+        # Broadcast response event
+        broadcast_event({"type": "response_end", "agent": agent_id,
+                         "message": f"{agent_id} responded ({tokens} tokens)", "tokens": tokens,
+                         "timestamp": datetime.utcnow().isoformat()})
+
+        # Check cost alerts
+        send_cost_alert_if_needed()
+
         agent_config = get_agent_config(agent_id)
 
-        return {
+        result = {
             "agent": agent_id,
             "response": response_text,
             "provider": agent_config.get("apiProvider"),
@@ -1161,6 +1378,11 @@ async def chat_endpoint(message: Message):
             "sessionKey": session_key,
             "historyLength": len(chat_history[session_key])
         }
+
+        if delegation_results:
+            result["delegations"] = [{"agent": r["agent"], "tokens": r["tokens"]} for r in delegation_results]
+
+        return result
     except Exception as e:
         logger.error(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -2837,6 +3059,251 @@ async def dashboard_summary():
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# WORKFLOW ENGINE REST ENDPOINTS
+# Sequential multi-step agent task chains with error handling
+# ═══════════════════════════════════════════════════════════════════════
+
+_workflows_file = pathlib.Path("/tmp/openclaw_workflows.json")
+
+def _load_workflows():
+    if _workflows_file.exists():
+        with open(_workflows_file, 'r') as f:
+            return json.load(f)
+    return []
+
+def _save_workflows(workflows):
+    with open(_workflows_file, 'w') as f:
+        json.dump(workflows, f, indent=2)
+
+
+@app.post("/api/workflows")
+async def create_workflow_endpoint(request: Request):
+    """Create and optionally start a new workflow"""
+    body = await request.json()
+    steps = body.get("steps", [])
+    name = body.get("name", "Unnamed Workflow")
+    auto_start = body.get("auto_start", False)
+
+    if not steps:
+        raise HTTPException(status_code=400, detail="Workflow must have at least one step")
+
+    workflow_id = str(uuid.uuid4())[:8]
+    workflow = {
+        "id": workflow_id,
+        "name": name,
+        "steps": steps,
+        "status": "created",
+        "created_at": datetime.utcnow().isoformat() + "Z",
+        "results": [],
+        "current_step": 0
+    }
+
+    workflows = _load_workflows()
+    workflows.append(workflow)
+    _save_workflows(workflows)
+
+    if auto_start:
+        asyncio.create_task(_execute_workflow(workflow_id))
+        workflow["status"] = "running"
+
+    broadcast_event({"type": "workflow_created", "agent": "system",
+                     "message": f"Workflow '{name}' created ({len(steps)} steps)"})
+
+    return {"success": True, "workflow": workflow}
+
+
+@app.get("/api/workflows")
+async def list_workflows_endpoint():
+    """List all workflows"""
+    workflows = _load_workflows()
+    return {"success": True, "workflows": workflows, "total": len(workflows)}
+
+
+@app.get("/api/workflows/{workflow_id}")
+async def get_workflow_endpoint(workflow_id: str):
+    """Get workflow status and results"""
+    workflows = _load_workflows()
+    for wf in workflows:
+        if wf["id"] == workflow_id:
+            return {"success": True, "workflow": wf}
+    raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+
+
+@app.delete("/api/workflows/{workflow_id}")
+async def cancel_workflow_endpoint(workflow_id: str):
+    """Cancel a running workflow"""
+    workflows = _load_workflows()
+    for wf in workflows:
+        if wf["id"] == workflow_id:
+            wf["status"] = "cancelled"
+            wf["cancelled_at"] = datetime.utcnow().isoformat() + "Z"
+            break
+    _save_workflows(workflows)
+    broadcast_event({"type": "workflow_cancelled", "agent": "system",
+                     "message": f"Workflow {workflow_id} cancelled"})
+    return {"success": True, "message": f"Workflow {workflow_id} cancelled"}
+
+
+@app.post("/api/workflows/{workflow_id}/start")
+async def start_workflow_endpoint(workflow_id: str):
+    """Start a created workflow"""
+    asyncio.create_task(_execute_workflow(workflow_id))
+    return {"success": True, "message": f"Workflow {workflow_id} started"}
+
+
+async def _execute_workflow(workflow_id: str):
+    """Execute workflow steps sequentially, passing output forward"""
+    workflows = _load_workflows()
+    workflow = None
+    for wf in workflows:
+        if wf["id"] == workflow_id:
+            workflow = wf
+            break
+
+    if not workflow:
+        return
+
+    workflow["status"] = "running"
+    workflow["started_at"] = datetime.utcnow().isoformat() + "Z"
+    _save_workflows(workflows)
+
+    broadcast_event({"type": "workflow_started", "agent": "system",
+                     "message": f"Workflow '{workflow.get('name', workflow_id)}' started"})
+
+    previous_output = ""
+
+    for i, step in enumerate(workflow["steps"]):
+        # Reload to check for cancellation
+        workflows = _load_workflows()
+        for wf in workflows:
+            if wf["id"] == workflow_id:
+                workflow = wf
+                break
+
+        if workflow["status"] == "cancelled":
+            break
+
+        workflow["current_step"] = i
+        _save_workflows(workflows)
+
+        agent_id = step.get("agent", "project_manager")
+        task = step.get("task", "")
+
+        if previous_output:
+            task = f"Previous step output:\n{previous_output}\n\nYour task: {task}"
+
+        broadcast_event({"type": "workflow_step_start", "agent": agent_id,
+                         "message": f"Workflow step {i+1}/{len(workflow['steps'])}: {step.get('task', '')[:60]}"})
+
+        try:
+            response_text, tokens = call_model_for_agent(agent_id, task)
+
+            step_result = {
+                "step": i,
+                "agent": agent_id,
+                "task": step.get("task", ""),
+                "status": "completed",
+                "response": response_text,
+                "tokens": tokens,
+                "completed_at": datetime.utcnow().isoformat() + "Z"
+            }
+            previous_output = response_text
+
+            agent_cfg = get_agent_config(agent_id)
+            try:
+                log_cost_event(
+                    project="openclaw",
+                    agent=agent_id,
+                    model=agent_cfg.get("model", "unknown"),
+                    tokens_input=len(task.split()),
+                    tokens_output=tokens
+                )
+            except Exception:
+                pass
+
+            broadcast_event({"type": "workflow_step_end", "agent": agent_id,
+                             "message": f"Step {i+1} completed ({tokens} tokens)"})
+
+        except Exception as e:
+            step_result = {
+                "step": i,
+                "agent": agent_id,
+                "task": step.get("task", ""),
+                "status": "failed",
+                "error": str(e),
+                "completed_at": datetime.utcnow().isoformat() + "Z"
+            }
+
+            workflows = _load_workflows()
+            for wf in workflows:
+                if wf["id"] == workflow_id:
+                    wf["results"].append(step_result)
+                    wf["status"] = "failed"
+                    wf["failed_at"] = datetime.utcnow().isoformat() + "Z"
+                    break
+            _save_workflows(workflows)
+
+            broadcast_event({"type": "workflow_failed", "agent": agent_id,
+                             "message": f"Workflow failed at step {i+1}: {str(e)[:60]}"})
+            return
+
+        # Save step result
+        workflows = _load_workflows()
+        for wf in workflows:
+            if wf["id"] == workflow_id:
+                wf["results"].append(step_result)
+                break
+        _save_workflows(workflows)
+
+    # Mark completed
+    workflows = _load_workflows()
+    for wf in workflows:
+        if wf["id"] == workflow_id:
+            if wf["status"] != "cancelled":
+                wf["status"] = "completed"
+                wf["completed_at"] = datetime.utcnow().isoformat() + "Z"
+            break
+    _save_workflows(workflows)
+
+    broadcast_event({"type": "workflow_completed", "agent": "system",
+                     "message": f"Workflow '{workflow.get('name', workflow_id)}' completed"})
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# SSE EVENT STREAM ENDPOINT — Real-time updates for Mission Control
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/events/stream")
+async def event_stream():
+    """SSE endpoint for real-time dashboard updates"""
+    async def generate():
+        last_index = len(_event_log)
+        while True:
+            await asyncio.sleep(1)
+            current_len = len(_event_log)
+            if current_len > last_index:
+                for event in _event_log[last_index:current_len]:
+                    yield f"data: {json.dumps(event)}\n\n"
+                last_index = current_len
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@app.get("/api/events/recent")
+async def recent_events():
+    """Get recent events (non-streaming fallback)"""
+    return {"success": True, "events": _event_log[-50:], "total": len(_event_log)}
 
 
 @app.get("/mission-control")
