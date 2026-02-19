@@ -364,6 +364,87 @@ AGENT_TOOLS = [
             "required": ["url"]
         }
     },
+    # ═══════════════════════════════════════════════════════════════
+    # CODE EDITING TOOLS — Edit, Glob, Grep, Process, Env
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "file_edit",
+        "description": "Edit a file by finding and replacing a specific string. Like surgical find-replace — doesn't overwrite the whole file. Use this to modify existing code, fix bugs, update configs.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Absolute path to file"},
+                "old_string": {"type": "string", "description": "The exact string to find (must be unique in the file)"},
+                "new_string": {"type": "string", "description": "The replacement string"},
+                "replace_all": {"type": "boolean", "description": "Replace all occurrences (default: false, only first)"}
+            },
+            "required": ["path", "old_string", "new_string"]
+        }
+    },
+    {
+        "name": "glob_files",
+        "description": "Find files matching a glob pattern. Use to discover project structure, find all files of a type, locate configs. Returns file paths sorted by modification time.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Glob pattern (e.g. '**/*.py', 'src/**/*.ts', '*.json')"},
+                "path": {"type": "string", "description": "Root directory to search in (default: /root)"},
+                "max_results": {"type": "integer", "description": "Max files to return (default: 50)"}
+            },
+            "required": ["pattern"]
+        }
+    },
+    {
+        "name": "grep_search",
+        "description": "Search file contents using regex patterns. Find function definitions, variable usage, imports, error messages, etc. across a codebase.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Regex pattern to search for (e.g. 'def main', 'import.*fastapi', 'TODO|FIXME')"},
+                "path": {"type": "string", "description": "File or directory to search in (default: /root)"},
+                "file_pattern": {"type": "string", "description": "Filter files by glob (e.g. '*.py', '*.ts')"},
+                "context_lines": {"type": "integer", "description": "Lines of context around matches (default: 2)"},
+                "max_results": {"type": "integer", "description": "Max matches to return (default: 20)"}
+            },
+            "required": ["pattern"]
+        }
+    },
+    {
+        "name": "process_manage",
+        "description": "Manage running processes: list, kill, check ports. Use to manage servers, check what's running, free up ports.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "kill", "check_port", "top"],
+                    "description": "Action: list processes, kill by PID/name, check what's on a port, or show top resource users"
+                },
+                "target": {"type": "string", "description": "PID, process name, or port number depending on action"},
+                "signal": {"type": "string", "enum": ["TERM", "KILL", "HUP"], "description": "Signal for kill (default: TERM)"}
+            },
+            "required": ["action"]
+        }
+    },
+    {
+        "name": "env_manage",
+        "description": "Manage environment variables and .env files. Read, set, list env vars. Load/save .env files.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["get", "set", "list", "load_dotenv", "save_dotenv"],
+                    "description": "Action to perform"
+                },
+                "key": {"type": "string", "description": "Env var name (for get/set)"},
+                "value": {"type": "string", "description": "Value to set (for set)"},
+                "env_file": {"type": "string", "description": "Path to .env file (default: /root/.env)"},
+                "filter": {"type": "string", "description": "Filter pattern for list (e.g. 'API', 'TOKEN')"}
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 
@@ -435,6 +516,24 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             return _research_task(tool_input["topic"], tool_input.get("depth", "medium"))
         elif tool_name == "web_scrape":
             return _web_scrape(tool_input["url"], tool_input.get("extract", "text"), tool_input.get("selector", ""))
+        # ═ Code editing tools
+        elif tool_name == "file_edit":
+            return _file_edit(tool_input["path"], tool_input["old_string"], tool_input["new_string"],
+                             tool_input.get("replace_all", False))
+        elif tool_name == "glob_files":
+            return _glob_files(tool_input["pattern"], tool_input.get("path", "/root"),
+                              tool_input.get("max_results", 50))
+        elif tool_name == "grep_search":
+            return _grep_search(tool_input["pattern"], tool_input.get("path", "/root"),
+                               tool_input.get("file_pattern", ""), tool_input.get("context_lines", 2),
+                               tool_input.get("max_results", 20))
+        elif tool_name == "process_manage":
+            return _process_manage(tool_input["action"], tool_input.get("target", ""),
+                                  tool_input.get("signal", "TERM"))
+        elif tool_name == "env_manage":
+            return _env_manage(tool_input["action"], tool_input.get("key", ""),
+                              tool_input.get("value", ""), tool_input.get("env_file", "/root/.env"),
+                              tool_input.get("filter", ""))
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:
@@ -1046,3 +1145,255 @@ def _web_scrape(url: str, extract: str = "text", selector: str = "") -> str:
 
     except Exception as e:
         return f"Scrape error: {e}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CODE EDITING TOOLS — Edit, Glob, Grep, Process, Env
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _file_edit(path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
+    """Find and replace a string in a file (surgical edit, not overwrite)."""
+    try:
+        abs_path = os.path.abspath(path)
+        if not os.path.exists(abs_path):
+            return f"File not found: {path}"
+        if not _is_path_writable(abs_path):
+            return f"⛔ Path not writable: {path}"
+
+        with open(abs_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        if old_string not in content:
+            return f"⛔ String not found in {path}. Make sure old_string matches exactly (including whitespace/indentation)."
+
+        if not replace_all:
+            count = content.count(old_string)
+            if count > 1:
+                return f"⛔ Found {count} occurrences of old_string — must be unique. Add more context to make it unique, or set replace_all=true."
+            new_content = content.replace(old_string, new_string, 1)
+        else:
+            count = content.count(old_string)
+            new_content = content.replace(old_string, new_string)
+
+        with open(abs_path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+
+        replaced = content.count(old_string) if replace_all else 1
+        return f"✅ Edited {path}: replaced {replaced} occurrence(s) ({len(new_content)} bytes written)"
+    except Exception as e:
+        return f"Edit error: {e}"
+
+
+def _glob_files(pattern: str, path: str = "/root", max_results: int = 50) -> str:
+    """Find files matching a glob pattern."""
+    import glob as glob_mod
+
+    try:
+        search_pattern = os.path.join(path, pattern)
+        matches = glob_mod.glob(search_pattern, recursive=True)
+
+        if not matches:
+            return f"No files matching '{pattern}' in {path}"
+
+        # Sort by modification time (newest first)
+        matches.sort(key=lambda f: os.path.getmtime(f) if os.path.exists(f) else 0, reverse=True)
+        matches = matches[:max_results]
+
+        lines = []
+        for m in matches:
+            try:
+                size = os.path.getsize(m)
+                mtime = os.path.getmtime(m)
+                from datetime import datetime
+                dt = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+                size_str = f"{size:>8,}" if size < 1_000_000 else f"{size/1_000_000:.1f}M"
+                lines.append(f"{size_str}  {dt}  {m}")
+            except Exception:
+                lines.append(f"           {m}")
+
+        header = f"Found {len(matches)} files matching '{pattern}':"
+        return header + "\n" + "\n".join(lines)
+    except Exception as e:
+        return f"Glob error: {e}"
+
+
+def _grep_search(pattern: str, path: str = "/root", file_pattern: str = "",
+                 context_lines: int = 2, max_results: int = 20) -> str:
+    """Search file contents using grep/ripgrep."""
+    try:
+        # Prefer ripgrep (rg) if available, else fallback to grep
+        rg = shutil.which("rg")
+
+        if rg:
+            cmd = [rg, "--no-heading", "-n", f"-C{context_lines}", f"-m{max_results}"]
+            if file_pattern:
+                cmd.extend(["-g", file_pattern])
+            cmd.extend([pattern, path])
+        else:
+            cmd = ["grep", "-rn", f"-C{context_lines}", f"-m{max_results}"]
+            if file_pattern:
+                cmd.extend(["--include", file_pattern])
+            cmd.extend([pattern, path])
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        output = result.stdout.strip()
+
+        if not output:
+            return f"No matches for '{pattern}' in {path}"
+
+        # Truncate if too long
+        if len(output) > MAX_SHELL_OUTPUT:
+            output = output[:MAX_SHELL_OUTPUT] + f"\n... [truncated, showing first {MAX_SHELL_OUTPUT} chars]"
+
+        match_count = output.count("\n") + 1
+        return f"Found matches ({match_count} lines):\n{output}"
+    except subprocess.TimeoutExpired:
+        return "Search timed out"
+    except Exception as e:
+        return f"Grep error: {e}"
+
+
+def _process_manage(action: str, target: str = "", signal: str = "TERM") -> str:
+    """Manage running processes."""
+    try:
+        if action == "list":
+            # List running processes (filtered if target provided)
+            if target:
+                result = subprocess.run(
+                    ["pgrep", "-a", "-f", target],
+                    capture_output=True, text=True, timeout=5
+                )
+            else:
+                result = subprocess.run(
+                    ["ps", "aux", "--sort=-pcpu"],
+                    capture_output=True, text=True, timeout=5
+                )
+            output = result.stdout.strip()
+            return output[:3000] if output else "No matching processes"
+
+        elif action == "kill":
+            if not target:
+                return "Error: target (PID or process name) required"
+            sig = {"TERM": "15", "KILL": "9", "HUP": "1"}.get(signal, "15")
+
+            # Try as PID first
+            if target.isdigit():
+                result = subprocess.run(
+                    ["kill", f"-{sig}", target],
+                    capture_output=True, text=True, timeout=5
+                )
+            else:
+                # Kill by name
+                result = subprocess.run(
+                    ["pkill", f"-{sig}", "-f", target],
+                    capture_output=True, text=True, timeout=5
+                )
+            if result.returncode == 0:
+                return f"✅ Sent SIG{signal} to {target}"
+            else:
+                return f"Failed to kill {target}: {result.stderr.strip()}"
+
+        elif action == "check_port":
+            if not target:
+                return "Error: port number required"
+            result = subprocess.run(
+                ["fuser", f"{target}/tcp"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip():
+                pids = result.stdout.strip()
+                # Get process details
+                details = subprocess.run(
+                    ["ps", "-p", pids.replace(" ", ","), "-o", "pid,comm,args"],
+                    capture_output=True, text=True, timeout=5
+                )
+                return f"Port {target} used by PID(s): {pids}\n{details.stdout.strip()}"
+            return f"Port {target} is free"
+
+        elif action == "top":
+            result = subprocess.run(
+                ["ps", "aux", "--sort=-pcpu"],
+                capture_output=True, text=True, timeout=5
+            )
+            lines = result.stdout.strip().split("\n")
+            return "\n".join(lines[:15])  # Top 15 processes
+
+        return f"Unknown action: {action}"
+    except Exception as e:
+        return f"Process error: {e}"
+
+
+def _env_manage(action: str, key: str = "", value: str = "",
+                env_file: str = "/root/.env", filter_str: str = "") -> str:
+    """Manage environment variables and .env files."""
+    try:
+        if action == "get":
+            if not key:
+                return "Error: key required"
+            val = os.environ.get(key, "")
+            if val:
+                # Mask secrets
+                if any(s in key.upper() for s in ["KEY", "TOKEN", "SECRET", "PASSWORD"]):
+                    return f"{key}={val[:8]}...{val[-4:]}" if len(val) > 12 else f"{key}=***"
+                return f"{key}={val}"
+            return f"{key} not set"
+
+        elif action == "set":
+            if not key or not value:
+                return "Error: key and value required"
+            os.environ[key] = value
+            return f"✅ Set {key} in current process"
+
+        elif action == "list":
+            env_vars = sorted(os.environ.items())
+            if filter_str:
+                env_vars = [(k, v) for k, v in env_vars if filter_str.upper() in k.upper()]
+            lines = []
+            for k, v in env_vars[:50]:
+                if any(s in k.upper() for s in ["KEY", "TOKEN", "SECRET", "PASSWORD"]):
+                    v_display = f"{v[:8]}..." if len(v) > 8 else "***"
+                else:
+                    v_display = v[:80]
+                lines.append(f"{k}={v_display}")
+            return f"Environment variables ({len(lines)}):\n" + "\n".join(lines)
+
+        elif action == "load_dotenv":
+            if not os.path.exists(env_file):
+                return f"File not found: {env_file}"
+            loaded = 0
+            with open(env_file, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ[k.strip()] = v.strip()
+                        loaded += 1
+            return f"✅ Loaded {loaded} vars from {env_file}"
+
+        elif action == "save_dotenv":
+            if not key or not value:
+                return "Error: key and value required to save"
+            if not _is_path_writable(env_file):
+                return f"⛔ Cannot write to {env_file}"
+
+            # Read existing, update or append
+            lines = []
+            found = False
+            if os.path.exists(env_file):
+                with open(env_file, "r") as f:
+                    for line in f:
+                        if line.strip().startswith(f"{key}="):
+                            lines.append(f"{key}={value}\n")
+                            found = True
+                        else:
+                            lines.append(line)
+            if not found:
+                lines.append(f"{key}={value}\n")
+
+            with open(env_file, "w") as f:
+                f.writelines(lines)
+            return f"✅ Saved {key} to {env_file}"
+
+        return f"Unknown action: {action}"
+    except Exception as e:
+        return f"Env error: {e}"
