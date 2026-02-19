@@ -85,6 +85,18 @@ from workflow_engine import WorkflowEngine
 # Import job manager
 from job_manager import create_job, get_job, list_jobs, update_job_status
 
+# Import autonomous runner (background job executor)
+from autonomous_runner import AutonomousRunner, init_runner, get_runner
+
+# Import review cycle engine (agent-to-agent collaboration)
+from review_cycle import ReviewCycleEngine, ReviewStatus
+
+# Import output verifier (quality gates)
+from output_verifier import OutputVerifier
+
+# Import client intake routes
+from intake_routes import router as intake_router
+
 # Import agent registry (auto-registration system)
 from agent_registry import (
     init_agent_registry,
@@ -366,17 +378,20 @@ setup_metrics(app, static_dir=static_dir)
 
 # Include audit routes
 app.include_router(audit_router)
+
+# Include client intake routes
+app.include_router(intake_router)
 # Authentication token - read from environment for security
 AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3")
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard.html", "/monitoring", "/telegram/webhook", "/slack/events", "/api/audit"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard.html", "/monitoring", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal"]
     path = request.url.path
 
-    # Dashboard APIs exempt from auth (for monitoring UI)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control"]
+    # Dashboard APIs exempt from auth (for monitoring UI + client portal)
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -509,14 +524,42 @@ async def startup_heartbeat_monitor():
         logger.error(f"Failed to initialize response cache: {err}")
 
 
+@app.on_event("startup")
+async def startup_autonomous_runner():
+    """Initialize autonomous job runner on FastAPI startup"""
+    try:
+        runner = init_runner(max_concurrent=2, budget_limit_usd=5.0)
+        await runner.start()
+        logger.info("✅ Autonomous job runner started (max_concurrent=2, budget=$5/job)")
+    except Exception as err:
+        logger.error(f"Failed to start autonomous runner: {err}")
+
+    # Initialize review cycle engine with agent caller
+    try:
+        global _review_engine, _output_verifier
+        _review_engine = ReviewCycleEngine(call_agent_fn=call_model_for_agent)
+        _output_verifier = OutputVerifier()
+        logger.info("✅ Review cycle engine + output verifier initialized")
+    except Exception as err:
+        logger.error(f"Failed to init review/verifier: {err}")
+
+
 @app.on_event("shutdown")
 async def shutdown_heartbeat_monitor():
-    """Stop heartbeat monitor on FastAPI shutdown"""
+    """Stop heartbeat monitor and autonomous runner on FastAPI shutdown"""
     try:
         stop_heartbeat_monitor()
         logger.info("✅ Heartbeat monitor stopped")
     except Exception as err:
         logger.error(f"Failed to stop heartbeat monitor: {err}")
+
+    try:
+        runner = get_runner()
+        if runner:
+            await runner.stop()
+        logger.info("✅ Autonomous runner stopped")
+    except Exception as err:
+        logger.error(f"Failed to stop autonomous runner: {err}")
 
     try:
         cron = get_cron_scheduler()
@@ -3702,6 +3745,133 @@ async def mission_control_page():
         with open(html_path, "r") as f:
             return HTMLResponse(content=f.read())
     return HTMLResponse(content="<h1>Mission Control not found</h1>", status_code=404)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# REVIEW CYCLE ENDPOINTS — Agent-to-agent multi-turn review
+# ═══════════════════════════════════════════════════════════════════════
+
+_review_engine = None  # Initialized in startup
+_output_verifier = None  # Initialized in startup
+
+
+@app.post("/api/reviews")
+async def start_review(request: Request):
+    """Start a new agent-to-agent review cycle"""
+    if not _review_engine:
+        raise HTTPException(status_code=503, detail="Review engine not initialized")
+    data = await request.json()
+    work_type = data.get("type", "code_review")
+    content = data.get("content", "")
+    author = data.get("author_agent", "coder_agent")
+    reviewers = data.get("reviewer_agents", [])
+    if not content:
+        raise HTTPException(status_code=400, detail="content required")
+    review_id = _review_engine.start_review(work_type, content, author, reviewers)
+    return {"success": True, "review_id": review_id, "type": work_type}
+
+
+@app.get("/api/reviews")
+async def list_reviews():
+    """List all reviews"""
+    if not _review_engine:
+        return {"reviews": [], "stats": {}}
+    active = _review_engine.list_active_reviews()
+    all_reviews = _review_engine.list_all_reviews()
+    stats = _review_engine.get_stats()
+    return {"active": active, "all": all_reviews, "stats": stats}
+
+
+@app.get("/api/reviews/{review_id}")
+async def get_review(review_id: str):
+    """Get review status and details"""
+    if not _review_engine:
+        raise HTTPException(status_code=503, detail="Review engine not initialized")
+    status = _review_engine.get_review_status(review_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return {"success": True, **status}
+
+
+@app.delete("/api/reviews/{review_id}")
+async def cancel_review(review_id: str):
+    """Cancel an active review"""
+    if not _review_engine:
+        raise HTTPException(status_code=503, detail="Review engine not initialized")
+    success = _review_engine.cancel_review(review_id)
+    return {"success": success}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# OUTPUT VERIFICATION ENDPOINTS — Quality gates
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/verify")
+async def verify_output(request: Request):
+    """Run quality gates on files"""
+    if not _output_verifier:
+        raise HTTPException(status_code=503, detail="Verifier not initialized")
+    data = await request.json()
+    files = data.get("files", [])
+    work_dir = data.get("work_dir", "/root/openclaw")
+    job_id = data.get("job_id")
+    result = _output_verifier.verify_all(job_id or "manual", files, work_dir)
+    return {
+        "success": True,
+        "passed": result.passed,
+        "score": result.overall_score,
+        "recommendation": result.recommendation,
+        "summary": result.summary,
+        "gates": [{"gate": g.gate, "passed": g.passed, "score": g.score,
+                    "issues_count": len(g.issues)} for g in result.gates]
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# AUTONOMOUS RUNNER ENDPOINTS — Background job executor
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/runner/status")
+async def runner_status():
+    """Get autonomous runner status"""
+    runner = get_runner()
+    if not runner:
+        return {"running": False, "message": "Runner not initialized"}
+    stats = runner.get_stats()
+    active = runner.get_active_jobs()
+    return {"running": runner._running, "active_jobs": active, "stats": stats}
+
+
+@app.post("/api/runner/execute/{job_id}")
+async def runner_execute_job(job_id: str):
+    """Manually trigger execution of a specific job"""
+    runner = get_runner()
+    if not runner:
+        raise HTTPException(status_code=503, detail="Runner not initialized")
+    asyncio.create_task(runner.execute_job(job_id))
+    return {"success": True, "message": f"Job {job_id} queued for execution"}
+
+
+@app.get("/api/runner/progress/{job_id}")
+async def runner_job_progress(job_id: str):
+    """Get progress of a running job"""
+    runner = get_runner()
+    if not runner:
+        raise HTTPException(status_code=503, detail="Runner not initialized")
+    progress = runner.get_job_progress(job_id)
+    if not progress:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"success": True, **progress}
+
+
+@app.delete("/api/runner/cancel/{job_id}")
+async def runner_cancel_job(job_id: str):
+    """Cancel a running job"""
+    runner = get_runner()
+    if not runner:
+        raise HTTPException(status_code=503, detail="Runner not initialized")
+    success = runner.cancel_job(job_id)
+    return {"success": success}
 
 
 if __name__ == "__main__":
