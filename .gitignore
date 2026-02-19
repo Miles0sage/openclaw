@@ -75,3 +75,13 @@ USER.md
 memory/
 .agent/*.json
 !.agent/workflows/
+
+# Persistent data directories (runtime state, not source code)
+data/sessions/
+data/costs/
+data/events/
+data/jobs/runs/
+data/memories/
+*.db
+__pycache__/
+*.pyc

@@ -2,6 +2,13 @@
   "name": "Cybershield Agency",
   "version": "1.0.0",
   "port": 8000,
+  "plugins": {
+    "entries": {
+      "lobster": { "enabled": true },
+      "llm-task": { "enabled": true },
+      "memory-lancedb": { "enabled": true }
+    }
+  },
   "channels": {
     "telegram": {
       "enabled": true,

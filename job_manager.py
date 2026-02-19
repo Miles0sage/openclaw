@@ -13,7 +13,8 @@ import logging
 
 logger = logging.getLogger("job_manager")
 
-JOBS_DIR = Path("/tmp/openclaw_jobs")
+DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
+JOBS_DIR = Path(os.path.join(DATA_DIR, "jobs"))
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
 JOBS_FILE = JOBS_DIR / "jobs.jsonl"
 

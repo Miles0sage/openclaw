@@ -13,7 +13,18 @@ from datetime import datetime
 
 from orchestrator import Orchestrator, AgentRole, Message, MessageAudience
 from gateway import call_model_for_agent
-from cost_tracker import log_cost_event
+# cost_tracker removed — inline stub
+import json as _json_aw, os as _os_aw, time as _time_aw
+def log_cost_event(project="openclaw", agent="unknown", model="unknown",
+                   tokens_input=0, tokens_output=0, cost=None, **kwargs):
+    c = cost if cost is not None else 0.0
+    try:
+        _data_dir = _os_aw.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
+        with open(_os_aw.environ.get("OPENCLAW_COSTS_PATH", _os_aw.path.join(_data_dir, "costs", "costs.jsonl")), "a") as _f:
+            _f.write(_json_aw.dumps({"timestamp": _time_aw.time(), "agent": agent, "model": model, "cost": c}) + "\n")
+    except Exception:
+        pass
+    return c
 
 logger = logging.getLogger("autonomous_workflows")
 

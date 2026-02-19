@@ -17,7 +17,8 @@ runtime:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       OLLAMA_HOST: ${OLLAMA_HOST:-http://localhost:11434}
       OPENCLAW_CONFIG: /etc/openclaw/config.json
-      OPENCLAW_SESSIONS_DIR: /tmp/openclaw_sessions
+      OPENCLAW_DATA_DIR: /app/data
+      OPENCLAW_SESSIONS_DIR: /app/data/sessions
       NODE_ENV: production
       PORT: "18789"
       LOG_LEVEL: info
@@ -59,10 +60,10 @@ volumes:
     mountPath: /etc/openclaw
     readOnly: true
 
-  sessions:
-    type: emptyDir
-    mountPath: /tmp/openclaw_sessions
-    sizeLimit: "2Gi"
+  data:
+    type: persistentVolume
+    mountPath: /app/data
+    sizeLimit: "10Gi"
 
 networking:
   ports:
@@ -98,11 +99,7 @@ security:
       mode: read-only
       owner: 1000:1000
 
-    - path: /tmp/openclaw_sessions
-      mode: read-write
-      owner: 1000:1000
-
-    - path: /tmp
+    - path: /app/data
       mode: read-write
       owner: 1000:1000
 

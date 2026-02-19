@@ -36,13 +36,49 @@ from typing import Optional
 
 from agent_tools import execute_tool, AGENT_TOOLS
 from job_manager import get_job, update_job_status, list_jobs, get_pending_jobs
-from cost_tracker import log_cost_event, calculate_cost, get_cost_metrics
+# cost_tracker removed — import inline stubs from gateway at runtime to avoid circular import
+# log_cost_event, calculate_cost, get_cost_metrics are defined inline in gateway.py
+# We redefine minimal versions here to avoid import errors
+
+import json as _json_ct
+import os as _os_ct
+import time as _time_ct
+
+_CT_PRICING = {
+    "claude-haiku-4-5-20251001": {"input": 0.8, "output": 4.0},
+    "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
+    "claude-opus-4-6": {"input": 15.0, "output": 75.0},
+    "kimi-2.5": {"input": 0.14, "output": 0.28},
+    "kimi": {"input": 0.27, "output": 0.68},
+    "m2.5": {"input": 0.30, "output": 1.20},
+}
+
+def calculate_cost(model: str, tokens_input: int, tokens_output: int) -> float:
+    pricing = _CT_PRICING.get(model, {"input": 3.0, "output": 15.0})
+    return round((tokens_input * pricing["input"] + tokens_output * pricing["output"]) / 1_000_000, 6)
+
+def log_cost_event(project: str = "openclaw", agent: str = "unknown", model: str = "unknown",
+                   tokens_input: int = 0, tokens_output: int = 0, cost: float = None, **kwargs) -> float:
+    calculated = cost if cost is not None else calculate_cost(model, tokens_input, tokens_output)
+    entry = {"timestamp": _time_ct.time(), "project": project, "agent": agent, "model": model,
+             "tokens_in": tokens_input, "tokens_out": tokens_output, "cost": calculated}
+    cost_path = _os_ct.environ.get("OPENCLAW_COSTS_PATH", _os_ct.path.join(_os_ct.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "costs", "costs.jsonl"))
+    try:
+        with open(cost_path, "a") as _f:
+            _f.write(_json_ct.dumps(entry) + "\n")
+    except Exception:
+        pass
+    return calculated
+
+def get_cost_metrics() -> dict:
+    return {"total_cost": 0.0, "entries_count": 0, "by_agent": {}}
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-JOB_RUNS_DIR = Path("/tmp/openclaw_job_runs")
+DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
+JOB_RUNS_DIR = Path(os.path.join(DATA_DIR, "jobs", "runs"))
 DEFAULT_POLL_INTERVAL = 10        # seconds between job queue checks
 DEFAULT_MAX_CONCURRENT = 2        # max parallel job executions
 DEFAULT_MAX_RETRIES = 3           # retries per phase on failure
@@ -844,7 +880,7 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
             from github_integration import deliver_job_to_github as _deliver_to_github
 
             # Collect workspace files so the PR body lists what changed.
-            ws_path = Path(f"/tmp/openclaw_job_runs/{progress.job_id}/workspace")
+            ws_path = JOB_RUNS_DIR / progress.job_id / "workspace"
             files_changed: dict = {}
             if ws_path.exists():
                 for f in ws_path.rglob("*"):
@@ -891,7 +927,7 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
     # Triggered when workspace contains vercel.json, or package.json AND
     # delivery_config has deploy_vercel=True.
     # ------------------------------------------------------------------
-    ws_path = Path(f"/tmp/openclaw_job_runs/{progress.job_id}/workspace")
+    ws_path = JOB_RUNS_DIR / progress.job_id / "workspace"
     vercel_json = ws_path / "vercel.json"
     package_json = ws_path / "package.json"
 
@@ -1191,7 +1227,7 @@ class AutonomousRunner:
 
         # Create an isolated workspace directory for this job so concurrent jobs
         # cannot interfere with each other's files on the shared VPS filesystem.
-        workspace = Path(f"/tmp/openclaw_job_runs/{job_id}/workspace")
+        workspace = JOB_RUNS_DIR / job_id / "workspace"
         workspace.mkdir(parents=True, exist_ok=True)
         logger.info(f"Job {job_id}: workspace created at {workspace}")
 

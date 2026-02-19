@@ -26,7 +26,8 @@ services:
       - DELHI_PALACE_SUPABASE_SERVICE_ROLE_KEY=${DELHI_PALACE_SUPABASE_SERVICE_ROLE_KEY}
 
       # OpenClaw Configuration
-      - OPENCLAW_SESSIONS_DIR=/app/sessions
+      - OPENCLAW_DATA_DIR=/app/data
+      - OPENCLAW_SESSIONS_DIR=/app/data/sessions
       - OPENCLAW_LOGS_DIR=/app/logs
       - OPENCLAW_HTTP_GATEWAY_URL=${OPENCLAW_HTTP_GATEWAY_URL:-http://openclaw-gateway:8000}
       - OPENCLAW_HTTP_GATEWAY_TOKEN=${OPENCLAW_HTTP_GATEWAY_TOKEN}
@@ -39,8 +40,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
 
     volumes:
-      # Persistent session storage
-      - sessions_data:/app/sessions
+      # Persistent data storage (sessions, costs, events, jobs, etc.)
+      - ./data:/app/data
       # Persistent log storage
       - logs_data:/app/logs
       # Config file (can be overridden)

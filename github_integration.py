@@ -50,7 +50,8 @@ logger = logging.getLogger("github_integration")
 # Storage
 # ---------------------------------------------------------------------------
 
-GITHUB_DELIVERY_FILE = "/tmp/openclaw_github_deliveries.json"
+DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
+GITHUB_DELIVERY_FILE = os.path.join(DATA_DIR, "jobs", "github_deliveries.json")
 
 
 def _load_deliveries() -> Dict[str, Any]:

@@ -27,7 +27,8 @@ logger = logging.getLogger("openclaw_intake")
 # Storage
 # ---------------------------------------------------------------------------
 
-INTAKE_FILE = "/tmp/openclaw_intake.json"
+DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
+INTAKE_FILE = os.path.join(DATA_DIR, "jobs", "intake.json")
 
 VALID_TASK_TYPES = {
     "feature_build", "bug_fix", "security_audit",

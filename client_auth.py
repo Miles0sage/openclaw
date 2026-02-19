@@ -34,6 +34,7 @@ import hmac
 from datetime import datetime, timezone, timedelta
 import secrets
 import requests
+import stripe
 
 router = APIRouter(tags=["billing"])
 logger = logging.getLogger("openclaw_billing")
@@ -42,7 +43,8 @@ logger = logging.getLogger("openclaw_billing")
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════
 
-CLIENTS_FILE = "/tmp/openclaw_clients.json"
+DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
+CLIENTS_FILE = os.path.join(DATA_DIR, "clients", "clients.json")
 
 PLANS = {
     "free": {
@@ -79,10 +81,19 @@ PLANS = {
     },
 }
 
-# Stripe keys (stub for now — wire in when keys available)
+# Stripe keys — set STRIPE_SECRET_KEY env var to enable live payments
 STRIPE_PUBLIC_KEY = os.getenv("STRIPE_PUBLIC_KEY", "pk_test_stub")
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_stub")
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "whsec_test_stub")
+
+# Configure stripe SDK
+stripe.api_key = STRIPE_SECRET_KEY
+
+# Stripe price IDs (in cents) for checkout sessions
+PLAN_PRICES_CENTS = {
+    "starter": 4900,   # $49.00/month
+    "pro": 19900,      # $199.00/month
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -399,20 +410,54 @@ async def create_checkout_session(
     if plan["price"] is None:
         raise HTTPException(status_code=400, detail="Enterprise plans require contacting sales")
 
-    # STUB: In production, call Stripe API here
-    # For now, return a mock checkout URL
-    mock_session_id = f"cs_test_{uuid.uuid4().hex[:16]}"
-    mock_url = f"https://checkout.stripe.com/mock?session_id={mock_session_id}"
+    plan_name = plan["name"]
+    plan_price_cents = PLAN_PRICES_CENTS.get(plan_id)
+    if plan_price_cents is None:
+        raise HTTPException(status_code=400, detail=f"No price configured for plan: {plan_id}")
 
-    logger.info(f"[STUB] Checkout session created for {client['client_id']}: {plan_id}")
-
-    return CheckoutResponse(
-        session_id=mock_session_id,
-        checkout_url=mock_url,
-        plan_id=plan_id,
-        price=plan["price"],
-        message=f"Checkout URL for {plan['name']} plan. In production, this will redirect to Stripe.",
-    )
+    # Use real Stripe checkout if STRIPE_SECRET_KEY is configured, otherwise return a mock URL
+    if stripe.api_key and not stripe.api_key.startswith("sk_test_stub"):
+        try:
+            session = stripe.checkout.Session.create(
+                payment_method_types=["card"],
+                line_items=[{
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {"name": f"Overseer AI Agency - {plan_name} Plan"},
+                        "unit_amount": plan_price_cents,
+                        "recurring": {"interval": "month"},
+                    },
+                    "quantity": 1,
+                }],
+                mode="subscription",
+                client_reference_id=client["client_id"],
+                customer_email=client.get("email"),
+                success_url=os.environ.get("STRIPE_SUCCESS_URL", "https://overseerclaw.uk/success"),
+                cancel_url=os.environ.get("STRIPE_CANCEL_URL", "https://overseerclaw.uk/cancel"),
+            )
+            logger.info(f"Stripe checkout session created for {client['client_id']}: {plan_id} ({session.id})")
+            return CheckoutResponse(
+                session_id=session.id,
+                checkout_url=session.url,
+                plan_id=plan_id,
+                price=plan["price"],
+                message=f"Stripe checkout session created for {plan_name} plan.",
+            )
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error for {client['client_id']}: {e}")
+            raise HTTPException(status_code=502, detail=f"Stripe error: {str(e)}")
+    else:
+        # Fallback: return a mock checkout URL when Stripe key is not configured
+        mock_session_id = f"cs_test_{uuid.uuid4().hex[:16]}"
+        mock_url = f"https://checkout.stripe.com/mock?session_id={mock_session_id}"
+        logger.info(f"[STUB] Mock checkout session for {client['client_id']}: {plan_id} (STRIPE_SECRET_KEY not set)")
+        return CheckoutResponse(
+            session_id=mock_session_id,
+            checkout_url=mock_url,
+            plan_id=plan_id,
+            price=plan["price"],
+            message=f"Mock checkout URL for {plan_name} plan. Set STRIPE_SECRET_KEY env var to enable live Stripe payments.",
+        )
 
 
 @router.post("/api/billing/webhook")
@@ -420,31 +465,61 @@ async def handle_stripe_webhook(request: Request) -> Dict[str, str]:
     """
     Handle Stripe webhook events (payment successful, subscription updates, etc.).
 
-    Signature verification happens here (using STRIPE_WEBHOOK_SECRET).
-    Currently stubbed — logs events, ready for real Stripe integration.
+    Verifies Stripe signature using STRIPE_WEBHOOK_SECRET when configured.
+    Falls back to unsigned parsing when webhook secret is not set (test/dev mode).
 
     No auth required (Stripe verifies via signature).
     """
     body = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
 
-    # STUB: In production, verify Stripe signature here
-    # For now, just accept and log the event
     try:
-        event = json.loads(body)
+        # Verify Stripe webhook signature if secret is configured
+        webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+        if webhook_secret and not webhook_secret.startswith("whsec_test"):
+            try:
+                event = stripe.Webhook.construct_event(body, sig_header, webhook_secret)
+            except stripe.error.SignatureVerificationError as e:
+                logger.warning(f"Stripe webhook signature verification failed: {e}")
+                raise HTTPException(status_code=400, detail="Invalid Stripe webhook signature")
+        else:
+            # Dev/test mode — parse without verification
+            event = json.loads(body)
+            logger.info("[DEV] Stripe webhook received without signature verification")
+
         event_type = event.get("type", "unknown")
-        logger.info(f"[STUB] Received Stripe webhook: {event_type}")
+        logger.info(f"Received Stripe webhook: {event_type}")
 
         # Handle specific events
         if event_type == "checkout.session.completed":
-            # Upgrade client's plan
-            logger.info("[TODO] Upgrade client plan based on checkout session")
+            session_obj = event.get("data", {}).get("object", {})
+            client_id = session_obj.get("client_reference_id")
+            subscription_id = session_obj.get("subscription")
+            customer_id = session_obj.get("customer")
+            logger.info(f"Checkout complete: client={client_id}, subscription={subscription_id}")
+
+            if client_id:
+                clients = _load_clients()
+                if client_id in clients:
+                    if subscription_id:
+                        clients[client_id]["stripe_subscription_id"] = subscription_id
+                    if customer_id:
+                        clients[client_id]["stripe_customer_id"] = customer_id
+                    clients[client_id]["updated_at"] = _now_iso()
+                    _save_clients(clients)
+                    logger.info(f"Updated Stripe IDs for client {client_id[:8]}")
+
         elif event_type == "customer.subscription.updated":
-            logger.info("[TODO] Update client subscription")
+            subscription = event.get("data", {}).get("object", {})
+            logger.info(f"Subscription updated: {subscription.get('id')} status={subscription.get('status')}")
+
         elif event_type == "customer.subscription.deleted":
-            logger.info("[TODO] Downgrade client plan")
+            subscription = event.get("data", {}).get("object", {})
+            logger.info(f"Subscription cancelled: {subscription.get('id')}")
 
         return {"status": "received"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Stripe webhook error: {e}")
         raise HTTPException(status_code=400, detail=f"Webhook processing failed: {e}")

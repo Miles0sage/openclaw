@@ -13,6 +13,8 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 import sqlite3
 
+DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
+
 # Pricing constants (updated Feb 2026)
 PRICING = {
     # Kimi Models (Deepseek)
@@ -73,8 +75,8 @@ class CostCheckResult:
 class CostGatesDB:
     """D1 database backend for cost tracking (SQLite compatible)"""
     
-    def __init__(self, db_path: str = "/tmp/openclaw_budget.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or os.path.join(DATA_DIR, "costs", "budget.db")
         self._init_db()
     
     def _init_db(self):
@@ -265,9 +267,9 @@ class CostGates:
         ),
     }
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None, db_path: str = "/tmp/openclaw_budget.db"):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, db_path: str = None):
         """Initialize cost gates with optional custom config"""
-        self.db = CostGatesDB(db_path)
+        self.db = CostGatesDB(db_path or os.path.join(DATA_DIR, "costs", "budget.db"))
         self.config = config or {}
         self.gates = self._load_gates()
     

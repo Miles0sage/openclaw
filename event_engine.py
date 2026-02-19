@@ -29,7 +29,8 @@ logger = logging.getLogger("event_engine")
 # Constants
 # ---------------------------------------------------------------------------
 
-EVENT_LOG_PATH = "/tmp/openclaw_events.jsonl"
+DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
+EVENT_LOG_PATH = os.path.join(DATA_DIR, "events", "events.jsonl")
 
 VALID_EVENT_TYPES = frozenset([
     "job.created",
@@ -315,19 +316,8 @@ class EventEngine:
             job_id = data.get("job_id", data.get("id", "unknown"))
             agent = data.get("agent", "unknown")
 
-            # Extract memories from completed job
-            try:
-                from memory_manager import get_memory_manager
-                mm = get_memory_manager()
-                mm.extract_from_job_result({
-                    "id": job_id,
-                    "status": "completed",
-                    "task": task_type,
-                    "agent": agent,
-                    "project": data.get("project", "openclaw"),
-                })
-            except Exception as exc:
-                logger.debug("Memory extraction failed for job %s: %s", job_id, exc)
+            # Memory extraction (memory_manager removed — no-op)
+            logger.debug("Memory extraction skipped for job %s (memory_manager removed)", job_id)
 
             # Only propose test run for code-related tasks
             code_indicators = {"code", "build", "deploy", "implement", "fix", "refactor"}
@@ -360,19 +350,8 @@ class EventEngine:
                 "timestamp": record.get("timestamp", ""),
             })
 
-            # Record lesson learned in memory
-            try:
-                from memory_manager import get_memory_manager
-                mm = get_memory_manager()
-                mm.record_lesson_learned(
-                    task=task_type or "unknown task",
-                    error=reason,
-                    agent_id=agent,
-                    project=data.get("project", "openclaw"),
-                    job_id=job_id,
-                )
-            except Exception as exc:
-                logger.debug("Lesson recording failed for job %s: %s", job_id, exc)
+            # Lesson recording (memory_manager removed — no-op)
+            logger.debug("Lesson recording skipped for job %s (memory_manager removed)", job_id)
 
             if failure_count >= 2:
                 # ESCALATION: same task failed 2+ times -> route to Opus

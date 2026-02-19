@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Overseer AI Agency — Autonomous AI Engineering</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              "deep-blue": "#1a1a2e",
+              "mid-blue": "#16213e",
+              "card-blue": "#0f3460",
+              electric: "#4361ee",
+              "electric-light": "#6c8eff",
+            },
+            fontFamily: {
+              sans: ["Inter", "system-ui", "sans-serif"],
+            },
+          },
+        },
+      };
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        background-color: #1a1a2e;
+      }
+      .gradient-text {
+        background: linear-gradient(135deg, #4361ee, #6c8eff, #a78bfa);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .hero-glow {
+        background: radial-gradient(ellipse at center, rgba(67, 97, 238, 0.15) 0%, transparent 70%);
+      }
+      .card-hover {
+        transition:
+          transform 0.2s ease,
+          box-shadow 0.2s ease;
+      }
+      .card-hover:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 20px 40px rgba(67, 97, 238, 0.2);
+      }
+      .border-glow {
+        border: 1px solid rgba(67, 97, 238, 0.3);
+      }
+      .border-glow:hover {
+        border-color: rgba(67, 97, 238, 0.7);
+      }
+      .step-connector {
+        background: linear-gradient(90deg, transparent, rgba(67, 97, 238, 0.4), transparent);
+      }
+      .plan-popular {
+        border: 1px solid #4361ee;
+        box-shadow: 0 0 30px rgba(67, 97, 238, 0.25);
+      }
+    </style>
+  </head>
+  <body class="font-sans text-white antialiased">
+    <!-- Navigation -->
+    <nav
+      class="sticky top-0 z-50 border-b border-white/5"
+      style="background: rgba(26, 26, 46, 0.9); backdrop-filter: blur(12px)"
+    >
+      <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div
+            class="w-8 h-8 rounded-lg bg-electric flex items-center justify-center text-sm font-bold"
+          >
+            O
+          </div>
+          <span class="font-semibold text-white">Overseer</span>
+        </div>
+        <div class="hidden md:flex items-center gap-8 text-sm text-white/60">
+          <a href="#how-it-works" class="hover:text-white transition-colors">How It Works</a>
+          <a href="#pricing" class="hover:text-white transition-colors">Pricing</a>
+          <a href="#features" class="hover:text-white transition-colors">Features</a>
+          <a href="/terms" class="hover:text-white transition-colors">Terms</a>
+        </div>
+        <a
+          href="/client_portal.html"
+          class="bg-electric hover:bg-electric-light text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+        >
+          Get Started
+        </a>
+      </div>
+    </nav>
+
+    <!-- Hero -->
+    <section
+      class="relative min-h-screen flex flex-col items-center justify-center text-center px-6 py-24 overflow-hidden"
+    >
+      <div class="hero-glow absolute inset-0 pointer-events-none"></div>
+
+      <!-- Badge -->
+      <div
+        class="inline-flex items-center gap-2 text-xs font-medium text-electric-light bg-electric/10 border border-electric/20 px-4 py-2 rounded-full mb-8"
+      >
+        <span class="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
+        Production-grade multi-agent AI system
+      </div>
+
+      <!-- Headline -->
+      <h1 class="text-5xl md:text-7xl font-extrabold leading-tight tracking-tight mb-6 max-w-4xl">
+        <span class="text-white">AI Engineering</span><br />
+        <span class="gradient-text">Agency</span>
+      </h1>
+
+      <!-- Subheadline -->
+      <p class="text-lg md:text-xl text-white/60 max-w-2xl mb-10 leading-relaxed">
+        Autonomous AI agents that build, test, verify, and deliver production code.<br />
+        Submit a task, get a PR.
+      </p>
+
+      <!-- CTAs -->
+      <div class="flex flex-col sm:flex-row items-center gap-4">
+        <a
+          href="/client_portal.html"
+          class="bg-electric hover:bg-electric-light text-white font-semibold px-8 py-4 rounded-xl text-base transition-colors shadow-lg shadow-electric/25"
+        >
+          Open Client Portal
+        </a>
+        <a
+          href="#how-it-works"
+          class="text-white/60 hover:text-white font-medium px-8 py-4 rounded-xl border border-white/10 hover:border-white/20 transition-all text-base"
+        >
+          See How It Works
+        </a>
+      </div>
+
+      <!-- Stats -->
+      <div class="mt-20 grid grid-cols-3 gap-8 md:gap-16 max-w-lg mx-auto">
+        <div class="text-center">
+          <div class="text-3xl font-bold text-white">6</div>
+          <div class="text-xs text-white/40 mt-1">Parallel Agents</div>
+        </div>
+        <div class="text-center">
+          <div class="text-3xl font-bold text-white">187</div>
+          <div class="text-xs text-white/40 mt-1">Tests Passing</div>
+        </div>
+        <div class="text-center">
+          <div class="text-3xl font-bold text-white">70%</div>
+          <div class="text-xs text-white/40 mt-1">Cost Savings</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- How It Works -->
+    <section id="how-it-works" class="py-24 px-6" style="background: #16213e">
+      <div class="max-w-6xl mx-auto">
+        <div class="text-center mb-16">
+          <h2 class="text-3xl md:text-4xl font-bold text-white mb-4">How It Works</h2>
+          <p class="text-white/50 text-lg max-w-xl mx-auto">
+            Four steps from idea to production-ready pull request.
+          </p>
+        </div>
+
+        <div class="grid md:grid-cols-4 gap-6">
+          <!-- Step 1 -->
+          <div class="relative card-hover border-glow rounded-2xl p-6" style="background: #0f3460">
+            <div class="text-4xl mb-4">&#128221;</div>
+            <div class="text-xs font-semibold text-electric-light uppercase tracking-wider mb-2">
+              Step 1
+            </div>
+            <h3 class="text-lg font-semibold text-white mb-3">Submit</h3>
+            <p class="text-white/50 text-sm leading-relaxed">
+              Describe your project via the client portal. Attach context, files, or repository
+              links.
+            </p>
+          </div>
+
+          <!-- Step 2 -->
+          <div class="relative card-hover border-glow rounded-2xl p-6" style="background: #0f3460">
+            <div class="text-4xl mb-4">&#129504;</div>
+            <div class="text-xs font-semibold text-electric-light uppercase tracking-wider mb-2">
+              Step 2
+            </div>
+            <h3 class="text-lg font-semibold text-white mb-3">Plan</h3>
+            <p class="text-white/50 text-sm leading-relaxed">
+              AI agents analyze requirements and create a detailed execution plan with cost and time
+              estimates.
+            </p>
+          </div>
+
+          <!-- Step 3 -->
+          <div class="relative card-hover border-glow rounded-2xl p-6" style="background: #0f3460">
+            <div class="text-4xl mb-4">&#9889;</div>
+            <div class="text-xs font-semibold text-electric-light uppercase tracking-wider mb-2">
+              Step 3
+            </div>
+            <h3 class="text-lg font-semibold text-white mb-3">Execute</h3>
+            <p class="text-white/50 text-sm leading-relaxed">
+              Autonomous agents write code, run tests, verify quality, and iterate until all gates
+              pass.
+            </p>
+          </div>
+
+          <!-- Step 4 -->
+          <div class="relative card-hover border-glow rounded-2xl p-6" style="background: #0f3460">
+            <div class="text-4xl mb-4">&#127881;</div>
+            <div class="text-xs font-semibold text-electric-light uppercase tracking-wider mb-2">
+              Step 4
+            </div>
+            <h3 class="text-lg font-semibold text-white mb-3">Deliver</h3>
+            <p class="text-white/50 text-sm leading-relaxed">
+              Receive a GitHub PR with verified, production-ready code. Review, merge, and ship.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pricing -->
+    <section id="pricing" class="py-24 px-6" style="background: #1a1a2e">
+      <div class="max-w-6xl mx-auto">
+        <div class="text-center mb-16">
+          <h2 class="text-3xl md:text-4xl font-bold text-white mb-4">Simple Pricing</h2>
+          <p class="text-white/50 text-lg max-w-xl mx-auto">
+            Start free. Scale as you grow. No hidden fees.
+          </p>
+        </div>
+
+        <div class="grid md:grid-cols-4 gap-6">
+          <!-- Free -->
+          <div
+            class="card-hover border-glow rounded-2xl p-6 flex flex-col"
+            style="background: #16213e"
+          >
+            <div class="mb-6">
+              <div class="text-sm font-semibold text-white/50 uppercase tracking-wider mb-2">
+                Free
+              </div>
+              <div class="text-4xl font-bold text-white">$0</div>
+              <div class="text-white/40 text-sm mt-1">forever</div>
+            </div>
+            <ul class="space-y-3 mb-8 flex-1">
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> 5 jobs / month
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> Claude Haiku model
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> Basic support
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> 24h job history
+              </li>
+            </ul>
+            <a
+              href="/client_portal.html"
+              class="block text-center border border-white/20 hover:border-electric text-white text-sm font-medium py-3 rounded-lg transition-colors"
+            >
+              Get Started Free
+            </a>
+          </div>
+
+          <!-- Starter -->
+          <div
+            class="card-hover border-glow rounded-2xl p-6 flex flex-col"
+            style="background: #16213e"
+          >
+            <div class="mb-6">
+              <div class="text-sm font-semibold text-white/50 uppercase tracking-wider mb-2">
+                Starter
+              </div>
+              <div class="text-4xl font-bold text-white">$49</div>
+              <div class="text-white/40 text-sm mt-1">per month</div>
+            </div>
+            <ul class="space-y-3 mb-8 flex-1">
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> 50 jobs / month
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> Claude Sonnet model
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> Email support
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> 30-day history
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> API access
+              </li>
+            </ul>
+            <a
+              href="/client_portal.html"
+              class="block text-center bg-electric/20 hover:bg-electric text-electric hover:text-white text-sm font-medium py-3 rounded-lg transition-colors border border-electric/30"
+            >
+              Choose Starter
+            </a>
+          </div>
+
+          <!-- Pro (Popular) -->
+          <div
+            class="plan-popular card-hover rounded-2xl p-6 flex flex-col relative"
+            style="background: #16213e"
+          >
+            <div class="absolute -top-3 left-1/2 -translate-x-1/2">
+              <span class="bg-electric text-white text-xs font-semibold px-4 py-1 rounded-full"
+                >Most Popular</span
+              >
+            </div>
+            <div class="mb-6 mt-2">
+              <div class="text-sm font-semibold text-electric-light uppercase tracking-wider mb-2">
+                Pro
+              </div>
+              <div class="text-4xl font-bold text-white">$199</div>
+              <div class="text-white/40 text-sm mt-1">per month</div>
+            </div>
+            <ul class="space-y-3 mb-8 flex-1">
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> 200 jobs / month
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> Claude Opus model
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> Priority support
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> 90-day history
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> Advanced analytics
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> Webhooks
+              </li>
+            </ul>
+            <a
+              href="/client_portal.html"
+              class="block text-center bg-electric hover:bg-electric-light text-white text-sm font-semibold py-3 rounded-lg transition-colors shadow-lg shadow-electric/30"
+            >
+              Choose Pro
+            </a>
+          </div>
+
+          <!-- Enterprise -->
+          <div
+            class="card-hover border-glow rounded-2xl p-6 flex flex-col"
+            style="background: #16213e"
+          >
+            <div class="mb-6">
+              <div class="text-sm font-semibold text-white/50 uppercase tracking-wider mb-2">
+                Enterprise
+              </div>
+              <div class="text-4xl font-bold text-white">Custom</div>
+              <div class="text-white/40 text-sm mt-1">contact sales</div>
+            </div>
+            <ul class="space-y-3 mb-8 flex-1">
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> Unlimited jobs
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> All models
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> Dedicated support
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> Custom SLA
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> Custom integrations
+              </li>
+              <li class="flex items-center gap-2 text-sm text-white/70">
+                <span class="text-green-400">&#10003;</span> Forever history
+              </li>
+            </ul>
+            <a
+              href="mailto:sales@overseerclaw.uk"
+              class="block text-center border border-white/20 hover:border-electric text-white text-sm font-medium py-3 rounded-lg transition-colors"
+            >
+              Contact Sales
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" class="py-24 px-6" style="background: #16213e">
+      <div class="max-w-6xl mx-auto">
+        <div class="text-center mb-16">
+          <h2 class="text-3xl md:text-4xl font-bold text-white mb-4">Built for Production</h2>
+          <p class="text-white/50 text-lg max-w-xl mx-auto">
+            Every component is engineered for reliability, security, and cost efficiency.
+          </p>
+        </div>
+
+        <div class="grid md:grid-cols-3 gap-6">
+          <div class="card-hover border-glow rounded-2xl p-6" style="background: #1a1a2e">
+            <div
+              class="w-10 h-10 rounded-xl bg-electric/15 flex items-center justify-center text-xl mb-4"
+            >
+              &#129302;
+            </div>
+            <h3 class="font-semibold text-white mb-2">Multi-Agent Pipeline</h3>
+            <p class="text-white/50 text-sm leading-relaxed">
+              5-phase autonomous execution: plan, code, test, verify, deliver. Specialized agents
+              for each stage.
+            </p>
+          </div>
+
+          <div class="card-hover border-glow rounded-2xl p-6" style="background: #1a1a2e">
+            <div
+              class="w-10 h-10 rounded-xl bg-electric/15 flex items-center justify-center text-xl mb-4"
+            >
+              &#9989;
+            </div>
+            <h3 class="font-semibold text-white mb-2">Quality Gates</h3>
+            <p class="text-white/50 text-sm leading-relaxed">
+              6 automated verification checks per output. Code only ships when all gates pass.
+            </p>
+          </div>
+
+          <div class="card-hover border-glow rounded-2xl p-6" style="background: #1a1a2e">
+            <div
+              class="w-10 h-10 rounded-xl bg-electric/15 flex items-center justify-center text-xl mb-4"
+            >
+              &#128176;
+            </div>
+            <h3 class="font-semibold text-white mb-2">Cost Optimization</h3>
+            <p class="text-white/50 text-sm leading-relaxed">
+              Tri-model routing — Haiku, Sonnet, Opus — based on task complexity. 60-70% cost
+              savings vs. Claude-only.
+            </p>
+          </div>
+
+          <div class="card-hover border-glow rounded-2xl p-6" style="background: #1a1a2e">
+            <div
+              class="w-10 h-10 rounded-xl bg-electric/15 flex items-center justify-center text-xl mb-4"
+            >
+              &#128279;
+            </div>
+            <h3 class="font-semibold text-white mb-2">GitHub Integration</h3>
+            <p class="text-white/50 text-sm leading-relaxed">
+              Automatic PR delivery to your repository. Commits signed, diffs clean, ready to merge.
+            </p>
+          </div>
+
+          <div class="card-hover border-glow rounded-2xl p-6" style="background: #1a1a2e">
+            <div
+              class="w-10 h-10 rounded-xl bg-electric/15 flex items-center justify-center text-xl mb-4"
+            >
+              &#128200;
+            </div>
+            <h3 class="font-semibold text-white mb-2">Real-Time Monitoring</h3>
+            <p class="text-white/50 text-sm leading-relaxed">
+              Live dashboard with job status, cost tracking, agent health, and audit logs.
+            </p>
+          </div>
+
+          <div class="card-hover border-glow rounded-2xl p-6" style="background: #1a1a2e">
+            <div
+              class="w-10 h-10 rounded-xl bg-electric/15 flex items-center justify-center text-xl mb-4"
+            >
+              &#128737;
+            </div>
+            <h3 class="font-semibold text-white mb-2">Error Recovery</h3>
+            <p class="text-white/50 text-sm leading-relaxed">
+              Circuit breakers and auto-retry on every agent call. 99.9% uptime with automatic
+              failover.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA Banner -->
+    <section class="py-20 px-6" style="background: #1a1a2e">
+      <div class="max-w-3xl mx-auto text-center">
+        <div
+          class="border border-electric/30 rounded-3xl p-12"
+          style="
+            background: linear-gradient(135deg, rgba(67, 97, 238, 0.1), rgba(167, 139, 250, 0.05));
+          "
+        >
+          <h2 class="text-3xl md:text-4xl font-bold text-white mb-4">Ready to ship faster?</h2>
+          <p class="text-white/50 text-lg mb-8">
+            Submit your first job today. No credit card required for the free plan.
+          </p>
+          <a
+            href="/client_portal.html"
+            class="inline-block bg-electric hover:bg-electric-light text-white font-semibold px-10 py-4 rounded-xl text-base transition-colors shadow-lg shadow-electric/30"
+          >
+            Open Client Portal
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="border-t border-white/5 py-12 px-6" style="background: #16213e">
+      <div class="max-w-7xl mx-auto">
+        <div class="flex flex-col md:flex-row items-center justify-between gap-6">
+          <div class="flex items-center gap-2">
+            <div
+              class="w-7 h-7 rounded-lg bg-electric flex items-center justify-center text-xs font-bold"
+            >
+              O
+            </div>
+            <span class="font-semibold text-white">Overseer AI Agency</span>
+          </div>
+          <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-white/40">
+            <a href="/terms" class="hover:text-white transition-colors">Terms of Service</a>
+            <a href="/client_portal.html" class="hover:text-white transition-colors"
+              >Client Portal</a
+            >
+            <a href="/dashboard.html" class="hover:text-white transition-colors">Dashboard</a>
+            <a href="/api/billing/plans" class="hover:text-white transition-colors">API Docs</a>
+          </div>
+          <div class="text-sm text-white/30">&copy; 2026 Overseer AI Agency</div>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

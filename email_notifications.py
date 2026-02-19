@@ -38,9 +38,10 @@ logger = logging.getLogger("openclaw_email")
 # Configuration
 # -----------------------------------------------------------------------
 
-EMAIL_LOG_FILE = "/tmp/openclaw_emails.jsonl"
-NOTIFICATION_DEDUP_FILE = "/tmp/openclaw_notification_dedup.json"
-NOTIFICATION_HISTORY_FILE = "/tmp/openclaw_notification_history.jsonl"
+DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
+EMAIL_LOG_FILE = os.path.join(DATA_DIR, "events", "emails.jsonl")
+NOTIFICATION_DEDUP_FILE = os.path.join(DATA_DIR, "events", "notification_dedup.json")
+NOTIFICATION_HISTORY_FILE = os.path.join(DATA_DIR, "events", "notification_history.jsonl")
 MAX_EMAILS_PER_JOB = 10
 DEDUP_WINDOW_MINUTES = 5
 

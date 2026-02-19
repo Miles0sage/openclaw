@@ -723,35 +723,13 @@ def _get_events(limit: int = 10, event_type: str = None) -> str:
 
 
 def _save_memory(content: str, tags: list = None, importance: int = 5) -> str:
-    """Save important information to long-term memory."""
-    try:
-        from memory_manager import get_memory_manager
-        mm = get_memory_manager()
-        if not mm:
-            return "Memory manager not initialized"
-        mem_id = mm.add_memory(content=content, tags=tags or [], source="agent_tool", importance=importance)
-        return f"Memory saved: {mem_id} (importance: {importance})"
-    except Exception as e:
-        return f"Error saving memory: {e}"
+    """Save important information to long-term memory (stub — memory_manager removed)."""
+    return f"Memory save acknowledged (persistence disabled): {content[:80]}"
 
 
 def _search_memory(query: str, limit: int = 5) -> str:
-    """Search through saved memories for relevant context."""
-    try:
-        from memory_manager import get_memory_manager
-        mm = get_memory_manager()
-        if not mm:
-            return "Memory manager not initialized"
-        results = mm.search_memories(query, limit=limit)
-        if not results:
-            return "No matching memories found"
-        lines = []
-        for m in results:
-            tags_str = ", ".join(m.get("tags", []))
-            lines.append(f"[{m.get('importance', '?')}/10] {m.get('content', '')[:150]} ({tags_str})")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"Error: {e}"
+    """Search through saved memories (stub — memory_manager removed)."""
+    return "No matching memories found"
 
 
 def _send_slack_message(message: str, channel: str = None) -> str:

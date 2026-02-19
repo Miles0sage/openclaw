@@ -1,29 +1,62 @@
 /**
- * PUT /api/agency/config
- * Update agency configuration (costs, schedule, projects, models)
+ * GET  /api/agency/config  — Return the live config.json
+ * PUT  /api/agency/config  — Merge updates into config.json and persist
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import type { AgencyConfig, ConfigResponse, ErrorResponse } from "../agency.types.js";
 import { clearAgencyConfigCache } from "../agency-config-loader.js";
 import { sendJson, readJsonBody } from "../agency-http.js";
 
+// Path to the main config file
+const CONFIG_PATH = process.env.OPENCLAW_CONFIG_PATH || "/root/openclaw/config.json";
+
+/** Critical top-level keys that must never be removed by a PUT update */
+const CRITICAL_KEYS = ["agents", "routing", "quotas"] as const;
+
 interface ConfigUpdateRequest {
-  updates: {
-    cycle_frequency?: string;
-    per_cycle_hard_cap?: number;
-    per_cycle_typical?: number;
-    per_project_cap?: number;
-    daily_hard_cap?: number;
-    monthly_hard_cap?: number;
-    monthly_soft_cap?: number;
-    projects?: Record<string, { enabled?: boolean; auto_deploy?: boolean }>;
-    model_selection?: {
-      planning?: string;
-      execution?: string;
-      review?: string;
-    };
-  };
+  updates: Record<string, unknown>;
+}
+
+/**
+ * Deep-merge `source` into `target` (non-destructive: existing keys are kept
+ * unless explicitly overwritten by the incoming `source`).
+ */
+function deepMerge(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = { ...target };
+  for (const [key, value] of Object.entries(source)) {
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      typeof result[key] === "object" &&
+      result[key] !== null &&
+      !Array.isArray(result[key])
+    ) {
+      // Both sides are plain objects — recurse
+      result[key] = deepMerge(
+        result[key] as Record<string, unknown>,
+        value as Record<string, unknown>,
+      );
+    } else {
+      // Primitive, array, or target key is missing — overwrite
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/** Load the config file from disk. Throws if missing or unparseable. */
+function loadConfigFromDisk(): Record<string, unknown> {
+  if (!existsSync(CONFIG_PATH)) {
+    throw new Error(`Config file not found: ${CONFIG_PATH}`);
+  }
+  const raw = readFileSync(CONFIG_PATH, "utf-8");
+  return JSON.parse(raw) as Record<string, unknown>;
 }
 
 export async function handleConfigRequest(
@@ -31,153 +64,224 @@ export async function handleConfigRequest(
   res: ServerResponse,
   config: AgencyConfig,
 ): Promise<boolean> {
-  try {
-    // Parse request body
-    const bodyResult = await readJsonBody(req, 1024 * 100); // 100KB limit
-    if (!bodyResult.ok) {
-      sendJson(res, 400, {
-        error: "Invalid request body: " + bodyResult.error,
-        code: "INVALID_BODY",
+  // ── GET: Return the live config ─────────────────────────────────────────────
+  if (req.method === "GET") {
+    try {
+      const diskConfig = loadConfigFromDisk();
+      sendJson(res, 200, {
+        config: diskConfig,
+        config_file: CONFIG_PATH,
+        timestamp: new Date().toISOString(),
+      });
+      return true;
+    } catch (err) {
+      console.error("Config GET error:", err);
+      sendJson(res, 500, {
+        error: `Failed to read config: ${String(err)}`,
+        code: "CONFIG_READ_ERROR",
       } as ErrorResponse);
       return true;
     }
+  }
 
-    const body = bodyResult.value as ConfigUpdateRequest;
-    const updates = body.updates || {};
-
-    // Validate update values
-    if (
-      updates.cycle_frequency &&
-      !["every 4h", "every 6h", "every 8h"].includes(updates.cycle_frequency)
-    ) {
-      sendJson(res, 400, {
-        error: "Invalid cycle_frequency. Must be one of: every 4h, every 6h, every 8h",
-        code: "INVALID_CONFIG",
-      } as ErrorResponse);
-      return true;
-    }
-
-    if (
-      updates.per_cycle_hard_cap !== undefined &&
-      (updates.per_cycle_hard_cap < 1 || updates.per_cycle_hard_cap > 1000)
-    ) {
-      sendJson(res, 400, {
-        error: "Invalid per_cycle_hard_cap. Must be between 1 and 1000",
-        code: "INVALID_CONFIG",
-      } as ErrorResponse);
-      return true;
-    }
-
-    if (
-      updates.monthly_hard_cap !== undefined &&
-      (updates.monthly_hard_cap < 100 || updates.monthly_hard_cap > 10000)
-    ) {
-      sendJson(res, 400, {
-        error: "Invalid monthly_hard_cap. Must be between 100 and 10000",
-        code: "INVALID_CONFIG",
-      } as ErrorResponse);
-      return true;
-    }
-
-    // Check if trying to disable all projects
-    if (updates.projects) {
-      const enabledCount = Object.values(updates.projects).filter(
-        (p) => p.enabled !== false,
-      ).length;
-      if (
-        enabledCount === 0 &&
-        Object.keys(updates.projects).length === Object.keys(config.projects).length
-      ) {
-        sendJson(res, 403, {
-          error: "Cannot disable all projects",
-          code: "CONFIG_ERROR",
-          reason: "At least one project must be enabled",
+  // ── PUT: Merge updates and persist ─────────────────────────────────────────
+  if (req.method === "PUT") {
+    try {
+      // Parse request body
+      const bodyResult = await readJsonBody(req, 1024 * 100); // 100 KB limit
+      if (!bodyResult.ok) {
+        sendJson(res, 400, {
+          error: "Invalid request body: " + bodyResult.error,
+          code: "INVALID_BODY",
         } as ErrorResponse);
         return true;
       }
-    }
 
-    // Validate models exist
-    if (updates.model_selection) {
-      const validModels = [
-        "claude-opus-4-6",
-        "claude-sonnet-4-5-20250929",
-        "claude-haiku-4-5-20251001",
-      ];
-      for (const [key, model] of Object.entries(updates.model_selection)) {
-        if (model && !validModels.includes(model)) {
+      const body = bodyResult.value as ConfigUpdateRequest;
+      const updates = body.updates as Record<string, unknown> | undefined;
+
+      if (!updates || typeof updates !== "object" || Array.isArray(updates)) {
+        sendJson(res, 400, {
+          error: "Missing or invalid 'updates' field — must be a plain object",
+          code: "INVALID_CONFIG",
+        } as ErrorResponse);
+        return true;
+      }
+
+      // ── Validate cycle_frequency if provided ───────────────────────────────
+      const cycleFreq = (updates as { cycle_frequency?: string }).cycle_frequency;
+      if (cycleFreq !== undefined) {
+        const validFreqs = ["every 4h", "every 6h", "every 8h"];
+        if (!validFreqs.includes(cycleFreq)) {
           sendJson(res, 400, {
-            error: `Invalid model for ${key}: ${model}`,
+            error: `Invalid cycle_frequency. Must be one of: ${validFreqs.join(", ")}`,
             code: "INVALID_CONFIG",
           } as ErrorResponse);
           return true;
         }
       }
-    }
 
-    // Track what changed
-    const changesApplied: Record<string, unknown> = {};
+      // ── Validate per_cycle_hard_cap if provided ────────────────────────────
+      const perCycleCap = (updates as { per_cycle_hard_cap?: number }).per_cycle_hard_cap;
+      if (perCycleCap !== undefined) {
+        if (perCycleCap < 1 || perCycleCap > 1000) {
+          sendJson(res, 400, {
+            error: "Invalid per_cycle_hard_cap. Must be between 1 and 1000",
+            code: "INVALID_CONFIG",
+          } as ErrorResponse);
+          return true;
+        }
+      }
 
-    if (updates.cycle_frequency) {
-      changesApplied["cycle_frequency"] = {
-        old: config.cycle.frequency,
-        new: updates.cycle_frequency,
+      // ── Validate monthly_hard_cap if provided ──────────────────────────────
+      const monthlyHardCap = (updates as { monthly_hard_cap?: number }).monthly_hard_cap;
+      if (monthlyHardCap !== undefined) {
+        if (monthlyHardCap < 100 || monthlyHardCap > 10000) {
+          sendJson(res, 400, {
+            error: "Invalid monthly_hard_cap. Must be between 100 and 10000",
+            code: "INVALID_CONFIG",
+          } as ErrorResponse);
+          return true;
+        }
+      }
+
+      // ── Validate model_selection values ───────────────────────────────────
+      const modelSel = (updates as { model_selection?: Record<string, string> }).model_selection;
+      if (modelSel) {
+        const validModels = [
+          "claude-opus-4-6",
+          "claude-sonnet-4-5-20250929",
+          "claude-haiku-4-5-20251001",
+          "kimi-2.5",
+          "kimi",
+          "m2.5",
+          "m2.5-lightning",
+        ];
+        for (const [phase, model] of Object.entries(modelSel)) {
+          if (model && !validModels.includes(model)) {
+            sendJson(res, 400, {
+              error: `Invalid model for ${phase}: ${model}`,
+              code: "INVALID_CONFIG",
+            } as ErrorResponse);
+            return true;
+          }
+        }
+      }
+
+      // ── Load existing config from disk ─────────────────────────────────────
+      let existing: Record<string, unknown>;
+      try {
+        existing = loadConfigFromDisk();
+      } catch (err) {
+        sendJson(res, 500, {
+          error: `Failed to read existing config: ${String(err)}`,
+          code: "CONFIG_READ_ERROR",
+        } as ErrorResponse);
+        return true;
+      }
+
+      // ── Guard: ensure critical keys are not removed ────────────────────────
+      for (const criticalKey of CRITICAL_KEYS) {
+        if (criticalKey in existing && updates[criticalKey] !== undefined) {
+          const incoming = updates[criticalKey];
+          // If the incoming value is null or an empty object that would replace a
+          // non-empty object, reject the update to protect the critical section.
+          if (
+            incoming === null ||
+            (typeof incoming === "object" &&
+              !Array.isArray(incoming) &&
+              Object.keys(incoming as Record<string, unknown>).length === 0)
+          ) {
+            sendJson(res, 400, {
+              error: `Cannot remove or empty critical key: '${criticalKey}'`,
+              code: "CRITICAL_KEY_PROTECTED",
+            } as ErrorResponse);
+            return true;
+          }
+        }
+      }
+
+      // ── Merge and write back ──────────────────────────────────────────────
+      const merged = deepMerge(existing, updates);
+
+      // Safety check: make sure critical keys still exist in merged result
+      for (const criticalKey of CRITICAL_KEYS) {
+        if (criticalKey in existing && !(criticalKey in merged)) {
+          sendJson(res, 400, {
+            error: `Update would delete critical key '${criticalKey}'. Rejected.`,
+            code: "CRITICAL_KEY_DELETED",
+          } as ErrorResponse);
+          return true;
+        }
+      }
+
+      try {
+        writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2), "utf-8");
+      } catch (writeErr) {
+        sendJson(res, 500, {
+          error: `Failed to write config: ${String(writeErr)}`,
+          code: "CONFIG_WRITE_ERROR",
+        } as ErrorResponse);
+        return true;
+      }
+
+      // Bust in-process config cache so the next request picks up fresh values
+      clearAgencyConfigCache();
+
+      // ── Send Slack notification if webhook is available ───────────────────
+      let slackSent = false;
+      const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL || config.agency?.slack_webhook;
+      if (slackWebhookUrl) {
+        try {
+          await fetch(slackWebhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: `*Agency config updated*\nFile: \`${CONFIG_PATH}\`\nKeys changed: ${Object.keys(updates).join(", ")}`,
+            }),
+            signal: AbortSignal.timeout(5000),
+          });
+          slackSent = true;
+        } catch (slackErr) {
+          console.warn("Slack notification failed after config update:", slackErr);
+        }
+      }
+
+      // ── Track what changed (old → new) ───────────────────────────────────
+      const changesApplied: Record<string, unknown> = {};
+      for (const [key, newValue] of Object.entries(updates)) {
+        changesApplied[key] = {
+          old: existing[key] ?? null,
+          new: newValue,
+        };
+      }
+
+      const response: ConfigResponse = {
+        status: "updated",
+        timestamp: new Date().toISOString(),
+        changes_applied: changesApplied,
+        config_file_updated: CONFIG_PATH,
+        next_cycle: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+        slack_notification_sent: slackSent,
+        note: "Changes take effect on next cycle",
       };
+
+      sendJson(res, 200, response);
+      return true;
+    } catch (err) {
+      console.error("Config PUT error:", err);
+      sendJson(res, 500, {
+        error: "Failed to update configuration",
+        code: "CONFIG_ERROR",
+      } as ErrorResponse);
+      return true;
     }
-
-    if (updates.per_cycle_hard_cap !== undefined) {
-      changesApplied["per_cycle_hard_cap"] = {
-        old: config.costs.per_cycle_hard_cap,
-        new: updates.per_cycle_hard_cap,
-      };
-    }
-
-    if (updates.monthly_hard_cap !== undefined) {
-      changesApplied["monthly_hard_cap"] = {
-        old: config.costs.monthly_hard_cap,
-        new: updates.monthly_hard_cap,
-      };
-    }
-
-    if (updates.projects) {
-      changesApplied["enabled_projects"] = updates.projects;
-    }
-
-    if (updates.model_selection) {
-      changesApplied["model_selection"] = updates.model_selection;
-    }
-
-    // TODO: Apply changes
-    // 1. Load current agency-config.json
-    // 2. Merge updates
-    // 3. Save to disk
-    // 4. Update Upstash cache
-    // 5. Log audit trail
-
-    // Clear config cache so next request loads fresh config
-    clearAgencyConfigCache();
-
-    // Send Slack notification
-    // TODO: Notify via Slack webhook
-
-    const response: ConfigResponse = {
-      status: "updated",
-      timestamp: new Date().toISOString(),
-      changes_applied: changesApplied,
-      config_file_updated: "/root/agency/agency-config.json",
-      next_cycle: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
-      slack_notification_sent: true,
-      note: "Changes take effect on next cycle",
-    };
-
-    sendJson(res, 200, response);
-    return true;
-  } catch (err) {
-    console.error("Config handler error:", err);
-    sendJson(res, 500, {
-      error: "Failed to update configuration",
-      code: "CONFIG_ERROR",
-    } as ErrorResponse);
-    return true;
   }
+
+  // ── Unsupported method ──────────────────────────────────────────────────────
+  sendJson(res, 405, {
+    error: "Method Not Allowed. Use GET or PUT.",
+    code: "METHOD_NOT_ALLOWED",
+  } as ErrorResponse);
+  return true;
 }

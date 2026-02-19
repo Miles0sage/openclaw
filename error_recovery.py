@@ -48,9 +48,10 @@ logger = logging.getLogger("error_recovery")
 # Constants
 # ---------------------------------------------------------------------------
 
-ALERTS_FILE = Path("/tmp/openclaw_alerts.jsonl")
-JOB_RUNS_DIR = Path("/tmp/openclaw_job_runs")
-CIRCUIT_STATE_FILE = Path("/tmp/openclaw_circuit_breakers.json")
+DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
+ALERTS_FILE = Path(os.path.join(DATA_DIR, "events", "alerts.jsonl"))
+JOB_RUNS_DIR = Path(os.path.join(DATA_DIR, "jobs", "runs"))
+CIRCUIT_STATE_FILE = Path(os.path.join(DATA_DIR, "events", "circuit_breakers.json"))
 
 
 # ---------------------------------------------------------------------------

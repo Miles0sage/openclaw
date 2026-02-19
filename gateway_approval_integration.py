@@ -43,7 +43,7 @@ async def startup_approval_system():
     )
 
     TASK_QUEUE = TaskQueue(
-        persistence_dir=os.getenv("OPENCLAW_TASKS_DIR", "/tmp/openclaw_tasks"),
+        persistence_dir=os.getenv("OPENCLAW_TASKS_DIR", os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "tasks")),
         auto_save=True
     )
 

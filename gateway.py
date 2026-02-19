@@ -29,8 +29,163 @@ from datetime import datetime
 # Import orchestrator
 from orchestrator import Orchestrator, AgentRole, Message as OrchMessage, MessageAudience
 
-# Import cost tracker
-from cost_tracker import log_cost_event, get_cost_metrics, get_cost_summary, get_cost_log_path
+# Inline cost tracking (replaces deleted cost_tracker.py)
+_COST_PRICING = {
+    "claude-haiku-4-5-20251001": {"input": 0.8, "output": 4.0},
+    "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
+    "claude-opus-4-6": {"input": 15.0, "output": 75.0},
+    "claude-3-5-haiku-20241022": {"input": 0.8, "output": 4.0},
+    "claude-3-5-sonnet-20241022": {"input": 3.0, "output": 15.0},
+    "kimi-2.5": {"input": 0.14, "output": 0.28},
+    "kimi": {"input": 0.27, "output": 0.68},
+    "m2.5": {"input": 0.30, "output": 1.20},
+}
+
+def _calc_cost(model: str, tokens_in: int, tokens_out: int) -> float:
+    pricing = _COST_PRICING.get(model, {"input": 3.0, "output": 15.0})
+    return round((tokens_in * pricing["input"] + tokens_out * pricing["output"]) / 1_000_000, 6)
+
+def log_cost_event(project: str = "openclaw", agent: str = "unknown", model: str = "unknown",
+                   tokens_input: int = 0, tokens_output: int = 0, cost: float = None,
+                   event_type: str = "api_call", metadata: dict = None) -> float:
+    import time as _time
+    calculated_cost = cost if cost is not None else _calc_cost(model, tokens_input, tokens_output)
+    entry = {
+        "timestamp": _time.time(),
+        "type": event_type,
+        "project": project,
+        "agent": agent,
+        "model": model,
+        "tokens_in": tokens_input,
+        "tokens_out": tokens_output,
+        "cost": calculated_cost,
+        "metadata": metadata or {},
+    }
+    cost_path = os.environ.get("OPENCLAW_COSTS_PATH", os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "costs", "costs.jsonl"))
+    try:
+        os.makedirs(os.path.dirname(cost_path), exist_ok=True)
+        with open(cost_path, "a") as _f:
+            import json as _json
+            _f.write(_json.dumps(entry) + "\n")
+    except Exception:
+        pass
+    return calculated_cost
+
+def calculate_cost(model: str, tokens_input: int, tokens_output: int) -> float:
+    return _calc_cost(model, tokens_input, tokens_output)
+
+def get_cost_log_path() -> str:
+    return os.environ.get("OPENCLAW_COSTS_PATH", os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "costs", "costs.jsonl"))
+
+def get_cost_metrics() -> dict:
+    cost_path = get_cost_log_path()
+    entries = []
+    try:
+        with open(cost_path, "r") as _f:
+            for line in _f:
+                line = line.strip()
+                if line:
+                    try:
+                        entries.append(json.loads(line))
+                    except Exception:
+                        pass
+    except FileNotFoundError:
+        pass
+    total = sum(e.get("cost", 0) for e in entries)
+    by_agent = {}
+    for e in entries:
+        a = e.get("agent", "unknown")
+        by_agent[a] = by_agent.get(a, 0) + e.get("cost", 0)
+    return {
+        "total_cost": round(total, 6),
+        "entries_count": len(entries),
+        "by_agent": {k: round(v, 6) for k, v in by_agent.items()},
+        "daily_total": round(total, 6),
+        "monthly_total": round(total, 6),
+        "today_usd": round(total, 6),
+        "month_usd": round(total, 6),
+    }
+
+def get_cost_summary() -> str:
+    m = get_cost_metrics()
+    return f"Total cost: ${m['total_cost']:.4f} across {m['entries_count']} API calls"
+
+# Inline quota stubs (replaces deleted quota_manager.py — quotas always pass)
+def load_quota_config() -> dict:
+    return {"enabled": False}
+
+def check_daily_quota(project_id: str = "default") -> tuple:
+    return True, None
+
+def check_monthly_quota(project_id: str = "default") -> tuple:
+    return True, None
+
+def check_queue_size(project_id: str = "default", queue_size: int = 0) -> tuple:
+    return True, None
+
+def check_all_quotas(project_id: str = "default", queue_size: int = 0) -> tuple:
+    return True, None
+
+def get_quota_status(project_id: str = "default") -> dict:
+    return {
+        "daily": {"limit": 50, "used": 0, "remaining": 50, "percent": 0},
+        "monthly": {"limit": 1000, "used": 0, "remaining": 1000, "percent": 0},
+    }
+
+# Inline metrics stub (replaces deleted metrics.py)
+class _MetricsStub:
+    def check_rate_limit(self, ip: str, max_requests: int = 30, window_seconds: int = 60) -> bool:
+        return True
+    def record_request(self, ip: str, path: str):
+        pass
+    def record_agent_call(self, agent_id: str):
+        pass
+    def record_session(self, session_key: str):
+        pass
+    def get_prometheus_metrics(self) -> str:
+        return "# No metrics collector\n"
+    def load_from_disk(self):
+        pass
+
+metrics = _MetricsStub()
+
+# Inline memory manager stub (replaces deleted memory_manager.py)
+class _MemoryManagerStub:
+    def count(self) -> int:
+        return 0
+    def get_context_for_prompt(self, persona: str, max_tokens: int = 500) -> str:
+        return ""
+    def auto_extract_memories(self, messages: list):
+        pass
+
+_memory_manager_instance = None
+
+def init_memory_manager():
+    global _memory_manager_instance
+    _memory_manager_instance = _MemoryManagerStub()
+    return _memory_manager_instance
+
+def get_memory_manager():
+    return _memory_manager_instance
+
+# Inline cron scheduler stub (replaces deleted cron_scheduler.py)
+class _CronSchedulerStub:
+    def start(self):
+        pass
+    def stop(self):
+        pass
+    def list_jobs(self) -> list:
+        return []
+
+_cron_scheduler_instance = None
+
+def init_cron_scheduler():
+    global _cron_scheduler_instance
+    _cron_scheduler_instance = _CronSchedulerStub()
+    return _cron_scheduler_instance
+
+def get_cron_scheduler():
+    return _cron_scheduler_instance
 
 # Import deepseek client
 from request_logger import RequestLogger, get_logger
@@ -45,16 +200,6 @@ from response_cache import init_response_cache, get_response_cache
 # Import agent tools (GitHub, web search, job management)
 from agent_tools import AGENT_TOOLS, execute_tool
 
-# Import quota manager
-from quota_manager import (
-    check_daily_quota,
-    check_monthly_quota,
-    check_queue_size,
-    check_all_quotas,
-    get_quota_status,
-    load_quota_config,
-)
-
 # Import complexity classifier (intelligent router)
 from complexity_classifier import (
     classify as classify_query,
@@ -63,9 +208,6 @@ from complexity_classifier import (
     MODEL_ALIASES,
     MODEL_RATE_LIMITS,
 )
-
-# Import metrics system
-from metrics import metrics
 
 # Import heartbeat monitor
 from heartbeat_monitor import (
@@ -117,9 +259,12 @@ from agent_registry import (
 )
 
 
-# Import metrics
-from metrics_collector import init_metrics_collector, get_metrics_collector, record_metric
-from gateway_metrics_integration import setup_metrics, MetricsMiddleware
+# metrics_collector and gateway_metrics_integration removed (deleted modules)
+# No-op stubs for any remaining references
+def init_metrics_collector(): pass
+def get_metrics_collector(): return None
+def record_metric(**kwargs): pass
+
 from cost_gates import (
     get_cost_gates, init_cost_gates, check_cost_budget,
     record_cost, BudgetStatus
@@ -129,8 +274,7 @@ from cost_gates import (
 from proposal_engine import create_proposal, get_proposal, list_proposals, update_proposal_status, estimate_cost
 from approval_engine import evaluate_proposal, auto_approve_and_execute, get_policy
 from event_engine import init_event_engine, get_event_engine
-from cron_scheduler import init_cron_scheduler, get_cron_scheduler
-from memory_manager import init_memory_manager, get_memory_manager
+# cron_scheduler and memory_manager removed — stubs defined earlier in this file
 
 load_dotenv()
 
@@ -148,12 +292,13 @@ logging.basicConfig(
 logger = logging.getLogger("openclaw_gateway")
 
 # Session persistence - v2
-SESSIONS_DIR = pathlib.Path(os.getenv("OPENCLAW_SESSIONS_DIR", "/tmp/openclaw_sessions"))
+DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
+SESSIONS_DIR = pathlib.Path(os.getenv("OPENCLAW_SESSIONS_DIR", os.path.join(DATA_DIR, "sessions")))
 SESSIONS_DIR.mkdir(exist_ok=True)
 logger.info(f"📁 Session storage: {SESSIONS_DIR}")
 
 # Tasks storage for Mission Control
-TASKS_FILE = pathlib.Path("/tmp/openclaw_tasks.json")
+TASKS_FILE = pathlib.Path(os.path.join(DATA_DIR, "jobs", "tasks.json"))
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -383,10 +528,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize and setup metrics
-init_metrics_collector()
-static_dir = os.path.join(os.path.dirname(__file__), 'src', 'static')
-setup_metrics(app, static_dir=static_dir)
+# metrics_collector and setup_metrics removed (stubs in place)
 
 # Include audit routes
 app.include_router(audit_router)
@@ -408,7 +550,7 @@ AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard.html", "/monitoring", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/api/health/detailed", "/api/health/circuit-breakers", "/api/health/alerts"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard.html", "/monitoring", "/terms", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/api/health/detailed", "/api/health/circuit-breakers", "/api/health/alerts"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
@@ -1124,21 +1266,51 @@ Always sign off with: {signature}"""
 
 @app.get("/")
 async def root():
-    """Health check showing ACTUAL model configuration"""
-    return {
-        "name": "OpenClaw Gateway",
-        "version": "2.0.0",
-        "status": "online",
-        "agents": len(CONFIG.get("agents", {})),
-        "protocol": "OpenClaw v1",
-        "model_config": {
-            agent: {
-                "provider": cfg.get("apiProvider"),
-                "model": cfg.get("model")
+    """Serve the Overseer AI Agency landing page, with JSON fallback for API clients."""
+    try:
+        landing_path = "/root/openclaw/landing/index.html"
+        with open(landing_path, "r") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        # Fallback: return JSON for API clients / health checks
+        return JSONResponse({
+            "name": "OpenClaw Gateway",
+            "version": "2.0.0",
+            "status": "online",
+            "agents": len(CONFIG.get("agents", {})),
+            "protocol": "OpenClaw v1",
+            "model_config": {
+                agent: {
+                    "provider": cfg.get("apiProvider"),
+                    "model": cfg.get("model")
+                }
+                for agent, cfg in CONFIG.get("agents", {}).items()
             }
-            for agent, cfg in CONFIG.get("agents", {}).items()
-        }
-    }
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/terms")
+async def terms_page():
+    """Serve the Terms of Service page."""
+    try:
+        terms_path = "/root/openclaw/landing/terms.html"
+        with open(terms_path, "r") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        return HTMLResponse(
+            content="<h1>Terms of Service not found</h1><p>terms.html is missing.</p>",
+            status_code=404
+        )
+    except Exception as e:
+        return HTMLResponse(
+            content=f"<h1>Error loading terms</h1><p>{str(e)}</p>",
+            status_code=500
+        )
+
 
 @app.get("/test-version")
 async def test_version():
@@ -3453,7 +3625,7 @@ async def dashboard_summary():
 # Sequential multi-step agent task chains with error handling
 # ═══════════════════════════════════════════════════════════════════════
 
-_workflows_file = pathlib.Path("/tmp/openclaw_workflows.json")
+_workflows_file = pathlib.Path(os.path.join(DATA_DIR, "jobs", "workflows.json"))
 
 def _load_workflows():
     if _workflows_file.exists():

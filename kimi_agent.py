@@ -8,7 +8,20 @@ import os
 import logging
 from typing import Optional, Dict, Any, Tuple
 from deepseek_client import DeepseekClient, KimiResponse
-from cost_tracker import log_cost_event
+# cost_tracker removed — inline stub
+import json as _json_ka, os as _os_ka, time as _time_ka
+def log_cost_event(project="openclaw", agent="unknown", model="unknown",
+                   tokens_input=0, tokens_output=0, cost=None, **kwargs):
+    _pricing = {"kimi-2.5": {"input": 0.14, "output": 0.28}, "kimi": {"input": 0.27, "output": 0.68}}
+    p = _pricing.get(model, {"input": 0.14, "output": 0.28})
+    c = cost if cost is not None else round((tokens_input * p["input"] + tokens_output * p["output"]) / 1_000_000, 6)
+    try:
+        _data_dir = _os_ka.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
+        with open(_os_ka.environ.get("OPENCLAW_COSTS_PATH", _os_ka.path.join(_data_dir, "costs", "costs.jsonl")), "a") as _f:
+            _f.write(_json_ka.dumps({"timestamp": _time_ka.time(), "agent": agent, "model": model, "cost": c}) + "\n")
+    except Exception:
+        pass
+    return c
 
 logger = logging.getLogger("kimi_agent")
 

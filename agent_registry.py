@@ -4,6 +4,7 @@ Enables agent discovery, health monitoring, and status reporting
 """
 
 import json
+import os
 import time
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -12,6 +13,8 @@ from pathlib import Path
 import logging
 
 logger = logging.getLogger(__name__)
+
+DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
 
 @dataclass
 class AgentStatus:
@@ -40,15 +43,15 @@ class AgentStatus:
 class AgentRegistry:
     """Central registry for all agents in the system"""
     
-    def __init__(self, persistence_path: str = "/tmp/openclaw_agents.json"):
+    def __init__(self, persistence_path: str = None):
         """
         Initialize agent registry
-        
+
         Args:
             persistence_path: Path to save agent registry to disk
         """
         self.agents: Dict[str, AgentStatus] = {}
-        self.persistence_path = persistence_path
+        self.persistence_path = persistence_path or os.path.join(DATA_DIR, "agents", "agents.json")
         self.metrics: Dict[str, Dict[str, Any]] = {}
         self._load_from_disk()
         
@@ -227,7 +230,7 @@ class AgentRegistry:
 _registry: Optional[AgentRegistry] = None
 
 
-def init_agent_registry(persistence_path: str = "/tmp/openclaw_agents.json") -> AgentRegistry:
+def init_agent_registry(persistence_path: str = None) -> AgentRegistry:
     """Initialize the global agent registry"""
     global _registry
     _registry = AgentRegistry(persistence_path)

@@ -51,14 +51,25 @@ COPY --chown=openclaw:openclaw config.json .
 COPY --chown=openclaw:openclaw dashboard_api.py .
 
 # Create runtime directories
-RUN mkdir -p /app/sessions /app/logs && \
-    chown -R openclaw:openclaw /app/sessions /app/logs
+RUN mkdir -p /app/sessions /app/logs \
+        /app/data/jobs/runs \
+        /app/data/clients \
+        /app/data/sessions \
+        /app/data/costs \
+        /app/data/events \
+        /app/data/reviews \
+        /app/data/memories \
+        /app/data/workflows \
+        /app/data/tasks \
+        /app/data/agents && \
+    chown -R openclaw:openclaw /app/sessions /app/logs /app/data
 
 # Set environment variables
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    OPENCLAW_SESSIONS_DIR=/app/sessions \
+    OPENCLAW_DATA_DIR=/app/data \
+    OPENCLAW_SESSIONS_DIR=/app/data/sessions \
     OPENCLAW_LOGS_DIR=/app/logs
 
 # Health check endpoint

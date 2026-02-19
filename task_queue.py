@@ -21,6 +21,8 @@ import asyncio
 
 logger = logging.getLogger("task_queue")
 
+DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
+
 
 class TaskStatus(Enum):
     """Task execution statuses"""
@@ -129,7 +131,7 @@ class TaskQueue:
 
     def __init__(
         self,
-        persistence_dir: str = "/tmp/openclaw_tasks",
+        persistence_dir: str = None,
         auto_save: bool = True
     ):
         """
@@ -139,7 +141,7 @@ class TaskQueue:
             persistence_dir: Directory for persisting tasks
             auto_save: Automatically save tasks to disk
         """
-        self.persistence_dir = Path(persistence_dir)
+        self.persistence_dir = Path(persistence_dir or os.path.join(DATA_DIR, "tasks"))
         self.persistence_dir.mkdir(exist_ok=True, parents=True)
         self.auto_save = auto_save
 
