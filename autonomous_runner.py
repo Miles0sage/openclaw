@@ -83,7 +83,7 @@ JOB_RUNS_DIR = Path(os.path.join(DATA_DIR, "jobs", "runs"))
 DEFAULT_POLL_INTERVAL = 10        # seconds between job queue checks
 DEFAULT_MAX_CONCURRENT = 2        # max parallel job executions
 DEFAULT_MAX_RETRIES = 3           # retries per phase on failure
-DEFAULT_BUDGET_LIMIT_USD = 5.0    # per-job cost cap
+DEFAULT_BUDGET_LIMIT_USD = 15.0   # per-job cost cap (raised: complex builds need headroom)
 MAX_TOOL_ITERATIONS = 30          # safety cap on agent tool loops per step
 MAX_PLAN_STEPS = 20               # safety cap on plan step count
 
@@ -251,7 +251,23 @@ def _select_agent_for_job(job: dict) -> str:
     """
     task_lower = (job.get("task", "") + " " + job.get("project", "")).lower()
 
-    # Complex code tasks (check FIRST — these override security keywords)
+    # Code-building tasks (check FIRST — "Build a KDS with Supabase" is a code task,
+    # not a database task. Only route to database_agent for pure data queries.)
+    build_keywords = [
+        "build", "create", "implement", "page", "component", "feature",
+        "frontend", "backend", "ui", "ux", "layout", "app",
+    ]
+    if any(kw in task_lower for kw in build_keywords):
+        # If it's also complex (multi-file, architecture), route to elite
+        complex_keywords = [
+            "refactor", "architecture", "redesign", "system design", "multi-file",
+            "algorithm", "race condition", "memory leak", "performance",
+        ]
+        if any(kw in task_lower for kw in complex_keywords):
+            return "elite_coder"
+        return "coder_agent"
+
+    # Complex code tasks
     if any(kw in task_lower for kw in [
         "refactor", "architecture", "redesign", "system design", "multi-file",
         "algorithm", "race condition", "memory leak", "performance",
@@ -265,17 +281,16 @@ def _select_agent_for_job(job: dict) -> str:
     ]):
         return "hacker_agent"
 
-    # Database / data tasks
+    # Database / data tasks (pure data work — queries, migrations, schema changes)
     if any(kw in task_lower for kw in [
         "database", "supabase", "sql", "query", "migration", "schema",
         "rls policy", "data analysis",
     ]):
         return "database_agent"
 
-    # Simple code tasks (default for most work)
+    # Simple code tasks
     if any(kw in task_lower for kw in [
-        "fix", "add", "build", "create", "implement", "update", "css",
-        "component", "endpoint", "test", "feature", "bug",
+        "fix", "add", "update", "css", "endpoint", "test", "bug",
     ]):
         return "coder_agent"
 
@@ -646,12 +661,11 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
             f"You are executing step {step.index + 1} of {len(plan.steps)} for a job.\n\n"
             f"PROJECT: {job.get('project', 'unknown')}\n"
             f"OVERALL TASK: {job['task']}\n\n"
-            f"WORKSPACE DIRECTORY: {workspace}\n"
-            f"IMPORTANT: All file operations must be done inside your workspace directory: {workspace}\n"
-            f"- Clone repos there (e.g. git clone <url> {workspace}/repo)\n"
-            f"- Create new files there (e.g. file_write with path starting with {workspace}/)\n"
-            f"- Run shell commands from there (set cwd={workspace})\n"
-            f"Use absolute paths starting with {workspace}/ for all file operations.\n\n"
+            f"WORKSPACE DIRECTORY (for temp/scratch files): {workspace}\n"
+            f"IMPORTANT: Edit the ACTUAL PROJECT FILES at their real paths on disk.\n"
+            f"If the task says to edit /root/Delhi-Palace/src/app/kds/page.tsx, write to THAT path.\n"
+            f"Only use the workspace for scratch files, clones, or new standalone projects.\n"
+            f"DO NOT write analysis documents — write actual code.\n\n"
             f"RESEARCH CONTEXT:\n{research[:3000]}\n\n"
             f"CURRENT STEP: {step.description}\n"
             f"SUGGESTED TOOLS: {', '.join(step.tool_hints)}\n\n"

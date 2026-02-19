@@ -691,9 +691,9 @@ async def startup_heartbeat_monitor():
 async def startup_autonomous_runner():
     """Initialize autonomous job runner on FastAPI startup"""
     try:
-        runner = init_runner(max_concurrent=2, budget_limit_usd=5.0)
+        runner = init_runner(max_concurrent=2, budget_limit_usd=15.0)
         await runner.start()
-        logger.info("✅ Autonomous job runner started (max_concurrent=2, budget=$5/job)")
+        logger.info("✅ Autonomous job runner started (max_concurrent=2, budget=$15/job)")
     except Exception as err:
         logger.error(f"Failed to start autonomous runner: {err}")
 
