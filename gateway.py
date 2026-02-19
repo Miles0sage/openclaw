@@ -548,6 +548,54 @@ class Message(BaseModel):
     agent_id: Optional[str] = "pm"
     sessionKey: Optional[str] = None  # Support session memory
     project_id: Optional[str] = None  # For quota tracking
+    use_tools: Optional[bool] = None  # Enable tool_use (auto-detected if None)
+
+
+def _build_system_prompt(agent_key: str, agent_config: dict = None) -> str:
+    """Build system prompt for an agent (reused by tool calls and direct calls)."""
+    if not agent_config:
+        agent_config = get_agent_config(agent_key) or {}
+
+    persona = agent_config.get("persona", "")
+    name = agent_config.get("name", "Agent")
+    emoji = agent_config.get("emoji", "")
+    signature = agent_config.get("signature", "")
+
+    # Load identity files
+    identity_context = ""
+    gateway_dir = os.path.dirname(os.path.abspath(__file__))
+    for identity_file in ["SOUL.md", "USER.md", "AGENTS.md"]:
+        filepath = os.path.join(gateway_dir, identity_file)
+        try:
+            with open(filepath, "r") as f:
+                identity_context += f"\n\n{f.read()}"
+        except FileNotFoundError:
+            pass
+
+    delegation_instructions = ""
+    if agent_key == "project_manager":
+        delegation_instructions = """
+DELEGATION: When a task requires specialist work, include markers:
+[DELEGATE:elite_coder]task[/DELEGATE]
+[DELEGATE:coder_agent]task[/DELEGATE]
+[DELEGATE:hacker_agent]task[/DELEGATE]
+[DELEGATE:database_agent]task[/DELEGATE]
+"""
+
+    return f"""You are {name} {emoji} in the Cybershield AI Agency.
+
+{persona}
+
+IMPORTANT RULES:
+- ALWAYS end your messages with your signature: {signature}
+- You have access to execution tools: shell commands, git, file I/O, Vercel deploy, package install, web scraping, and research.
+- Use tools proactively to accomplish tasks. Don't just describe what to do — DO it.
+- When asked to build, deploy, or fix something, use the tools to actually execute the work.
+- Research before executing complex tasks (use research_task tool).
+- Auto-install missing tools/packages as needed (use install_package tool).
+{delegation_instructions}
+--- IDENTITY & CONTEXT ---
+{identity_context}"""
 
 
 def call_ollama(model: str, prompt: str, endpoint: str = "http://localhost:11434") -> tuple[str, int]:
@@ -1333,12 +1381,45 @@ async def chat_endpoint(message: Message):
                          "message": f"{agent_id} is thinking...",
                          "timestamp": datetime.utcnow().isoformat()})
 
-        # Call model with last 10 messages for context (with auto-escalation)
-        response_text, tokens, actual_agent = call_model_with_escalation(
-            agent_id,
-            message.content,
-            chat_history[session_key][-10:]
-        )
+        # ═ TOOL USE: Auto-detect or use explicit flag
+        # Agents on Anthropic get tool access for execution tasks
+        agent_config_for_tools = get_agent_config(agent_id)
+        provider_for_tools = agent_config_for_tools.get("apiProvider", "anthropic") if agent_config_for_tools else "anthropic"
+
+        # Auto-detect: enable tools for Anthropic agents when message looks like an action
+        action_keywords = ["deploy", "build", "push", "commit", "install", "create file", "write file",
+                          "run ", "execute", "test ", "fix ", "git ", "npm ", "fetch ", "scrape",
+                          "research", "search for", "look up", "find out", "check status",
+                          "deploy to vercel", "push to github"]
+        should_use_tools = message.use_tools
+        if should_use_tools is None:
+            # Auto-detect based on content
+            msg_lower = message.content.lower()
+            should_use_tools = provider_for_tools == "anthropic" and any(kw in msg_lower for kw in action_keywords)
+
+        if should_use_tools and provider_for_tools == "anthropic":
+            # Use tool-enabled Claude call
+            logger.info(f"🔧 Tool-enabled call for {agent_id}")
+            system_prompt = _build_system_prompt(agent_id, agent_config_for_tools)
+            tool_messages = [{"role": m["role"], "content": m["content"]} for m in chat_history[session_key][-10:]]
+
+            model_for_tools = agent_config_for_tools.get("model", "claude-sonnet-4-20250514")
+            response_text = await call_claude_with_tools(
+                anthropic.Anthropic(),
+                model_for_tools,
+                system_prompt,
+                tool_messages,
+                max_rounds=8
+            )
+            tokens = len(response_text.split()) * 2  # Approximate
+            actual_agent = agent_id
+        else:
+            # Call model with last 10 messages for context (with auto-escalation)
+            response_text, tokens, actual_agent = call_model_with_escalation(
+                agent_id,
+                message.content,
+                chat_history[session_key][-10:]
+            )
         if actual_agent != agent_id:
             logger.info(f"⬆️ Chat escalated: {agent_id} → {actual_agent}")
             agent_id = actual_agent  # Use the agent that actually responded
