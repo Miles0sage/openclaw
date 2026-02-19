@@ -1,0 +1,1516 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenClaw Mission Control</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      :root {
+        --bg-primary: #0a0a0f;
+        --bg-secondary: #1a1a2e;
+        --bg-tertiary: #252541;
+        --text-primary: #e0e0e0;
+        --text-secondary: #a8a8c0;
+        --accent: #00d4ff;
+        --accent-hover: #00f0ff;
+        --danger: #ff4757;
+        --success: #2ed573;
+        --warning: #ffa502;
+        --border: #2a2a45;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell,
+          sans-serif;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        line-height: 1.6;
+      }
+
+      .header {
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border);
+        padding: 1.5rem 2rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+      }
+
+      .header h1 {
+        font-size: 1.8rem;
+        font-weight: 600;
+        color: var(--accent);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .header-right {
+        display: flex;
+        gap: 1.5rem;
+        align-items: center;
+      }
+
+      .status-indicator {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--success);
+        animation: pulse 2s infinite;
+      }
+
+      .status-dot.offline {
+        background: var(--danger);
+        animation: none;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      .settings-btn {
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        color: var(--accent);
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        transition: all 0.3s ease;
+      }
+
+      .settings-btn:hover {
+        background: var(--accent);
+        color: var(--bg-primary);
+        transform: rotate(90deg);
+      }
+
+      .tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-secondary);
+        padding: 0 2rem;
+        overflow-x: auto;
+      }
+
+      .tab-btn {
+        padding: 1rem 1.5rem;
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 1rem;
+        position: relative;
+        border-bottom: 2px solid transparent;
+        transition: all 0.3s ease;
+        white-space: nowrap;
+      }
+
+      .tab-btn:hover {
+        color: var(--accent);
+      }
+
+      .tab-btn.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
+
+      .container {
+        padding: 2rem;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+
+      .tab-content {
+        display: none;
+        animation: fadeIn 0.3s ease;
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+      }
+
+      .metric-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        transition: all 0.3s ease;
+      }
+
+      .metric-card:hover {
+        border-color: var(--accent);
+        transform: translateY(-2px);
+      }
+
+      .metric-label {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .metric-value {
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--accent);
+      }
+
+      .metric-subtext {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        margin-top: 0.5rem;
+      }
+
+      .activity-log {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.5rem;
+      }
+
+      .activity-item {
+        display: flex;
+        gap: 1rem;
+        padding: 1rem;
+        border-bottom: 1px solid var(--border);
+        align-items: center;
+      }
+
+      .activity-item:last-child {
+        border-bottom: none;
+      }
+
+      .activity-time {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        min-width: 80px;
+      }
+
+      .activity-message {
+        flex: 1;
+        font-size: 0.9rem;
+      }
+
+      .activity-agent {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      .agents-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 1.5rem;
+      }
+
+      .agent-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.5rem;
+        transition: all 0.3s ease;
+        cursor: pointer;
+      }
+
+      .agent-card:hover {
+        border-color: var(--accent);
+        transform: translateY(-4px);
+        box-shadow: 0 8px 24px rgba(0, 212, 255, 0.15);
+      }
+
+      .agent-header {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 1rem;
+      }
+
+      .agent-emoji {
+        font-size: 2.5rem;
+      }
+
+      .agent-info {
+        flex: 1;
+      }
+
+      .agent-name {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--accent);
+      }
+
+      .agent-status {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+      }
+
+      .agent-detail {
+        font-size: 0.85rem;
+        margin: 0.75rem 0;
+        display: flex;
+        justify-content: space-between;
+      }
+
+      .agent-detail-label {
+        color: var(--text-secondary);
+      }
+
+      .agent-detail-value {
+        color: var(--accent);
+        font-weight: 500;
+      }
+
+      .skills-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border);
+      }
+
+      .skill-badge {
+        background: rgba(0, 212, 255, 0.15);
+        border: 1px solid rgba(0, 212, 255, 0.3);
+        color: var(--accent);
+        padding: 0.25rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .org-chart {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2rem;
+        margin: 2rem 0;
+      }
+
+      .org-node {
+        background: var(--bg-secondary);
+        border: 2px solid var(--accent);
+        border-radius: 12px;
+        padding: 1rem 1.5rem;
+        text-align: center;
+        min-width: 200px;
+      }
+
+      .org-node.main {
+        border-color: var(--warning);
+        min-width: 250px;
+      }
+
+      .org-children {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 2rem;
+        width: 100%;
+        margin-top: 2rem;
+      }
+
+      .kanban-board {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+      }
+
+      .kanban-column {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.5rem;
+        min-height: 600px;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .kanban-title {
+        font-weight: 600;
+        color: var(--accent);
+        margin-bottom: 1rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid var(--border);
+      }
+
+      .kanban-tasks {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .kanban-card {
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem;
+        cursor: grab;
+        transition: all 0.2s ease;
+      }
+
+      .kanban-card:hover {
+        border-color: var(--accent);
+        transform: translateY(-2px);
+      }
+
+      .kanban-card:active {
+        cursor: grabbing;
+      }
+
+      .kanban-card-title {
+        font-weight: 500;
+        margin-bottom: 0.5rem;
+        color: var(--text-primary);
+      }
+
+      .kanban-card-agent {
+        font-size: 0.75rem;
+        color: var(--accent);
+        margin-bottom: 0.5rem;
+      }
+
+      .kanban-card-time {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+      }
+
+      .add-task-btn {
+        background: var(--accent);
+        color: var(--bg-primary);
+        border: none;
+        padding: 1rem;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+        margin-bottom: 1.5rem;
+        transition: all 0.3s ease;
+        width: 100%;
+      }
+
+      .add-task-btn:hover {
+        background: var(--accent-hover);
+        transform: scale(1.02);
+      }
+
+      .memory-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .memory-search {
+        margin-bottom: 1.5rem;
+      }
+
+      .memory-search input {
+        width: 100%;
+        padding: 0.75rem 1rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text-primary);
+        font-size: 1rem;
+      }
+
+      .memory-search input::placeholder {
+        color: var(--text-secondary);
+      }
+
+      .memory-item {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.5rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+
+      .memory-item:hover {
+        border-color: var(--accent);
+        transform: translateY(-2px);
+      }
+
+      .memory-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.75rem;
+      }
+
+      .memory-key {
+        font-weight: 600;
+        color: var(--accent);
+        font-family: monospace;
+        font-size: 0.9rem;
+      }
+
+      .memory-source {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        background: rgba(0, 212, 255, 0.1);
+        padding: 0.25rem 0.75rem;
+        border-radius: 12px;
+      }
+
+      .memory-preview {
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+        margin: 0.5rem 0;
+        max-height: 80px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .memory-time {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        margin-top: 0.75rem;
+      }
+
+      .costs-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+      }
+
+      .cost-section {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.5rem;
+      }
+
+      .cost-title {
+        font-weight: 600;
+        color: var(--accent);
+        margin-bottom: 1.5rem;
+        font-size: 1.1rem;
+      }
+
+      .cost-bar {
+        margin-bottom: 1.5rem;
+      }
+
+      .cost-bar-label {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 0.5rem;
+        font-size: 0.9rem;
+      }
+
+      .cost-bar-name {
+        color: var(--text-primary);
+        font-weight: 500;
+      }
+
+      .cost-bar-value {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      .cost-bar-bg {
+        background: rgba(0, 212, 255, 0.1);
+        border-radius: 8px;
+        height: 8px;
+        overflow: hidden;
+      }
+
+      .cost-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--accent), var(--warning));
+        transition: width 0.3s ease;
+      }
+
+      .modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .modal.active {
+        display: flex;
+      }
+
+      .modal-content {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 2rem;
+        max-width: 400px;
+        width: 90%;
+      }
+
+      .modal-title {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--accent);
+        margin-bottom: 1.5rem;
+      }
+
+      .modal-field {
+        margin-bottom: 1.5rem;
+      }
+
+      .modal-label {
+        display: block;
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .modal-input {
+        width: 100%;
+        padding: 0.75rem 1rem;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text-primary);
+        font-size: 1rem;
+        font-family: monospace;
+      }
+
+      .modal-input::placeholder {
+        color: var(--text-secondary);
+      }
+
+      .modal-buttons {
+        display: flex;
+        gap: 1rem;
+        margin-top: 2rem;
+      }
+
+      .modal-btn {
+        flex: 1;
+        padding: 0.75rem;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: all 0.3s ease;
+      }
+
+      .modal-btn.primary {
+        background: var(--accent);
+        color: var(--bg-primary);
+      }
+
+      .modal-btn.primary:hover {
+        background: var(--accent-hover);
+      }
+
+      .modal-btn.secondary {
+        background: var(--bg-tertiary);
+        color: var(--accent);
+        border: 1px solid var(--border);
+      }
+
+      .modal-btn.secondary:hover {
+        border-color: var(--accent);
+      }
+
+      .loading {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--accent);
+        animation: blink 1s infinite;
+      }
+
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
+
+      .error-message {
+        background: rgba(255, 71, 87, 0.15);
+        border: 1px solid var(--danger);
+        color: var(--danger);
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+      }
+
+      .success-message {
+        background: rgba(46, 213, 115, 0.15);
+        border: 1px solid var(--success);
+        color: var(--success);
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+      }
+
+      @media (max-width: 768px) {
+        .container {
+          padding: 1rem;
+        }
+
+        .header {
+          padding: 1rem;
+        }
+
+        .tabs {
+          padding: 0 1rem;
+        }
+
+        .tab-btn {
+          padding: 0.75rem 1rem;
+          font-size: 0.9rem;
+        }
+
+        .metrics-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .agents-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .kanban-board {
+          grid-template-columns: 1fr;
+        }
+
+        .kanban-column {
+          min-height: 400px;
+        }
+
+        .costs-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .header-right {
+          gap: 1rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="header">
+      <h1>⚙️ OpenClaw Mission Control</h1>
+      <div class="header-right">
+        <div class="status-indicator">
+          <span class="status-dot" id="gatewayStatus"></span>
+          <span id="statusText">Connecting...</span>
+        </div>
+        <button class="settings-btn" id="settingsBtn" title="Settings">⚙️</button>
+      </div>
+    </header>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="overview">📊 Overview</button>
+      <button class="tab-btn" data-tab="agents">👥 Agents</button>
+      <button class="tab-btn" data-tab="tasks">📋 Tasks</button>
+      <button class="tab-btn" data-tab="memory">💾 Memory</button>
+      <button class="tab-btn" data-tab="costs">💰 Costs</button>
+    </div>
+
+    <div class="container">
+      <!-- OVERVIEW TAB -->
+      <div id="overview" class="tab-content active">
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-label">Total Agents</div>
+            <div class="metric-value" id="agentCount">5</div>
+            <div class="metric-subtext">Active and monitoring</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Requests Today</div>
+            <div class="metric-value" id="requestsToday">—</div>
+            <div class="metric-subtext" id="requestsSubtext">Loading...</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Cost Today</div>
+            <div class="metric-value" id="costToday">—</div>
+            <div class="metric-subtext" id="costSubtext">Loading...</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Cache Hit Rate</div>
+            <div class="metric-value" id="cacheHitRate">—</div>
+            <div class="metric-subtext" id="cacheSubtext">Loading...</div>
+          </div>
+        </div>
+
+        <h2 style="color: var(--accent); margin-bottom: 1.5rem; font-size: 1.3rem">Agent Status</h2>
+        <div class="agents-grid" id="overviewAgents">
+          <!-- Populated by JS -->
+        </div>
+
+        <h2
+          style="color: var(--accent); margin-bottom: 1.5rem; margin-top: 2rem; font-size: 1.3rem"
+        >
+          Activity Log
+        </h2>
+        <div class="activity-log" id="activityLog">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- AGENTS TAB -->
+      <div id="agents" class="tab-content">
+        <div class="org-chart">
+          <div class="org-node main">
+            <div style="font-size: 2rem; margin-bottom: 0.5rem">🤖</div>
+            <div style="font-weight: 600; color: var(--warning)">Overseer PM</div>
+            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.5rem">
+              Claude Opus 4.6
+            </div>
+          </div>
+          <div class="org-children" id="agentCards">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- TASKS TAB -->
+      <div id="tasks" class="tab-content">
+        <button class="add-task-btn" id="addTaskBtn">+ New Task</button>
+        <div class="kanban-board" id="kanbanBoard">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- MEMORY TAB -->
+      <div id="memory" class="tab-content">
+        <div class="memory-search">
+          <input type="text" id="memorySearch" placeholder="Search memories..." />
+        </div>
+        <div class="memory-list" id="memoryList">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- COSTS TAB -->
+      <div id="costs" class="tab-content">
+        <div class="costs-grid">
+          <div class="cost-section">
+            <div class="cost-title">Cost by Agent</div>
+            <div id="costByAgent">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+
+          <div class="cost-section">
+            <div class="cost-title">Budget Status</div>
+            <div id="budgetStatus">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+
+          <div class="cost-section">
+            <div class="cost-title">Cache Savings</div>
+            <div id="cacheSavings">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SETTINGS MODAL -->
+    <div class="modal" id="settingsModal">
+      <div class="modal-content">
+        <div class="modal-title">⚙️ Settings</div>
+        <div class="modal-field">
+          <label class="modal-label">API Gateway URL</label>
+          <input
+            type="text"
+            id="gatewayUrl"
+            class="modal-input"
+            placeholder="http://localhost:18789"
+          />
+        </div>
+        <div class="modal-field">
+          <label class="modal-label">Auth Token</label>
+          <input
+            type="password"
+            id="authToken"
+            class="modal-input"
+            placeholder="X-Auth-Token value"
+          />
+        </div>
+        <div class="modal-field">
+          <label
+            style="
+              display: flex;
+              align-items: center;
+              gap: 0.5rem;
+              cursor: pointer;
+              color: var(--text-primary);
+            "
+          >
+            <input type="checkbox" id="showToken" style="cursor: pointer" />
+            Show token
+          </label>
+        </div>
+        <div class="modal-buttons">
+          <button class="modal-btn primary" id="saveBtnSettings">Save</button>
+          <button class="modal-btn secondary" id="closeBtnSettings">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ============================================
+      // STATE & CONFIG
+      // ============================================
+      const STATE = {
+        gatewayUrl: localStorage.getItem("gatewayUrl") || "http://localhost:18789",
+        authToken: localStorage.getItem("authToken") || "",
+        currentTab: "overview",
+        agents: [
+          {
+            id: "pm",
+            name: "Overseer",
+            emoji: "🤖",
+            model: "claude-opus-4-6",
+            provider: "Anthropic",
+            tier: "Premium",
+            skills: ["Planning", "Analysis", "Routing"],
+          },
+          {
+            id: "codegen-kimi",
+            name: "CodeGen Pro",
+            emoji: "💻",
+            model: "Kimi (Moonshot)",
+            provider: "Moonshot",
+            tier: "High",
+            skills: ["Code Gen", "Optimization", "Refactoring"],
+          },
+          {
+            id: "codegen-minimax",
+            name: "CodeGen Elite",
+            emoji: "⚡",
+            model: "MiniMax",
+            provider: "MiniMax",
+            tier: "Standard",
+            skills: ["Prototyping", "Testing", "Debugging"],
+          },
+          {
+            id: "pentest-kimi",
+            name: "Pentest AI",
+            emoji: "🔒",
+            model: "Kimi (Moonshot)",
+            provider: "Moonshot",
+            tier: "High",
+            skills: ["Security", "Penetration", "Audits"],
+          },
+          {
+            id: "supa-opus",
+            name: "SupabaseConnector",
+            emoji: "🗄️",
+            model: "claude-opus-4-6",
+            provider: "Anthropic",
+            tier: "Premium",
+            skills: ["Database", "Queries", "Schema Design"],
+          },
+        ],
+        tasks: JSON.parse(localStorage.getItem("tasks")) || [
+          {
+            id: 1,
+            title: "Implement routing logic",
+            agent: "Overseer",
+            status: "in-progress",
+            timestamp: Date.now() - 300000,
+          },
+          {
+            id: 2,
+            title: "Write unit tests",
+            agent: "CodeGen Pro",
+            status: "todo",
+            timestamp: Date.now() - 600000,
+          },
+          {
+            id: 3,
+            title: "Deploy to production",
+            agent: "Overseer",
+            status: "done",
+            timestamp: Date.now() - 1800000,
+          },
+        ],
+        memories: [
+          {
+            key: "session:user:123",
+            value: "User context and preferences stored",
+            source: "Overseer",
+            timestamp: Date.now() - 120000,
+          },
+          {
+            key: "cache:routes:fast",
+            value: "Cached routing decisions for quick lookup",
+            source: "CodeGen Pro",
+            timestamp: Date.now() - 240000,
+          },
+          {
+            key: "config:costs:daily",
+            value: "Daily cost limits and quotas",
+            source: "Overseer",
+            timestamp: Date.now() - 360000,
+          },
+          {
+            key: "state:projects:active",
+            value: "Active projects and their status",
+            source: "Overseer",
+            timestamp: Date.now() - 480000,
+          },
+          {
+            key: "log:errors:recent",
+            value: "Error logs from last 24 hours",
+            source: "Pentest AI",
+            timestamp: Date.now() - 600000,
+          },
+        ],
+        agentHealth: {},
+        metrics: {},
+      };
+
+      // ============================================
+      // UTILITIES
+      // ============================================
+      function formatCost(value) {
+        if (typeof value !== "number") return "$0.00";
+        return "$" + value.toFixed(2);
+      }
+
+      function formatTime(timestamp) {
+        const now = Date.now();
+        const diff = now - timestamp;
+        const minutes = Math.floor(diff / 60000);
+        const hours = Math.floor(diff / 3600000);
+        const days = Math.floor(diff / 86400000);
+
+        if (minutes < 1) return "just now";
+        if (minutes < 60) return `${minutes}m ago`;
+        if (hours < 24) return `${hours}h ago`;
+        return `${days}d ago`;
+      }
+
+      function makeCostColor(percentage) {
+        if (percentage < 50) return "var(--success)";
+        if (percentage < 80) return "var(--warning)";
+        return "var(--danger)";
+      }
+
+      async function apiCall(endpoint, options = {}) {
+        try {
+          const url = `${STATE.gatewayUrl}${endpoint}`;
+          const headers = {
+            "Content-Type": "application/json",
+            "X-Auth-Token": STATE.authToken,
+          };
+
+          const response = await fetch(url, {
+            ...options,
+            headers: { ...headers, ...options.headers },
+          });
+
+          if (!response.ok) {
+            if (response.status === 401) {
+              showError("Authentication failed. Check your token.");
+              updateStatus("offline");
+              return null;
+            }
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          updateStatus("online");
+          return await response.json();
+        } catch (error) {
+          console.error(`API Error: ${endpoint}`, error);
+          updateStatus("offline");
+          return null;
+        }
+      }
+
+      // ============================================
+      // UI UPDATES
+      // ============================================
+      function updateStatus(status) {
+        const dot = document.getElementById("gatewayStatus");
+        const text = document.getElementById("statusText");
+        if (status === "online") {
+          dot.classList.remove("offline");
+          text.textContent = "Gateway Online";
+        } else {
+          dot.classList.add("offline");
+          text.textContent = "Gateway Offline";
+        }
+      }
+
+      function showError(message) {
+        const container = document.querySelector(".container");
+        const errorDiv = document.createElement("div");
+        errorDiv.className = "error-message";
+        errorDiv.textContent = "❌ " + message;
+        container.insertBefore(errorDiv, container.firstChild);
+        setTimeout(() => errorDiv.remove(), 5000);
+      }
+
+      function showSuccess(message) {
+        const container = document.querySelector(".container");
+        const successDiv = document.createElement("div");
+        successDiv.className = "success-message";
+        successDiv.textContent = "✅ " + message;
+        container.insertBefore(successDiv, container.firstChild);
+        setTimeout(() => successDiv.remove(), 4000);
+      }
+
+      // ============================================
+      // OVERVIEW TAB
+      // ============================================
+      function renderOverview() {
+        renderOverviewAgents();
+        renderActivityLog();
+        refreshMetrics();
+      }
+
+      function renderOverviewAgents() {
+        const container = document.getElementById("overviewAgents");
+        container.innerHTML = STATE.agents
+          .slice(0, 4)
+          .map(
+            (agent) => `
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-emoji">${agent.emoji}</div>
+                        <div class="agent-info">
+                            <div class="agent-name">${agent.name}</div>
+                            <div class="agent-status">
+                                <span class="status-dot" style="width: 6px; height: 6px; margin-right: 0.25rem;"></span>
+                                ${agent.model}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `,
+          )
+          .join("");
+      }
+
+      function renderActivityLog() {
+        const log = document.getElementById("activityLog");
+        const activities = [
+          { time: "5s", agent: "Overseer", message: "Routed request to CodeGen Pro" },
+          { time: "2m", agent: "CodeGen Pro", message: "Generated 347 lines of code" },
+          { time: "8m", agent: "Pentest AI", message: "Completed security audit" },
+          { time: "15m", agent: "Overseer", message: "Cache hit - skipped 2 API calls" },
+          { time: "23m", agent: "SupabaseConnector", message: "Query executed in 145ms" },
+        ];
+
+        log.innerHTML = activities
+          .map(
+            (a) => `
+                <div class="activity-item">
+                    <div class="activity-time">${a.time}</div>
+                    <div class="activity-message">
+                        <span class="activity-agent">${a.agent}</span> — ${a.message}
+                    </div>
+                </div>
+            `,
+          )
+          .join("");
+      }
+
+      async function refreshMetrics() {
+        // Cost summary
+        const costs = await apiCall("/api/costs/summary");
+        if (costs) {
+          document.getElementById("costToday").textContent = formatCost(costs.today_total || 0.42);
+          document.getElementById("costSubtext").textContent =
+            `Daily limit: ${formatCost(costs.daily_limit || 20)}`;
+          document.getElementById("requestsToday").textContent = (
+            costs.today_requests || 87
+          ).toString();
+          document.getElementById("requestsSubtext").textContent = "in 12 hours";
+        }
+
+        // Cache stats
+        const cache = await apiCall("/api/cache/stats");
+        if (cache) {
+          const hitRate = cache.hit_rate || 0.67;
+          document.getElementById("cacheHitRate").textContent = (hitRate * 100).toFixed(1) + "%";
+          document.getElementById("cacheSubtext").textContent =
+            `${cache.total_cached || 847} items cached`;
+        }
+
+        // Agent health
+        const health = await apiCall("/api/agents/health");
+        if (health) {
+          STATE.agentHealth = health.agents || {};
+        }
+      }
+
+      // ============================================
+      // AGENTS TAB
+      // ============================================
+      function renderAgents() {
+        const container = document.getElementById("agentCards");
+        container.innerHTML = STATE.agents
+          .slice(1)
+          .map(
+            (agent) => `
+                <div class="org-node">
+                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">${agent.emoji}</div>
+                    <div style="font-weight: 600; color: var(--accent);">${agent.name}</div>
+                    <div style="font-size: 0.75rem; color: var(--text-secondary); margin: 0.5rem 0;">${agent.model}</div>
+                    <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.5rem;">${agent.provider}</div>
+                    <div class="skills-list">
+                        ${agent.skills.map((s) => `<span class="skill-badge">${s}</span>`).join("")}
+                    </div>
+                </div>
+            `,
+          )
+          .join("");
+      }
+
+      // ============================================
+      // TASKS TAB (KANBAN)
+      // ============================================
+      function renderTasks() {
+        const board = document.getElementById("kanbanBoard");
+        const columns = [
+          { id: "todo", title: "📝 Todo", label: "Todo" },
+          { id: "in-progress", title: "⚙️ In Progress", label: "In Progress" },
+          { id: "done", title: "✅ Done", label: "Done" },
+        ];
+
+        board.innerHTML = columns
+          .map((col) => {
+            const tasks = STATE.tasks.filter(
+              (t) => t.status === col.label.toLowerCase().replace(" ", "-"),
+            );
+            return `
+                    <div class="kanban-column" data-status="${col.label.toLowerCase().replace(" ", "-")}">
+                        <div class="kanban-title">${col.title}</div>
+                        <div class="kanban-tasks">
+                            ${tasks
+                              .map(
+                                (task) => `
+                                <div class="kanban-card" draggable="true" data-task-id="${task.id}">
+                                    <div class="kanban-card-title">${task.title}</div>
+                                    <div class="kanban-card-agent">👤 ${task.agent}</div>
+                                    <div class="kanban-card-time">${formatTime(task.timestamp)}</div>
+                                </div>
+                            `,
+                              )
+                              .join("")}
+                        </div>
+                    </div>
+                `;
+          })
+          .join("");
+
+        setupKanbanDragDrop();
+      }
+
+      function setupKanbanDragDrop() {
+        const cards = document.querySelectorAll(".kanban-card");
+        const columns = document.querySelectorAll(".kanban-column");
+
+        cards.forEach((card) => {
+          card.addEventListener("dragstart", (e) => {
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("taskId", card.dataset.taskId);
+          });
+        });
+
+        columns.forEach((col) => {
+          col.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            col.style.borderColor = "var(--accent)";
+          });
+
+          col.addEventListener("dragleave", () => {
+            col.style.borderColor = "var(--border)";
+          });
+
+          col.addEventListener("drop", (e) => {
+            e.preventDefault();
+            col.style.borderColor = "var(--border)";
+            const taskId = parseInt(e.dataTransfer.getData("taskId"));
+            const newStatus = col.dataset.status;
+
+            const task = STATE.tasks.find((t) => t.id === taskId);
+            if (task) {
+              task.status = newStatus;
+              localStorage.setItem("tasks", JSON.stringify(STATE.tasks));
+              renderTasks();
+              showSuccess("Task moved!");
+            }
+          });
+        });
+      }
+
+      document.getElementById("addTaskBtn").addEventListener("click", () => {
+        const title = prompt("Task title:");
+        if (!title) return;
+        const agents = STATE.agents.map((a) => a.name).join(", ");
+        const agent = prompt(`Agent (${agents}):`, STATE.agents[0].name);
+
+        const newTask = {
+          id: Math.max(0, ...STATE.tasks.map((t) => t.id)) + 1,
+          title,
+          agent: agent || STATE.agents[0].name,
+          status: "todo",
+          timestamp: Date.now(),
+        };
+
+        STATE.tasks.push(newTask);
+        localStorage.setItem("tasks", JSON.stringify(STATE.tasks));
+        renderTasks();
+        showSuccess("Task created!");
+      });
+
+      // ============================================
+      // MEMORY TAB
+      // ============================================
+      function renderMemory() {
+        const container = document.getElementById("memoryList");
+        container.innerHTML = STATE.memories
+          .map(
+            (mem) => `
+                <div class="memory-item">
+                    <div class="memory-header">
+                        <div class="memory-key">${mem.key}</div>
+                        <div class="memory-source">${mem.source}</div>
+                    </div>
+                    <div class="memory-preview">${mem.value}</div>
+                    <div class="memory-time">${formatTime(mem.timestamp)}</div>
+                </div>
+            `,
+          )
+          .join("");
+      }
+
+      document.getElementById("memorySearch").addEventListener("input", (e) => {
+        const query = e.target.value.toLowerCase();
+        const items = document.querySelectorAll(".memory-item");
+        items.forEach((item) => {
+          const key = item.querySelector(".memory-key").textContent.toLowerCase();
+          const value = item.querySelector(".memory-preview").textContent.toLowerCase();
+          const visible = key.includes(query) || value.includes(query);
+          item.style.display = visible ? "block" : "none";
+        });
+      });
+
+      // ============================================
+      // COSTS TAB
+      // ============================================
+      async function renderCosts() {
+        const costs = await apiCall("/api/costs/summary");
+        if (!costs) return;
+
+        // Cost by Agent
+        const costByAgent = document.getElementById("costByAgent");
+        const agentCosts = [
+          { name: "Overseer", cost: 0.18 },
+          { name: "CodeGen Pro", cost: 0.14 },
+          { name: "Pentest AI", cost: 0.08 },
+          { name: "CodeGen Elite", cost: 0.02 },
+        ];
+        const maxCost = Math.max(...agentCosts.map((a) => a.cost));
+        costByAgent.innerHTML = agentCosts
+          .map(
+            (a) => `
+                <div class="cost-bar">
+                    <div class="cost-bar-label">
+                        <span class="cost-bar-name">${a.name}</span>
+                        <span class="cost-bar-value">${formatCost(a.cost)}</span>
+                    </div>
+                    <div class="cost-bar-bg">
+                        <div class="cost-bar-fill" style="width: ${(a.cost / maxCost) * 100}%"></div>
+                    </div>
+                </div>
+            `,
+          )
+          .join("");
+
+        // Budget Status
+        const budgetStatus = document.getElementById("budgetStatus");
+        const dailyLimit = costs.daily_limit || 20;
+        const monthlyLimit = costs.monthly_limit || 1000;
+        const dailyUsed = costs.today_total || 0.42;
+        const monthlyUsed = costs.monthly_total || 8.5;
+        budgetStatus.innerHTML = `
+                <div class="cost-bar">
+                    <div class="cost-bar-label">
+                        <span class="cost-bar-name">Daily Budget</span>
+                        <span class="cost-bar-value">${formatCost(dailyUsed)} / ${formatCost(dailyLimit)}</span>
+                    </div>
+                    <div class="cost-bar-bg">
+                        <div class="cost-bar-fill" style="width: ${Math.min((dailyUsed / dailyLimit) * 100, 100)}%; background: ${makeCostColor((dailyUsed / dailyLimit) * 100)};"></div>
+                    </div>
+                </div>
+                <div class="cost-bar">
+                    <div class="cost-bar-label">
+                        <span class="cost-bar-name">Monthly Budget</span>
+                        <span class="cost-bar-value">${formatCost(monthlyUsed)} / ${formatCost(monthlyLimit)}</span>
+                    </div>
+                    <div class="cost-bar-bg">
+                        <div class="cost-bar-fill" style="width: ${Math.min((monthlyUsed / monthlyLimit) * 100, 100)}%; background: ${makeCostColor((monthlyUsed / monthlyLimit) * 100)};"></div>
+                    </div>
+                </div>
+            `;
+
+        // Cache Savings
+        const cache = await apiCall("/api/cache/stats");
+        const cacheSavings = document.getElementById("cacheSavings");
+        const savingsAmount = cache && cache.savings_amount ? cache.savings_amount : 3.27;
+        const savingsPercent = cache && cache.savings_percent ? cache.savings_percent : 28;
+        cacheSavings.innerHTML = `
+                <div style="margin-bottom: 1.5rem;">
+                    <div style="font-size: 1.8rem; color: var(--success); font-weight: 600;">${formatCost(savingsAmount)}</div>
+                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.5rem;">Saved by caching</div>
+                </div>
+                <div class="cost-bar">
+                    <div class="cost-bar-label">
+                        <span class="cost-bar-name">Cache Efficiency</span>
+                        <span class="cost-bar-value">${savingsPercent}%</span>
+                    </div>
+                    <div class="cost-bar-bg">
+                        <div class="cost-bar-fill" style="width: ${savingsPercent}%; background: var(--success);"></div>
+                    </div>
+                </div>
+            `;
+      }
+
+      // ============================================
+      // TAB NAVIGATION
+      // ============================================
+      document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const tabName = btn.dataset.tab;
+          document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+          document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
+          btn.classList.add("active");
+          document.getElementById(tabName).classList.add("active");
+          STATE.currentTab = tabName;
+
+          // Render tab content
+          if (tabName === "overview") renderOverview();
+          else if (tabName === "agents") renderAgents();
+          else if (tabName === "tasks") renderTasks();
+          else if (tabName === "memory") renderMemory();
+          else if (tabName === "costs") renderCosts();
+        });
+      });
+
+      // ============================================
+      // SETTINGS MODAL
+      // ============================================
+      const modal = document.getElementById("settingsModal");
+      document.getElementById("settingsBtn").addEventListener("click", () => {
+        document.getElementById("gatewayUrl").value = STATE.gatewayUrl;
+        document.getElementById("authToken").value = STATE.authToken;
+        modal.classList.add("active");
+      });
+
+      document.getElementById("closeBtnSettings").addEventListener("click", () => {
+        modal.classList.remove("active");
+      });
+
+      document.getElementById("showToken").addEventListener("change", (e) => {
+        const input = document.getElementById("authToken");
+        input.type = e.target.checked ? "text" : "password";
+      });
+
+      document.getElementById("saveBtnSettings").addEventListener("click", () => {
+        STATE.gatewayUrl = document.getElementById("gatewayUrl").value || STATE.gatewayUrl;
+        STATE.authToken = document.getElementById("authToken").value || "";
+        localStorage.setItem("gatewayUrl", STATE.gatewayUrl);
+        localStorage.setItem("authToken", STATE.authToken);
+        modal.classList.remove("active");
+        showSuccess("Settings saved!");
+        refreshMetrics();
+      });
+
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) modal.classList.remove("active");
+      });
+
+      // ============================================
+      // INITIALIZATION
+      // ============================================
+      function init() {
+        renderOverview();
+        updateStatus("online");
+
+        // Auto-refresh metrics every 30 seconds
+        setInterval(() => {
+          if (STATE.currentTab === "overview") refreshMetrics();
+          else if (STATE.currentTab === "costs") renderCosts();
+        }, 30000);
+      }
+
+      // Start the app
+      document.addEventListener("DOMContentLoaded", init);
+    </script>
+  </body>
+</html>

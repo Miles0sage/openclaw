@@ -16,7 +16,7 @@ import hashlib
 import time
 from fastapi import FastAPI, WebSocket, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import anthropic
@@ -127,6 +127,9 @@ logger = logging.getLogger("openclaw_gateway")
 SESSIONS_DIR = pathlib.Path(os.getenv("OPENCLAW_SESSIONS_DIR", "/tmp/openclaw_sessions"))
 SESSIONS_DIR.mkdir(exist_ok=True)
 logger.info(f"📁 Session storage: {SESSIONS_DIR}")
+
+# Tasks storage for Mission Control
+TASKS_FILE = pathlib.Path("/tmp/openclaw_tasks.json")
 
 def sanitize_session_key(session_key: str) -> str:
     """Sanitize session key to prevent path traversal attacks"""
@@ -2679,6 +2682,172 @@ async def slack_slash_approve(request: Request):
         return PlainTextResponse(f"✅ Job `{job_id}` approved! Processor will execute it shortly.")
     except Exception as e:
         return PlainTextResponse(f"❌ Error: {str(e)}")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# MISSION CONTROL DASHBOARD ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/agents/status")
+async def agents_status():
+    """Get status of all agents for Mission Control"""
+    agents_config = CONFIG.get("agents", {})
+    agent_statuses = {}
+    heartbeat = get_heartbeat_monitor()
+
+    for agent_id, config in agents_config.items():
+        agent_statuses[agent_id] = {
+            "name": config.get("name", agent_id),
+            "emoji": config.get("emoji", ""),
+            "model": config.get("model", "unknown"),
+            "provider": config.get("apiProvider", "unknown"),
+            "type": config.get("type", "unknown"),
+            "skills": config.get("skills", []),
+            "signature": config.get("signature", ""),
+            "costSavings": config.get("costSavings", ""),
+            "status": "active",
+        }
+
+        # Check heartbeat if available
+        if heartbeat:
+            try:
+                status_data = heartbeat.get_status()
+                in_flight = heartbeat.get_in_flight_agents()
+                if agent_id in [a.get("agent_id") for a in in_flight]:
+                    agent_statuses[agent_id]["status"] = "busy"
+                else:
+                    agent_statuses[agent_id]["status"] = "idle"
+            except Exception:
+                pass
+
+    return {"success": True, "agents": agent_statuses, "total": len(agent_statuses)}
+
+
+@app.get("/api/tasks")
+async def list_tasks_endpoint():
+    """List all tasks for Mission Control task board"""
+    try:
+        if TASKS_FILE.exists():
+            with open(TASKS_FILE, 'r') as f:
+                tasks = json.load(f)
+        else:
+            tasks = []
+        return {"success": True, "tasks": tasks, "total": len(tasks)}
+    except Exception as e:
+        return {"success": True, "tasks": [], "total": 0}
+
+
+@app.post("/api/tasks")
+async def create_task_endpoint(request: Request):
+    """Create a new task"""
+    body = await request.json()
+    try:
+        if TASKS_FILE.exists():
+            with open(TASKS_FILE, 'r') as f:
+                tasks = json.load(f)
+        else:
+            tasks = []
+
+        task = {
+            "id": str(uuid.uuid4())[:8],
+            "title": body.get("title", "Untitled"),
+            "description": body.get("description", ""),
+            "status": body.get("status", "todo"),
+            "agent": body.get("agent", ""),
+            "created_at": datetime.utcnow().isoformat() + "Z",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+        tasks.append(task)
+
+        with open(TASKS_FILE, 'w') as f:
+            json.dump(tasks, f, indent=2)
+
+        return {"success": True, "task": task}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/tasks/{task_id}")
+async def update_task_endpoint(task_id: str, request: Request):
+    """Update a task status"""
+    body = await request.json()
+    try:
+        if TASKS_FILE.exists():
+            with open(TASKS_FILE, 'r') as f:
+                tasks = json.load(f)
+        else:
+            tasks = []
+
+        for task in tasks:
+            if task["id"] == task_id:
+                task.update({k: v for k, v in body.items() if k in ["title", "description", "status", "agent"]})
+                task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                break
+
+        with open(TASKS_FILE, 'w') as f:
+            json.dump(tasks, f, indent=2)
+
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/memory/list")
+async def memory_list():
+    """List all memories for Mission Control"""
+    memory_mgr = get_memory_manager()
+    if not memory_mgr:
+        return {"success": True, "memories": [], "total": 0}
+
+    memories = memory_mgr.list_all() if hasattr(memory_mgr, 'list_all') else []
+    return {"success": True, "memories": memories, "total": len(memories)}
+
+
+@app.get("/api/dashboard/summary")
+async def dashboard_summary():
+    """Aggregated dashboard summary for Mission Control"""
+    # Get cost metrics
+    cost_data = get_cost_metrics()
+
+    # Get cache stats
+    cache = get_response_cache()
+    cache_stats = cache.get_stats() if cache else {}
+
+    # Get quota status
+    quota_status = get_quota_status("default")
+
+    # Get agent count
+    agent_count = len(CONFIG.get("agents", {}))
+
+    # Get router stats
+    router_stats = agent_router.get_cache_stats() if hasattr(agent_router, 'get_cache_stats') else {}
+
+    return {
+        "success": True,
+        "summary": {
+            "agents_total": agent_count,
+            "cost_today": cost_data.get("today_usd", 0),
+            "cost_month": cost_data.get("month_usd", 0),
+            "daily_limit": quota_status.get("daily", {}).get("limit", 50),
+            "monthly_limit": quota_status.get("monthly", {}).get("limit", 1000),
+            "cache_hit_rate": cache_stats.get("hit_rate_percent", "0%"),
+            "cache_tokens_saved": cache_stats.get("total_tokens_saved", 0),
+            "cache_cost_saved": cache_stats.get("total_cost_saved_usd", 0),
+            "router_cache": router_stats,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+    }
+
+
+@app.get("/mission-control")
+@app.get("/mission-control.html")
+async def mission_control_page():
+    """Serve Mission Control dashboard"""
+    html_path = os.path.join(os.path.dirname(__file__), "mission_control.html")
+    if os.path.exists(html_path):
+        with open(html_path, "r") as f:
+            return HTMLResponse(content=f.read())
+    return HTMLResponse(content="<h1>Mission Control not found</h1>", status_code=404)
 
 
 if __name__ == "__main__":
