@@ -205,14 +205,21 @@ async def send_slack_message(channel: str, text: str, thread_ts: str = None) -> 
 
 
 async def call_claude_with_tools(client, model: str, system_prompt: str, messages: list, max_rounds: int = 5) -> str:
-    """Call Claude with tool_use support. Loops until text response or max rounds."""
+    """Call Claude with tool_use support. Loops until text response or max rounds.
+    Runs synchronous Anthropic client in a thread pool to avoid blocking the event loop."""
+    loop = asyncio.get_event_loop()
+
     for _ in range(max_rounds):
-        response = client.messages.create(
-            model=model,
-            max_tokens=8192,
-            system=system_prompt,
-            messages=messages,
-            tools=AGENT_TOOLS
+        # Run synchronous API call in thread pool so we don't block the event loop
+        response = await loop.run_in_executor(
+            None,
+            lambda: client.messages.create(
+                model=model,
+                max_tokens=8192,
+                system=system_prompt,
+                messages=messages,
+                tools=AGENT_TOOLS
+            )
         )
 
         # Collect all tool uses and text blocks
@@ -223,15 +230,27 @@ async def call_claude_with_tools(client, model: str, system_prompt: str, message
             # No tool calls — return the text
             return text_blocks[0].text if text_blocks else "No response"
 
-        # Execute tools and build tool_result messages
-        # First add the assistant message with tool_use blocks
-        messages.append({"role": "assistant", "content": response.content})
+        # Serialize response.content to plain dicts for the messages list
+        # (Anthropic SDK objects are not JSON-serializable and can cause issues)
+        serialized_content = []
+        for block in response.content:
+            if block.type == "text":
+                serialized_content.append({"type": "text", "text": block.text})
+            elif block.type == "tool_use":
+                serialized_content.append({
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input
+                })
+
+        messages.append({"role": "assistant", "content": serialized_content})
 
         tool_results = []
         for tu in tool_uses:
-            logger.info(f"🔧 Tool call: {tu.name}({json.dumps(tu.input)[:100]})")
+            logger.info(f"Tool call: {tu.name}({json.dumps(tu.input)[:100]})")
             result = execute_tool(tu.name, tu.input)
-            logger.info(f"🔧 Tool result: {result[:100]}...")
+            logger.info(f"Tool result: {result[:100]}...")
             tool_results.append({
                 "type": "tool_result",
                 "tool_use_id": tu.id,
@@ -505,6 +524,29 @@ def call_model_for_agent(agent_key: str, prompt: str, conversation: list = None)
     emoji = agent_config.get("emoji", "")
     signature = agent_config.get("signature", "")
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # IDENTITY STACK: Load SOUL.md, USER.md, AGENTS.md for full context
+    # This gives the agent knowledge of real projects, team, and behavior rules
+    # ═══════════════════════════════════════════════════════════════════════
+    identity_context = ""
+    gateway_dir = os.path.dirname(os.path.abspath(__file__))
+    for identity_file in ["SOUL.md", "USER.md", "AGENTS.md"]:
+        filepath = os.path.join(gateway_dir, identity_file)
+        try:
+            with open(filepath, "r") as f:
+                identity_context += f"\n\n{f.read()}"
+        except FileNotFoundError:
+            logger.warning(f"Identity file not found: {filepath}")
+
+    # Load skill graph index for project/tool awareness
+    skills_index = ""
+    skills_index_path = os.path.join(gateway_dir, "skills", "index.md")
+    try:
+        with open(skills_index_path, "r") as f:
+            skills_index = f.read()
+    except FileNotFoundError:
+        logger.warning(f"Skill graph index not found: {skills_index_path}")
+
     # Full system prompt for Anthropic (handles long prompts well)
     anthropic_system = f"""You are {name} {emoji} in the Cybershield AI Agency.
 
@@ -512,11 +554,18 @@ def call_model_for_agent(agent_key: str, prompt: str, conversation: list = None)
 
 IMPORTANT RULES:
 - ALWAYS end your messages with your signature: {signature}
-- Be playful but professional
 - Follow your character consistently
-- Use emojis naturally
+- Follow the communication and behavior rules in the identity documents below
+- Reference real project names (Barber CRM, Delhi Palace, OpenClaw, PrestressCalc, Concrete Canoe)
+- NEVER invent fake project names like "DataGuard Enterprise" or "SecureShield"
 
-Remember: You ARE {name}. Stay in character!"""
+Remember: You ARE {name}. Stay in character!
+
+--- IDENTITY & CONTEXT ---
+{identity_context}
+
+--- SKILL GRAPH ---
+{skills_index}"""
 
     # Minimal system prompt for Ollama (to avoid timeouts)
     ollama_suffix = f"\n\nSign your response with: {signature}"
@@ -554,11 +603,11 @@ Remember: You ARE {name}. Stay in character!"""
         ollama_prompt = f"{full_prompt}{ollama_suffix}"
         return call_ollama(model, ollama_prompt, endpoint)
     elif provider == "anthropic":
-        # For Anthropic, use system parameter
+        # For Anthropic, use system parameter with full identity stack
         if conversation:
             response = anthropic_client.messages.create(
                 model=model,
-                max_tokens=4096,
+                max_tokens=8192,
                 system=anthropic_system,
                 messages=conversation
             )
@@ -568,7 +617,7 @@ Remember: You ARE {name}. Stay in character!"""
         else:
             response = anthropic_client.messages.create(
                 model=model,
-                max_tokens=4096,
+                max_tokens=8192,
                 system=anthropic_system,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -602,7 +651,7 @@ Remember: You ARE {name}. Stay in character!"""
                 model=api_model,
                 prompt=prompt if not conversation else full_prompt,
                 system_prompt=anthropic_system,
-                max_tokens=4096,
+                max_tokens=8192,
                 temperature=0.7
             )
 
@@ -1300,6 +1349,14 @@ async def slack_events(request: Request):
     try:
         # Get request body and headers for signature verification
         body_bytes = await request.body()
+        payload = json.loads(body_bytes)
+
+        # Handle URL verification challenge FIRST (before signature check)
+        # Slack sends this during app setup and it must be answered immediately
+        if payload.get("type") == "url_verification":
+            logger.info("Slack verification challenge received")
+            return {"challenge": payload.get("challenge")}
+
         timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
         signature = request.headers.get("X-Slack-Signature", "")
 
@@ -1310,10 +1367,10 @@ async def slack_events(request: Request):
                 request_time = int(timestamp)
                 current_time = int(time.time())
                 if abs(current_time - request_time) > 300:
-                    logger.warning("⚠️  Slack request timestamp too old (replay attack?)")
+                    logger.warning("Slack request timestamp too old (replay attack?)")
                     return JSONResponse({"error": "Invalid timestamp"}, status_code=403)
             except ValueError:
-                logger.warning("⚠️  Invalid timestamp from Slack")
+                logger.warning("Invalid timestamp from Slack")
                 return JSONResponse({"error": "Invalid timestamp"}, status_code=403)
 
             # Verify signature
@@ -1325,15 +1382,8 @@ async def slack_events(request: Request):
             ).hexdigest()
 
             if not hmac.compare_digest(expected_signature, signature):
-                logger.warning("⚠️  Invalid Slack signature")
+                logger.warning("Invalid Slack signature")
                 return JSONResponse({"error": "Invalid signature"}, status_code=403)
-
-        payload = json.loads(body_bytes)
-
-        # Handle URL verification challenge (Slack requires this)
-        if payload.get("type") == "url_verification":
-            logger.info("✅ Slack verification challenge received")
-            return {"challenge": payload.get("challenge")}
 
         # Handle message events
         event = payload.get("event", {})
@@ -1449,16 +1499,20 @@ async def quota_check_endpoint(req: QuotaCheckRequest):
 async def slack_report_costs():
     """Send cost summary to Slack"""
     try:
-        summary = get_cost_summary()
-        message = f"""💰 *Cost Summary*
+        metrics_data = get_cost_metrics()
+        total = metrics_data.get('total_cost', 0)
+        message = f"""*Cost Summary*
 
-Daily: ${summary.get('daily_total', 0):.2f} / $20.00
-Monthly: ${summary.get('monthly_total', 0):.2f} / $1000.00
+Total: ${total:.4f}
+Entries: {metrics_data.get('entries_count', 0)}
 
 *Top Agents:*"""
 
-        for agent, cost in list(summary.get('by_agent', {}).items())[:5]:
-            message += f"\n  • {agent}: ${cost:.4f}"
+        for agent, cost in list(metrics_data.get('by_agent', {}).items())[:5]:
+            message += f"\n  - {agent}: ${cost:.4f}"
+
+        if not metrics_data.get('by_agent'):
+            message += "\n  (no cost data yet)"
 
         await send_slack_message(SLACK_REPORT_CHANNEL, message)
         return {"ok": True, "message": "Cost summary sent"}
@@ -1473,17 +1527,19 @@ async def slack_report_health():
     try:
         monitor = get_heartbeat_monitor()
         if not monitor:
-            message = "⚠️  Heartbeat monitor not initialized"
+            message = "Heartbeat monitor not initialized"
         else:
-            agent_statuses = monitor.agent_health_status()
-            healthy = sum(1 for s in agent_statuses.values() if s.get("status") == "healthy")
-            total = len(agent_statuses)
+            status = monitor.get_status()
+            agents_monitoring = status.get("agents_monitoring", 0)
+            is_running = status.get("running", False)
 
-            message = f"""🏥 *Gateway Health*
+            session_count = len(list(SESSIONS_DIR.glob('*.json')))
+            message = f"""*Gateway Health*
 
-Agents: {healthy}/{total} healthy
-Active Sessions: {len(SESSIONS_DIR.glob('*.json'))}
-API Status: ✅ OK"""
+Heartbeat: {"running" if is_running else "stopped"}
+Agents Monitored: {agents_monitoring}
+Active Sessions: {session_count}
+API Status: OK"""
 
         await send_slack_message(SLACK_REPORT_CHANNEL, message)
         return {"ok": True, "message": "Health report sent"}
