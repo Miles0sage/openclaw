@@ -9,7 +9,21 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import asyncio
 import logging
+import os
+import requests
 from typing import Dict, Optional
+
+try:
+    from event_engine import emit_event
+    _HAS_EVENT_ENGINE = True
+except ImportError:
+    _HAS_EVENT_ENGINE = False
+
+try:
+    from job_manager import update_job_status, create_job
+    _HAS_JOB_MANAGER = True
+except ImportError:
+    _HAS_JOB_MANAGER = False
 
 logger = logging.getLogger("heartbeat")
 
@@ -209,6 +223,29 @@ class HeartbeatMonitor:
 
         self.stale_counts[agent_id] = stale_count + 1
 
+        # Slack notification for stale warning
+        try:
+            gateway_token = os.environ.get("GATEWAY_AUTH_TOKEN", "")
+            requests.post(
+                "http://localhost:18789/slack/report/send",
+                json={"text": message, "channel": "C0AFE4QHKH7"},
+                headers={"X-Auth-Token": gateway_token},
+                timeout=5,
+            )
+        except Exception as e:
+            logger.warning(f"HeartbeatMonitor: failed to send Slack stale notification: {e}")
+
+        # Emit agent.stale event
+        if _HAS_EVENT_ENGINE:
+            try:
+                emit_event("agent.stale", {
+                    "agent_id": agent_id,
+                    "idle_ms": idle_ms,
+                    "task_id": agent.task_id,
+                })
+            except Exception as e:
+                logger.warning(f"HeartbeatMonitor: failed to emit agent.stale event: {e}")
+
     async def _handle_timeout(
         self, agent_id: str, agent: AgentActivity, elapsed_ms: int
     ) -> None:
@@ -247,6 +284,41 @@ class HeartbeatMonitor:
 
         logger.info(f"   ✅ Recovered: agent {agent_id} removed from in-flight, ready for next task")
 
+        # Mark the agent's task as failed if it has a task_id
+        if agent.task_id and _HAS_JOB_MANAGER:
+            try:
+                update_job_status(agent.task_id, "failed", {
+                    "error": "Timeout",
+                    "agent": agent_id,
+                    "elapsed_ms": elapsed_ms,
+                })
+                logger.info(f"   Job {agent.task_id} marked as failed due to timeout")
+            except Exception as e:
+                logger.warning(f"HeartbeatMonitor: failed to update job status: {e}")
+
+        # Slack notification for timeout
+        try:
+            gateway_token = os.environ.get("GATEWAY_AUTH_TOKEN", "")
+            requests.post(
+                "http://localhost:18789/slack/report/send",
+                json={"text": message, "channel": "C0AFE4QHKH7"},
+                headers={"X-Auth-Token": gateway_token},
+                timeout=5,
+            )
+        except Exception as e:
+            logger.warning(f"HeartbeatMonitor: failed to send Slack timeout notification: {e}")
+
+        # Emit agent.timeout event
+        if _HAS_EVENT_ENGINE:
+            try:
+                emit_event("agent.timeout", {
+                    "agent_id": agent_id,
+                    "task_id": agent.task_id,
+                    "elapsed_ms": elapsed_ms,
+                })
+            except Exception as e:
+                logger.warning(f"HeartbeatMonitor: failed to emit agent.timeout event: {e}")
+
     async def recover_stale_task(self, agent_id: str) -> None:
         """
         Recover a stale/timeout task by marking it failed and available for retry
@@ -275,6 +347,72 @@ class HeartbeatMonitor:
         #     "description": "Auto-retry from heartbeat recovery",
         #     "retryOf": agent.task_id
         # })
+
+    def recover_and_requeue(self, agent_id: str) -> None:
+        """
+        Recover a timed-out agent's task, mark it failed, and re-queue
+        with bumped priority (P1->P0, P2->P1, etc.).
+
+        Args:
+            agent_id: Unique identifier for the agent
+        """
+        agent = self.in_flight_agents.get(agent_id)
+        if not agent or not agent.task_id:
+            logger.warning(f"HeartbeatMonitor: cannot requeue — no task for agent {agent_id}")
+            return
+
+        task_id = agent.task_id
+
+        # Mark the current job as failed
+        if _HAS_JOB_MANAGER:
+            try:
+                update_job_status(task_id, "failed", {
+                    "error": "Timeout — auto-requeued",
+                    "agent": agent_id,
+                })
+            except Exception as e:
+                logger.warning(f"HeartbeatMonitor: failed to mark job {task_id} as failed: {e}")
+
+            # Create a new job with bumped priority
+            try:
+                priority_map = {"P1": "P0", "P2": "P1", "P3": "P2", "P4": "P3"}
+                current_priority = getattr(agent, "priority", "P2")
+                bumped_priority = priority_map.get(current_priority, "P0")
+
+                new_job = create_job({
+                    "title": f"Retry: {task_id}",
+                    "description": f"Auto-retry from heartbeat recovery (agent {agent_id} timed out)",
+                    "priority": bumped_priority,
+                    "retry_of": task_id,
+                })
+                new_job_id = new_job.get("id", "unknown") if isinstance(new_job, dict) else "unknown"
+                logger.info(
+                    f"   Re-queued task {task_id} as new job {new_job_id} "
+                    f"with priority {bumped_priority} (was {current_priority})"
+                )
+            except Exception as e:
+                logger.warning(f"HeartbeatMonitor: failed to create requeue job: {e}")
+        else:
+            logger.warning("HeartbeatMonitor: job_manager not available, cannot requeue")
+
+        # Notify Slack about the re-queue
+        requeue_msg = (
+            f"🔄 Re-queued: agent {agent_id} task {task_id} failed due to timeout. "
+            f"New job created with bumped priority."
+        )
+        try:
+            gateway_token = os.environ.get("GATEWAY_AUTH_TOKEN", "")
+            requests.post(
+                "http://localhost:18789/slack/report/send",
+                json={"text": requeue_msg, "channel": "C0AFE4QHKH7"},
+                headers={"X-Auth-Token": gateway_token},
+                timeout=5,
+            )
+        except Exception as e:
+            logger.warning(f"HeartbeatMonitor: failed to send Slack requeue notification: {e}")
+
+        # Clean up the agent
+        self.unregister_agent(agent_id)
 
     def get_status(self) -> Dict:
         """Get current heartbeat status"""

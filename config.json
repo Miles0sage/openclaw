@@ -484,6 +484,39 @@
     },
     "warning_threshold_percent": 80
   },
+  "ops_policy": {
+    "daily_budget_usd": 20,
+    "monthly_budget_usd": 1000,
+    "auto_approve_rules": [
+      {
+        "name": "cheap_safe",
+        "max_cost_usd": 0.5,
+        "excluded_tags": ["security", "production", "deploy"],
+        "action": "approve"
+      },
+      {
+        "name": "cheap_model",
+        "agents": ["coder_agent", "hacker_agent"],
+        "max_cost_usd": 2.0,
+        "action": "approve"
+      },
+      {
+        "name": "sensitive",
+        "required_tags": ["security", "production", "deploy"],
+        "action": "require_human"
+      },
+      { "name": "expensive", "min_cost_usd": 5.0, "action": "require_human" },
+      { "name": "high_confidence", "min_threshold": 80, "max_cost_usd": 1.0, "action": "approve" }
+    ],
+    "stale_threshold_ms": 1800000,
+    "timeout_threshold_ms": 3600000,
+    "reaction_matrix": [
+      { "event": "job.completed", "condition": "task_type=code", "action": "propose_tests" },
+      { "event": "job.failed", "action": "retry_bumped_priority" },
+      { "event": "cost.alert", "action": "notify_slack" },
+      { "event": "agent.timeout", "action": "requeue_and_notify" }
+    ]
+  },
   "channels": {
     "slack": {
       "enabled": true,

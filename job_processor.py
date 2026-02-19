@@ -12,6 +12,21 @@ import threading
 from job_manager import get_pending_jobs, update_job_status, get_job, list_jobs
 import requests
 
+try:
+    from event_engine import get_event_engine
+    _HAS_EVENTS = True
+except ImportError:
+    _HAS_EVENTS = False
+
+def _emit(event_type, data):
+    if _HAS_EVENTS:
+        try:
+            engine = get_event_engine()
+            if engine:
+                engine.emit(event_type, data)
+        except Exception:
+            pass
+
 logger = logging.getLogger("job_processor")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(message)s')
 
@@ -21,16 +36,15 @@ SLACK_RETRIES = 3
 SLACK_TIMEOUT = 15  # Increased timeout for slow connections
 
 def post_to_slack(message: str, job_id: str = None):
-    """Post update to Slack via gateway (non-blocking with retries)"""
+    """Post update to Slack report channel via gateway endpoint (non-blocking with retries)"""
     def _post():
         for attempt in range(SLACK_RETRIES):
             try:
                 requests.post(
-                    f"{GATEWAY_URL}/api/chat",
+                    f"{GATEWAY_URL}/slack/report/send",
                     json={
-                        "content": f"🤖 Job {job_id}: {message}",
-                        "sessionKey": f"job:{job_id}",
-                        "agent_id": "project_manager"
+                        "text": f"🤖 *Job {job_id}*: {message}",
+                        "channel": os.getenv("SLACK_REPORT_CHANNEL", "C0AFE4QHKH7")
                     },
                     headers={"X-Auth-Token": GATEWAY_TOKEN},
                     timeout=SLACK_TIMEOUT
@@ -40,7 +54,7 @@ def post_to_slack(message: str, job_id: str = None):
             except Exception as e:
                 if attempt < SLACK_RETRIES - 1:
                     logger.warning(f"Slack post attempt {attempt + 1} failed: {e}, retrying...")
-                    time.sleep(2)  # Wait before retry
+                    time.sleep(2)
                 else:
                     logger.error(f"Failed to post to Slack after {SLACK_RETRIES} retries: {e}")
 
@@ -91,6 +105,7 @@ def process_job(job: dict):
     # Mark ready for human review
     update_job_status(job_id, "pr_ready")
     post_to_slack(f"🔍 Ready for review! Run: `approve_job('{job_id}')`", job_id)
+    _emit("job.created", {"job_id": job_id, "task": job.get("task", ""), "project": job.get("project", "")})
 
 def execute_approved_job(job: dict):
     """Execute an approved job (create PR, run tests, merge)"""
@@ -150,6 +165,7 @@ def execute_approved_job(job: dict):
     post_to_slack(f"✅ JOB COMPLETE! Changes merged for: {job['task']}", job_id)
 
     update_job_status(job_id, "done")
+    _emit("job.completed", {"job_id": job_id, "task": job.get("task", ""), "project": job.get("project", "")})
     logger.info(f"✅✅✅ JOB COMPLETE: {job_id}")
 
 def job_processor_loop():

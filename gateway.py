@@ -38,6 +38,9 @@ from audit_routes import router as audit_router
 
 from deepseek_client import DeepseekClient
 
+# Import agent tools (GitHub, web search, job management)
+from agent_tools import AGENT_TOOLS, execute_tool
+
 # Import quota manager
 from quota_manager import (
     check_daily_quota,
@@ -93,6 +96,13 @@ from cost_gates import (
     get_cost_gates, init_cost_gates, check_cost_budget,
     record_cost, BudgetStatus
 )
+
+# Import closed-loop engines
+from proposal_engine import create_proposal, get_proposal, list_proposals, update_proposal_status, estimate_cost
+from approval_engine import evaluate_proposal, auto_approve_and_execute, get_policy
+from event_engine import init_event_engine, get_event_engine
+from cron_scheduler import init_cron_scheduler, get_cron_scheduler
+from memory_manager import init_memory_manager, get_memory_manager
 
 load_dotenv()
 
@@ -194,6 +204,45 @@ async def send_slack_message(channel: str, text: str, thread_ts: str = None) -> 
         return False
 
 
+async def call_claude_with_tools(client, model: str, system_prompt: str, messages: list, max_rounds: int = 5) -> str:
+    """Call Claude with tool_use support. Loops until text response or max rounds."""
+    for _ in range(max_rounds):
+        response = client.messages.create(
+            model=model,
+            max_tokens=8192,
+            system=system_prompt,
+            messages=messages,
+            tools=AGENT_TOOLS
+        )
+
+        # Collect all tool uses and text blocks
+        tool_uses = [b for b in response.content if b.type == "tool_use"]
+        text_blocks = [b for b in response.content if b.type == "text"]
+
+        if not tool_uses:
+            # No tool calls — return the text
+            return text_blocks[0].text if text_blocks else "No response"
+
+        # Execute tools and build tool_result messages
+        # First add the assistant message with tool_use blocks
+        messages.append({"role": "assistant", "content": response.content})
+
+        tool_results = []
+        for tu in tool_uses:
+            logger.info(f"🔧 Tool call: {tu.name}({json.dumps(tu.input)[:100]})")
+            result = execute_tool(tu.name, tu.input)
+            logger.info(f"🔧 Tool result: {result[:100]}...")
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": tu.id,
+                "content": result
+            })
+
+        messages.append({"role": "user", "content": tool_results})
+
+    return "Max tool rounds reached. Please try a simpler request."
+
+
 # Initialize Orchestrator
 orchestrator = Orchestrator()
 
@@ -223,7 +272,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -323,10 +372,30 @@ async def startup_heartbeat_monitor():
         )
         monitor = await init_heartbeat_monitor(alert_manager=None, config=config)
         logger.info("✅ Heartbeat monitor initialized and started")
-        return monitor
     except Exception as err:
         logger.error(f"Failed to initialize heartbeat monitor: {err}")
-        return None
+
+    # Initialize event engine (closed-loop system)
+    try:
+        event_engine = init_event_engine()
+        logger.info("✅ Event engine initialized (closed-loop system active)")
+    except Exception as err:
+        logger.error(f"Failed to initialize event engine: {err}")
+
+    # Initialize cron scheduler
+    try:
+        cron = init_cron_scheduler()
+        await cron.start()
+        logger.info(f"✅ Cron scheduler initialized ({len(cron.list_jobs())} jobs)")
+    except Exception as err:
+        logger.error(f"Failed to initialize cron scheduler: {err}")
+
+    # Initialize memory manager
+    try:
+        memory = init_memory_manager()
+        logger.info(f"✅ Memory manager initialized ({memory.count()} memories)")
+    except Exception as err:
+        logger.error(f"Failed to initialize memory manager: {err}")
 
 
 @app.on_event("shutdown")
@@ -337,6 +406,14 @@ async def shutdown_heartbeat_monitor():
         logger.info("✅ Heartbeat monitor stopped")
     except Exception as err:
         logger.error(f"Failed to stop heartbeat monitor: {err}")
+
+    try:
+        cron = get_cron_scheduler()
+        if cron:
+            cron.stop()
+        logger.info("✅ Cron scheduler stopped")
+    except Exception as err:
+        logger.error(f"Failed to stop cron scheduler: {err}")
 
 # Load existing sessions from disk
 def _load_all_sessions():
@@ -592,6 +669,68 @@ REMEMBER:
 Now respond as {orchestrator.agents[agent_role].name} {orchestrator.agents[agent_role].emoji}!
 """
     return base_prompt
+
+
+def build_channel_system_prompt(agent_config: dict) -> str:
+    """Build a rich system prompt for channel handlers (Telegram, Slack) with tools and project context."""
+    name = agent_config.get("name", "Agent")
+    emoji = agent_config.get("emoji", "")
+    persona = agent_config.get("persona", "You are a helpful assistant.")
+    signature = agent_config.get("signature", "")
+    skills = agent_config.get("skills", [])
+    style = agent_config.get("style_guidelines", [])
+
+    skills_str = ", ".join(skills) if skills else "general assistance"
+    style_str = "\n".join(f"- {s}" for s in style) if style else "- Professional and direct"
+
+    prompt = f"""You are {name} {emoji} in the Cybershield AI Agency.
+
+{persona}
+
+YOUR SKILLS: {skills_str}
+
+COMMUNICATION STYLE:
+{style_str}
+
+AVAILABLE TOOLS — USE THEM PROACTIVELY:
+- github_repo_info: Check repo status, issues, PRs, commits for any GitHub repo
+- github_create_issue: File bugs and feature requests on GitHub
+- web_search: Search the web for current information, docs, tutorials
+- create_job: Create tasks in the autonomous job queue
+- list_jobs: View current job queue and status
+- create_proposal: Submit a proposal for auto-approval
+- approve_job: Approve a job for execution
+- get_cost_summary: Check budget and cost status
+
+ACTIVE PROJECTS (user: Miles Sage):
+- Barber CRM (Miles0sage/Barber-CRM) — Next.js + Supabase, AI receptionist live
+- Delhi Palace (Miles0sage/Delhi-Palce-) — Restaurant website on Vercel
+- OpenClaw (this platform) — Multi-agent AI system
+- PrestressCalc (Miles0sage/Mathcad-Scripts) — Engineering calculator, 358 tests
+- Concrete Canoe 2026 — NAU ASCE competition
+
+BEHAVIOR:
+- When someone asks about a repo → use github_repo_info tool
+- When someone asks to create a task → use create_job tool
+- When someone needs current info → use web_search tool
+- When asked about costs/budget → use get_cost_summary tool
+- Think step by step for complex requests
+- Be proactive: suggest next steps, offer to check things
+- Reference specific projects when relevant
+
+Always sign off with: {signature}"""
+
+    # Inject relevant memories
+    try:
+        mm = get_memory_manager()
+        if mm:
+            memory_context = mm.get_context_for_prompt(persona, max_tokens=500)
+            if memory_context:
+                prompt += f"\n\nRELEVANT MEMORIES:\n{memory_context}"
+    except Exception:
+        pass
+
+    return prompt
 
 
 @app.get("/")
@@ -1063,27 +1202,40 @@ async def telegram_webhook(request: Request):
 
             # Create system prompt
             agent_config = CONFIG.get("agents", {}).get(route_decision["agentId"], {})
-            system_prompt = agent_config.get("persona", "You are a helpful assistant.")
+            system_prompt = build_channel_system_prompt(agent_config)
 
-            # Call Claude
-            response = client.messages.create(
-                model=agent_config.get("model", "claude-opus-4-6-20250514"),
-                max_tokens=1024,
-                system=system_prompt,
-                messages=messages_for_api
+            # Call Claude with tools (GitHub, web search, job management)
+            model = agent_config.get("model", "claude-opus-4-6")
+            assistant_message = await call_claude_with_tools(
+                client, model, system_prompt, messages_for_api
             )
-
-            assistant_message = response.content[0].text
 
             # Save to session
             session_history.append({"role": "user", "content": text})
             session_history.append({"role": "assistant", "content": assistant_message})
             save_session_history(session_key, session_history)
 
+            # Auto-extract memories from conversation
+            try:
+                mm = get_memory_manager()
+                if mm:
+                    mm.auto_extract_memories([
+                        {"role": "user", "content": text},
+                        {"role": "assistant", "content": assistant_message}
+                    ])
+            except Exception:
+                pass
+
             logger.info(f"✅ Response generated: {assistant_message[:50]}...")
 
             # Send response back to Telegram
             telegram_token = CONFIG.get("channels", {}).get("telegram", {}).get("botToken", "")
+            # Resolve env var placeholders like ${TELEGRAM_BOT_TOKEN}
+            if telegram_token.startswith("${") and telegram_token.endswith("}"):
+                env_var = telegram_token[2:-1]
+                telegram_token = os.getenv(env_var, "")
+            if not telegram_token:
+                telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
             logger.info(f"🔍 DEBUG: telegram_token length={len(telegram_token)}, starts with: {telegram_token[:20] if telegram_token else 'EMPTY'}")
             if telegram_token:
                 telegram_send_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
@@ -1191,24 +1343,30 @@ async def slack_events(request: Request):
 
                 # Get agent config and call model
                 agent_config = CONFIG.get("agents", {}).get(route_decision["agentId"], {})
-                system_prompt = agent_config.get("persona", "You are a helpful assistant.")
+                system_prompt = build_channel_system_prompt(agent_config)
                 model = agent_config.get("model", "claude-opus-4-6")
 
-                # Call Claude
+                # Call Claude with tools (GitHub, web search, job management)
                 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-                response = client.messages.create(
-                    model=model,
-                    max_tokens=1024,
-                    system=system_prompt,
-                    messages=messages_for_api
+                assistant_message = await call_claude_with_tools(
+                    client, model, system_prompt, messages_for_api
                 )
 
-                assistant_message = response.content[0].text
-
-                # Save to session
+                # Save to session (only user msg + final response, not tool intermediaries)
                 session_history.append({"role": "user", "content": text})
                 session_history.append({"role": "assistant", "content": assistant_message})
                 save_session_history(session_key, session_history)
+
+                # Auto-extract memories from conversation
+                try:
+                    mm = get_memory_manager()
+                    if mm:
+                        mm.auto_extract_memories([
+                            {"role": "user", "content": text},
+                            {"role": "assistant", "content": assistant_message}
+                        ])
+                except Exception:
+                    pass
 
                 logger.info(f"✅ Response generated: {assistant_message[:50]}...")
 
@@ -1217,7 +1375,6 @@ async def slack_events(request: Request):
 
             except Exception as e:
                 logger.error(f"Error processing Slack message: {e}")
-                # Send error message to Slack
                 await send_slack_message(channel_id, f"❌ Error processing message: {str(e)}", thread_ts)
 
         return {"ok": True}
@@ -1853,7 +2010,12 @@ async def create_new_job(request: Request):
         
         job = create_job(project, task, priority)
         logger.info(f"🆕 Job created: {job.id}")
-        
+
+        # Emit event for closed-loop
+        engine = get_event_engine()
+        if engine:
+            engine.emit("job.created", {"job_id": job.id, "project": project, "task": task, "priority": priority})
+
         return {
             "job_id": job.id,
             "project": project,
@@ -1900,11 +2062,259 @@ async def approve_job(job_id: str, request: Request):
         
         update_job_status(job_id, "approved", approved_by=approved_by)
         logger.info(f"✅ Job approved: {job_id}")
-        
+
+        engine = get_event_engine()
+        if engine:
+            engine.emit("job.approved", {"job_id": job_id, "approved_by": approved_by})
+
         return {"job_id": job_id, "status": "approved", "approved_by": approved_by}
     except Exception as e:
         logger.error(f"Job approval error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# CLOSED LOOP — Proposals, Auto-Approval, Events, Policy
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/proposal/create")
+async def api_create_proposal(request: Request):
+    """Create a proposal and run it through auto-approval"""
+    try:
+        data = await request.json()
+        proposal = create_proposal(
+            title=data.get("title", "Untitled"),
+            description=data.get("description", ""),
+            agent_pref=data.get("agent_pref", "project_manager"),
+            tokens_est=data.get("tokens_est", 5000),
+            tags=data.get("tags", []),
+            auto_approve_threshold=data.get("auto_approve_threshold", 50),
+        )
+        logger.info(f"Proposal created: {proposal.id} cost=${proposal.cost_est_usd:.4f}")
+
+        # Emit event
+        engine = get_event_engine()
+        if engine:
+            engine.emit("proposal.created", {"proposal_id": proposal.id, "title": proposal.title, "cost": proposal.cost_est_usd})
+
+        # Run through auto-approval
+        result = auto_approve_and_execute(proposal.to_dict())
+
+        return {
+            "proposal_id": proposal.id,
+            "cost_est_usd": proposal.cost_est_usd,
+            "approval": result,
+        }
+    except Exception as e:
+        logger.error(f"Proposal creation error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/proposals")
+async def api_list_proposals(status: Optional[str] = None):
+    """List proposals, optionally filtered by status"""
+    try:
+        proposals = list_proposals(status=status)
+        return {"proposals": [p.to_dict() for p in proposals], "total": len(proposals)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/proposal/{proposal_id}")
+async def api_get_proposal(proposal_id: str):
+    """Get a single proposal"""
+    try:
+        p = get_proposal(proposal_id)
+        if not p:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return p.to_dict()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/policy")
+async def api_get_policy():
+    """Get current ops policy"""
+    try:
+        return get_policy()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/events")
+async def api_get_events(limit: int = 50, event_type: Optional[str] = None):
+    """Get recent events"""
+    try:
+        engine = get_event_engine()
+        if not engine:
+            return {"events": [], "total": 0}
+        events = engine.get_recent_events(limit=limit, event_type=event_type)
+        return {"events": events, "total": len(events)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# MEMORY & CRON ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/memories")
+async def api_list_memories(tag: Optional[str] = None, limit: int = 20):
+    """List memories, optionally filtered by tag"""
+    try:
+        mm = get_memory_manager()
+        if not mm:
+            return {"memories": [], "total": 0}
+        if tag:
+            memories = mm.get_by_tag(tag)
+        else:
+            memories = mm.get_recent(limit=limit)
+        return {"memories": memories, "total": len(memories)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/memory/add")
+async def api_add_memory(request: Request):
+    """Manually add a memory"""
+    try:
+        data = await request.json()
+        mm = get_memory_manager()
+        if not mm:
+            return JSONResponse({"error": "memory manager not initialized"}, status_code=500)
+        mem_id = mm.add_memory(
+            content=data.get("content", ""),
+            tags=data.get("tags", []),
+            source=data.get("source", "manual"),
+            importance=data.get("importance", 5)
+        )
+        return {"memory_id": mem_id, "status": "saved"}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/cron/jobs")
+async def api_cron_jobs():
+    """List cron jobs"""
+    try:
+        cron = get_cron_scheduler()
+        if not cron:
+            return {"jobs": [], "total": 0}
+        jobs = cron.list_jobs()
+        return {"jobs": jobs, "total": len(jobs)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# SLACK JOB MANAGEMENT — Slash commands + JSON API for job creation
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/slack/create-job")
+async def slack_create_job(request: Request):
+    """Create a job from Slack JSON payload and notify the report channel."""
+    try:
+        data = await request.json()
+        project = data.get("project", "openclaw")
+        task = data.get("task", "General task")
+        priority = data.get("priority", "P1")
+        slack_user = data.get("slack_user_id", "unknown")
+
+        job = create_job(project, task, priority)
+        logger.info(f"✅ Job created from Slack: {job.id} by {slack_user}")
+
+        await send_slack_message(
+            SLACK_REPORT_CHANNEL,
+            f"📋 *New Job Created*\n• *ID:* `{job.id}`\n• *Project:* {project}\n• *Task:* {task}\n• *Priority:* {priority}\n• *Created by:* <@{slack_user}>"
+        )
+
+        return {"success": True, "job_id": job.id, "status": "pending", "message": f"Job created: {job.id}"}
+    except Exception as e:
+        logger.error(f"Slack job creation error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/slack/slash/job")
+async def slack_slash_job(request: Request):
+    """Slack slash command: /job <project> <priority> <task>"""
+    try:
+        form = await request.form()
+        text = form.get("text", "").strip()
+        user_id = form.get("user_id", "unknown")
+
+        if not text:
+            return PlainTextResponse(
+                "Usage: `/job <project> <priority> <task>`\n"
+                "Example: `/job barber-crm P1 Fix booking page`\n"
+                "Projects: barber-crm, openclaw, delhi-palace, prestress-calc"
+            )
+
+        parts = text.split(None, 2)
+        project = parts[0] if len(parts) >= 1 else "openclaw"
+        priority = parts[1].upper() if len(parts) >= 2 and parts[1].upper() in ("P0", "P1", "P2", "P3") else "P1"
+        task = parts[2] if len(parts) >= 3 else text
+        if len(parts) >= 2 and parts[1].upper() not in ("P0", "P1", "P2", "P3"):
+            task = " ".join(parts[1:])
+
+        job = create_job(project, task, priority)
+        logger.info(f"✅ Slash command job: {job.id} by {user_id}")
+
+        await send_slack_message(
+            SLACK_REPORT_CHANNEL,
+            f"📋 *New Job via /job*\n• *ID:* `{job.id}`\n• *Project:* {project}\n• *Task:* {task}\n• *Priority:* {priority}\n• *By:* <@{user_id}>"
+        )
+
+        return PlainTextResponse(f"✅ Job created!\nID: `{job.id}`\nProject: {project} | Priority: {priority}\nTask: {task}")
+    except Exception as e:
+        logger.error(f"Slash command error: {e}")
+        return PlainTextResponse(f"❌ Error: {str(e)}")
+
+
+@app.post("/slack/slash/jobs")
+async def slack_slash_jobs(request: Request):
+    """Slack slash command: /jobs [status] — list recent jobs"""
+    try:
+        form = await request.form()
+        filter_status = form.get("text", "").strip().lower()
+        jobs = list_jobs()
+        if filter_status:
+            jobs = [j for j in jobs if j.get("status") == filter_status]
+        if not jobs:
+            return PlainTextResponse("No jobs found.")
+
+        recent = jobs[-10:]
+        lines = ["*Recent Jobs:*"]
+        for j in reversed(recent):
+            emoji = {"pending": "⏳", "analyzing": "🔍", "code_generated": "💻", "pr_ready": "📝", "approved": "✅", "merged": "🚀", "done": "✅", "failed": "❌"}.get(j.get("status", ""), "❓")
+            lines.append(f"{emoji} `{j['id']}` | {j['project']} | {j.get('status','?')} | {j['task'][:60]}")
+        return PlainTextResponse("\n".join(lines))
+    except Exception as e:
+        return PlainTextResponse(f"❌ Error: {str(e)}")
+
+
+@app.post("/slack/slash/approve")
+async def slack_slash_approve(request: Request):
+    """Slack slash command: /approve <job-id>"""
+    try:
+        form = await request.form()
+        job_id = form.get("text", "").strip()
+        user_id = form.get("user_id", "unknown")
+
+        if not job_id:
+            return PlainTextResponse("Usage: `/approve <job-id>`")
+        job = get_job(job_id)
+        if not job:
+            return PlainTextResponse(f"❌ Job `{job_id}` not found")
+        if job.get("status") != "pr_ready":
+            return PlainTextResponse(f"⚠️ Job `{job_id}` is `{job.get('status')}`, not ready for approval")
+
+        update_job_status(job_id, "approved", approved_by=user_id)
+
+        await send_slack_message(
+            SLACK_REPORT_CHANNEL,
+            f"✅ *Job Approved*\n• *ID:* `{job_id}`\n• *Task:* {job['task']}\n• *Approved by:* <@{user_id}>"
+        )
+        return PlainTextResponse(f"✅ Job `{job_id}` approved! Processor will execute it shortly.")
+    except Exception as e:
+        return PlainTextResponse(f"❌ Error: {str(e)}")
 
 
 if __name__ == "__main__":
@@ -1931,37 +2341,3 @@ if __name__ == "__main__":
 
     print("")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
-
-@app.post("/slack/create-job")
-async def slack_create_job(request: Request):
-    """Create a job from Slack (slash command or button)
-    
-    POST /slack/create-job
-    {
-      "project": "barber-crm",
-      "task": "Fix email notifications",
-      "priority": "P1",
-      "slack_user_id": "U123456"
-    }
-    """
-    try:
-        data = await request.json()
-        project = data.get("project", "openclaw")
-        task = data.get("task", "General task")
-        priority = data.get("priority", "P1")
-        slack_user = data.get("slack_user_id", "unknown")
-        
-        # Create job
-        job = create_job(project, task, priority)
-        
-        logger.info(f"✅ Job created from Slack: {job.id} by {slack_user}")
-        
-        return {
-            "success": True,
-            "job_id": job.id,
-            "status": "pending",
-            "message": f"✅ Job created! ID: {job.id}\nTask: {task}\nProject: {project}\nPriority: {priority}"
-        }
-    except Exception as e:
-        logger.error(f"Slack job creation error: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
