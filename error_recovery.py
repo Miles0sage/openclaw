@@ -42,6 +42,11 @@ from collections import defaultdict
 
 from fastapi import APIRouter, HTTPException
 
+try:
+    from job_manager import update_job_status as _jm_update_status
+except ImportError:
+    _jm_update_status = None
+
 logger = logging.getLogger("error_recovery")
 
 # ---------------------------------------------------------------------------
@@ -520,6 +525,8 @@ class CrashRecovery:
         recovered = []
         unrecoverable = []
 
+        now = datetime.now(timezone.utc)
+
         for job_dir in JOB_RUNS_DIR.iterdir():
             if not job_dir.is_dir():
                 continue
@@ -537,12 +544,30 @@ class CrashRecovery:
                 if progress.get("phase_status") != "running":
                     continue
 
+                # Staleness check: skip jobs updated in the last 60 seconds.
+                # These may have been started by the current process and are
+                # still actively running — not crash leftovers.
+                updated_at = progress.get("updated_at")
+                if updated_at:
+                    try:
+                        updated_dt = datetime.fromisoformat(updated_at)
+                        if updated_dt.tzinfo is None:
+                            updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+                        age_seconds = (now - updated_dt).total_seconds()
+                        if age_seconds < 60:
+                            logger.info(
+                                f"Skipping job {job_id} — updated {age_seconds:.0f}s ago (still fresh)"
+                            )
+                            continue
+                    except (ValueError, TypeError):
+                        pass  # Can't parse timestamp — treat as stale
+
                 # Found an interrupted job
                 last_phase = progress.get("phase", "unknown")
                 step_index = progress.get("step_index", 0)
 
                 recovery_log = {
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": now.isoformat(),
                     "action": "recovery_scheduled",
                     "reason": f"Interrupted at phase={last_phase}, step={step_index}",
                     "original_phase_status": "running",
@@ -554,11 +579,23 @@ class CrashRecovery:
                 with open(recovery_file, "a") as f:
                     f.write(json.dumps(recovery_log) + "\n")
 
-                # Mark as failed with recovery info (will be retried by runner)
+                # Mark progress as failed with recovery info
                 progress["phase_status"] = "failed"
                 progress["error"] = f"Interrupted during {last_phase} phase (recovering)"
+                progress["updated_at"] = now.isoformat()
                 with open(progress_file, "w") as f:
                     json.dump(progress, f, indent=2)
+
+                # Re-queue the job in job_manager so the runner picks it up again.
+                # This is the critical fix: without this, the runner's
+                # get_pending_jobs() never sees recovered jobs because their
+                # status was changed to "analyzing" when the job first started.
+                if _jm_update_status is not None:
+                    try:
+                        _jm_update_status(job_id, "pending")
+                        logger.info(f"Re-queued job {job_id} as pending in job_manager")
+                    except Exception as jm_err:
+                        logger.warning(f"Could not re-queue {job_id} in job_manager: {jm_err}")
 
                 recovered.append({
                     "job_id": job_id,

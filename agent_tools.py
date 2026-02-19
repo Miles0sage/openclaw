@@ -9,6 +9,7 @@ import subprocess
 import json
 import logging
 import shutil
+from pathlib import Path
 import httpx
 
 logger = logging.getLogger("agent_tools")
@@ -1167,13 +1168,27 @@ def _glob_files(pattern: str, path: str = "/root", max_results: int = 50) -> str
     import glob as glob_mod
 
     try:
+        # Skip directories that produce massive results
+        skip_dirs = {"node_modules", ".git", "__pycache__", ".next", "dist", "build", ".cache"}
         search_pattern = os.path.join(path, pattern)
-        matches = glob_mod.glob(search_pattern, recursive=True)
+
+        # Use iglob iterator so we can cap the scan early
+        matches = []
+        scan_limit = max_results * 20  # Scan at most 20x the requested results
+        for i, m in enumerate(glob_mod.iglob(search_pattern, recursive=True)):
+            if i >= scan_limit:
+                break
+            # Skip files inside heavy directories
+            parts = set(Path(m).parts)
+            if parts & skip_dirs:
+                continue
+            if os.path.isfile(m):
+                matches.append(m)
 
         if not matches:
             return f"No files matching '{pattern}' in {path}"
 
-        # Sort by modification time (newest first)
+        # Sort by modification time (newest first) — only on the capped list
         matches.sort(key=lambda f: os.path.getmtime(f) if os.path.exists(f) else 0, reverse=True)
         matches = matches[:max_results]
 
