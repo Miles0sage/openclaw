@@ -29,86 +29,19 @@ from datetime import datetime
 # Import orchestrator
 from orchestrator import Orchestrator, AgentRole, Message as OrchMessage, MessageAudience
 
-# Inline cost tracking (replaces deleted cost_tracker.py)
-_COST_PRICING = {
-    "claude-haiku-4-5-20251001": {"input": 0.8, "output": 4.0},
-    "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
-    "claude-opus-4-6": {"input": 15.0, "output": 75.0},
-    "claude-3-5-haiku-20241022": {"input": 0.8, "output": 4.0},
-    "claude-3-5-sonnet-20241022": {"input": 3.0, "output": 15.0},
-    "kimi-2.5": {"input": 0.14, "output": 0.28},
-    "kimi": {"input": 0.27, "output": 0.68},
-    "m2.5": {"input": 0.30, "output": 1.20},
-}
+# Cost tracking — single source of truth in cost_tracker.py
+from cost_tracker import (
+    COST_PRICING as _COST_PRICING,
+    calculate_cost,
+    log_cost_event,
+    get_cost_log_path,
+    get_cost_metrics,
+    get_cost_summary,
+)
 
 def _calc_cost(model: str, tokens_in: int, tokens_out: int) -> float:
-    pricing = _COST_PRICING.get(model, {"input": 3.0, "output": 15.0})
-    return round((tokens_in * pricing["input"] + tokens_out * pricing["output"]) / 1_000_000, 6)
-
-def log_cost_event(project: str = "openclaw", agent: str = "unknown", model: str = "unknown",
-                   tokens_input: int = 0, tokens_output: int = 0, cost: float = None,
-                   event_type: str = "api_call", metadata: dict = None) -> float:
-    import time as _time
-    calculated_cost = cost if cost is not None else _calc_cost(model, tokens_input, tokens_output)
-    entry = {
-        "timestamp": _time.time(),
-        "type": event_type,
-        "project": project,
-        "agent": agent,
-        "model": model,
-        "tokens_in": tokens_input,
-        "tokens_out": tokens_output,
-        "cost": calculated_cost,
-        "metadata": metadata or {},
-    }
-    cost_path = os.environ.get("OPENCLAW_COSTS_PATH", os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "costs", "costs.jsonl"))
-    try:
-        os.makedirs(os.path.dirname(cost_path), exist_ok=True)
-        with open(cost_path, "a") as _f:
-            import json as _json
-            _f.write(_json.dumps(entry) + "\n")
-    except Exception:
-        pass
-    return calculated_cost
-
-def calculate_cost(model: str, tokens_input: int, tokens_output: int) -> float:
-    return _calc_cost(model, tokens_input, tokens_output)
-
-def get_cost_log_path() -> str:
-    return os.environ.get("OPENCLAW_COSTS_PATH", os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "costs", "costs.jsonl"))
-
-def get_cost_metrics() -> dict:
-    cost_path = get_cost_log_path()
-    entries = []
-    try:
-        with open(cost_path, "r") as _f:
-            for line in _f:
-                line = line.strip()
-                if line:
-                    try:
-                        entries.append(json.loads(line))
-                    except Exception:
-                        pass
-    except FileNotFoundError:
-        pass
-    total = sum(e.get("cost", 0) for e in entries)
-    by_agent = {}
-    for e in entries:
-        a = e.get("agent", "unknown")
-        by_agent[a] = by_agent.get(a, 0) + e.get("cost", 0)
-    return {
-        "total_cost": round(total, 6),
-        "entries_count": len(entries),
-        "by_agent": {k: round(v, 6) for k, v in by_agent.items()},
-        "daily_total": round(total, 6),
-        "monthly_total": round(total, 6),
-        "today_usd": round(total, 6),
-        "month_usd": round(total, 6),
-    }
-
-def get_cost_summary() -> str:
-    m = get_cost_metrics()
-    return f"Total cost: ${m['total_cost']:.4f} across {m['entries_count']} API calls"
+    """Local alias kept for any internal callers."""
+    return calculate_cost(model, tokens_in, tokens_out)
 
 # Inline quota stubs (replaces deleted quota_manager.py — quotas always pass)
 def load_quota_config() -> dict:
@@ -284,8 +217,9 @@ SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
 SLACK_REPORT_CHANNEL = os.getenv("SLACK_REPORT_CHANNEL", "#general")
 
 # Setup logging
+_LOG_LEVEL = os.getenv("OPENCLAW_LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, _LOG_LEVEL, logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     stream=sys.stdout
 )
@@ -296,6 +230,57 @@ DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
 SESSIONS_DIR = pathlib.Path(os.getenv("OPENCLAW_SESSIONS_DIR", os.path.join(DATA_DIR, "sessions")))
 SESSIONS_DIR.mkdir(exist_ok=True)
 logger.info(f"📁 Session storage: {SESSIONS_DIR}")
+
+class SessionStore:
+    """Lazy-loading session store with atomic writes."""
+    def __init__(self, sessions_dir):
+        self._dir = pathlib.Path(sessions_dir)
+        self._cache = {}
+
+    def get(self, key: str) -> list:
+        if key not in self._cache:
+            safe_key = key.replace("/", "_").replace("\\", "_")
+            path = self._dir / f"{safe_key}.json"
+            if path.exists():
+                try:
+                    with open(path) as f:
+                        data = json.load(f)
+                        self._cache[key] = data.get("messages", [])
+                except (json.JSONDecodeError, IOError) as e:
+                    logger.warning(f"Failed to load session {key}: {e}")
+                    self._cache[key] = []
+            else:
+                self._cache[key] = []
+        return self._cache[key]
+
+    def set(self, key: str, messages: list):
+        self._cache[key] = messages
+        safe_key = key.replace("/", "_").replace("\\", "_")
+        path = self._dir / f"{safe_key}.json"
+        tmp = path.with_suffix(".tmp")
+        try:
+            with open(tmp, "w") as f:
+                json.dump({"session_key": key, "messages": messages}, f)
+            tmp.replace(path)  # Atomic rename
+        except IOError as e:
+            logger.error(f"Failed to save session {key}: {e}")
+
+    def keys(self):
+        disk_keys = set()
+        for p in self._dir.glob("*.json"):
+            disk_keys.add(p.stem)
+        return list(set(self._cache.keys()) | disk_keys)
+
+    def __len__(self):
+        return len(self.keys())
+
+    def __contains__(self, key):
+        if key in self._cache:
+            return True
+        safe_key = key.replace("/", "_").replace("\\", "_")
+        return (self._dir / f"{safe_key}.json").exists()
+
+
 
 # Tasks storage for Mission Control
 TASKS_FILE = pathlib.Path(os.path.join(DATA_DIR, "jobs", "tasks.json"))
@@ -560,11 +545,11 @@ async def auth_middleware(request: Request, call_next):
     is_exempt = (path in exempt_paths or
                  path.startswith(("/telegram/", "/slack/", "/api/audit")) or
                  any(path.startswith(prefix) for prefix in dashboard_exempt_prefixes))
-    logger.info(f"AUTH_CHECK: path={path}, is_exempt={is_exempt}")
+    logger.debug(f"AUTH_CHECK: path={path}, is_exempt={is_exempt}")
 
     # Exempt webhook paths
     if is_exempt:
-        logger.info(f"✅ EXEMPT: {path}")
+        logger.debug(f"✅ EXEMPT: {path}")
         return await call_next(request)
 
     # Check auth token
@@ -573,7 +558,7 @@ async def auth_middleware(request: Request, call_next):
         logger.warning(f"❌ AUTH FAILED: {path} (no valid token)")
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
-    logger.info(f"✅ AUTH OK: {path}")
+    logger.debug(f"✅ AUTH OK: {path}")
     return await call_next(request)
 
 @app.middleware("http")
@@ -602,9 +587,25 @@ async def rate_limit_middleware(request: Request, call_next):
     response = await call_next(request)
     return response
 
+def _apply_env_overrides(cfg: dict) -> dict:
+    """Apply OPENCLAW_* environment variable overrides to config."""
+    overrides = {
+        "OPENCLAW_BUDGET": lambda v: cfg.setdefault("cost_gates", {}).update({"per_task_limit": float(v)}),
+        "OPENCLAW_POLL_INTERVAL": lambda v: cfg.setdefault("runner", {}).update({"poll_interval": int(v)}),
+        "OPENCLAW_MAX_CONCURRENT": lambda v: cfg.setdefault("runner", {}).update({"max_concurrent": int(v)}),
+        "OPENCLAW_LOG_LEVEL": lambda v: cfg.setdefault("logging", {}).update({"level": v.upper()}),
+    }
+    for env_key, apply_fn in overrides.items():
+        val = os.getenv(env_key)
+        if val:
+            apply_fn(val)
+            logger.info(f"Config override: {env_key}={val}")
+    return cfg
+
 # Load config
 with open('config.json', 'r') as f:
     CONFIG = json.load(f)
+CONFIG = _apply_env_overrides(CONFIG)
 
 # Initialize Agent Router for intelligent task routing
 agent_router = AgentRouter(config_path='config.json')
@@ -625,7 +626,7 @@ WS_PING_TIMEOUT = 10
 
 # Active connections
 active_connections: Dict[str, WebSocket] = {}
-chat_history: Dict[str, list] = {}
+session_store = SessionStore(SESSIONS_DIR)
 
 # FastAPI startup/shutdown event handlers for heartbeat monitor
 @app.on_event("startup")
@@ -740,21 +741,8 @@ async def shutdown_heartbeat_monitor():
     except Exception as err:
         logger.error(f"Failed to stop cron scheduler: {err}")
 
-# Load existing sessions from disk
-def _load_all_sessions():
-    """Load all existing sessions from disk on startup"""
-    for session_file in SESSIONS_DIR.glob("*.json"):
-        try:
-            with open(session_file, 'r') as f:
-                data = json.load(f)
-                session_key = data.get('session_key', session_file.stem)
-                chat_history[session_key] = data.get('messages', [])
-                logger.info(f"✅ Restored session {session_key}: {len(chat_history[session_key])} messages")
-        except Exception as e:
-            logger.warning(f"Failed to load {session_file}: {e}")
-
-_load_all_sessions()
-logger.info(f"🎉 Loaded {len(chat_history)} sessions from disk")
+# Sessions use lazy loading via SessionStore
+logger.info(f"✅ Session lazy loading enabled — sessions loaded on demand from {SESSIONS_DIR}")
 
 
 class Message(BaseModel):
@@ -1323,13 +1311,23 @@ async def test_version():
         "version": "fixed-2026-02-18"
     }
 
+@app.post("/api/admin/log-level")
+async def set_log_level(request: Request):
+    body = await request.json()
+    level = body.get("level", "INFO").upper()
+    numeric = getattr(logging, level, None)
+    if numeric is None:
+        raise HTTPException(400, detail=f"Invalid log level: {level}")
+    logging.getLogger().setLevel(numeric)
+    return {"level": level, "ok": True}
+
 @app.get("/health")
 async def health():
     """Health check endpoint"""
     return {
         "status": "operational",
         "gateway": "OpenClaw-FIXED-2026-02-18",
-        "version": "2.0.2-DEBUG-LOGGING",
+        "version": "2.1.0",
         "agents_active": len(CONFIG.get("agents", {})),
         "timestamp": datetime.utcnow().isoformat()
     }
@@ -1387,6 +1385,61 @@ async def monitoring_dashboard(request: Request):
             content=f"<h1>Error loading monitoring dashboard</h1><p>{str(e)}</p>",
             status_code=500
         )
+
+
+# ---------------------------------------------------------------------------
+# History trimming — prevents unbounded context growth
+# ---------------------------------------------------------------------------
+MAX_HISTORY_MESSAGES = 40
+SUMMARIZE_THRESHOLD = 30
+
+async def trim_history_if_needed(history: list, client=None) -> list:
+    """Compress old messages when history gets too long.
+    
+    Keeps the last 20 messages verbatim and summarises everything older.
+    Falls back to a plain truncation notice if the summarisation API call fails.
+    """
+    if len(history) <= SUMMARIZE_THRESHOLD:
+        return history
+
+    old = history[:-20]
+    recent = history[-20:]
+
+    # Build a condensed text of the old messages to feed into the summariser
+    summary_parts = []
+    for m in old:
+        content = m.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        summary_parts.append(f"{m.get('role', 'unknown')}: {str(content)[:200]}")
+
+    summary_text = "\n".join(summary_parts)
+
+    if client:
+        try:
+            resp = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=500,
+                    messages=[{
+                        "role": "user",
+                        "content": (
+                            "Summarize this conversation history concisely. "
+                            "Preserve key decisions, completed tasks, and important context:\n\n"
+                            + summary_text
+                        ),
+                    }],
+                ),
+            )
+            summary = resp.content[0].text
+        except Exception as e:
+            logger.warning(f"History summarisation failed, using truncation: {e}")
+            summary = f"[Previous conversation with {len(old)} messages — auto-truncated]"
+    else:
+        summary = f"[Previous conversation with {len(old)} messages — auto-truncated]"
+
+    return [{"role": "assistant", "content": f"[Conversation summary]: {summary}"}] + recent
 
 
 @app.get("/api/agents")
@@ -1509,11 +1562,9 @@ async def chat_endpoint(message: Message):
                 f"({routing.get('reason', '')})\n\n— Overseer"
             )
 
-            if session_key not in chat_history:
-                chat_history[session_key] = load_session_history(session_key)
-            chat_history[session_key].append({"role": "user", "content": message.content})
-            chat_history[session_key].append({"role": "assistant", "content": task_response})
-            save_session_history(session_key, chat_history[session_key])
+            session_store.get(session_key).append({"role": "user", "content": message.content})
+            session_store.get(session_key).append({"role": "assistant", "content": task_response})
+            save_session_history(session_key, session_store.get(session_key))
 
             broadcast_event({"type": "task_created", "agent": "project_manager",
                              "message": f"Task created: {task_match[:80]}",
@@ -1521,7 +1572,7 @@ async def chat_endpoint(message: Message):
 
             return {"response": task_response, "agent": "project_manager", "task_created": new_task,
                     "runner_job_id": jm_job_id,
-                    "sessionKey": session_key, "historyLength": len(chat_history[session_key])}
+                    "sessionKey": session_key, "historyLength": len(session_store.get(session_key))}
         except Exception as e:
             logger.error(f"Task creation failed: {e}")
             # Fall through to normal chat if task creation fails
@@ -1605,8 +1656,6 @@ async def chat_endpoint(message: Message):
 
 
         # Load session history if available
-        if session_key not in chat_history:
-            chat_history[session_key] = load_session_history(session_key)
 
         # Check cache first
         response_cache = get_response_cache()
@@ -1614,9 +1663,9 @@ async def chat_endpoint(message: Message):
             cached = response_cache.get(message.content, agent_id, session_key)
             if cached:
                 # Cache hit - return cached response
-                chat_history[session_key].append({"role": "user", "content": message.content})
-                chat_history[session_key].append({"role": "assistant", "content": cached.response})
-                save_session_history(session_key, chat_history[session_key])
+                session_store.get(session_key).append({"role": "user", "content": message.content})
+                session_store.get(session_key).append({"role": "assistant", "content": cached.response})
+                save_session_history(session_key, session_store.get(session_key))
                 return {
                     "agent": cached.agent_id,
                     "response": cached.response,
@@ -1624,13 +1673,13 @@ async def chat_endpoint(message: Message):
                     "model": cached.model,
                     "tokens": 0,
                     "sessionKey": session_key,
-                    "historyLength": len(chat_history[session_key]),
+                    "historyLength": len(session_store.get(session_key)),
                     "cached": True,
                     "tokens_saved": cached.tokens_saved
                 }
 
         # Add user message to history
-        chat_history[session_key].append({
+        session_store.get(session_key).append({
             "role": "user",
             "content": message.content
         })
@@ -1660,7 +1709,9 @@ async def chat_endpoint(message: Message):
             # Use tool-enabled Claude call
             logger.info(f"🔧 Tool-enabled call for {agent_id}")
             system_prompt = _build_system_prompt(agent_id, agent_config_for_tools)
-            tool_messages = [{"role": m["role"], "content": m["content"]} for m in chat_history[session_key][-10:]]
+            _trimmed_hist = await trim_history_if_needed(
+                session_store.get(session_key), client=anthropic.Anthropic())
+            tool_messages = [{"role": m["role"], "content": m["content"]} for m in _trimmed_hist[-10:]]
 
             model_for_tools = agent_config_for_tools.get("model", "claude-sonnet-4-20250514")
             response_text = await call_claude_with_tools(
@@ -1674,10 +1725,12 @@ async def chat_endpoint(message: Message):
             actual_agent = agent_id
         else:
             # Call model with last 10 messages for context (with auto-escalation)
+            _trimmed_hist2 = await trim_history_if_needed(
+                session_store.get(session_key))
             response_text, tokens, actual_agent = call_model_with_escalation(
                 agent_id,
                 message.content,
-                chat_history[session_key][-10:]
+                _trimmed_hist2[-10:]
             )
         if actual_agent != agent_id:
             logger.info(f"⬆️ Chat escalated: {agent_id} → {actual_agent}")
@@ -1697,13 +1750,13 @@ async def chat_endpoint(message: Message):
             heartbeat.update_activity(agent_id)
 
         # Add assistant response to history
-        chat_history[session_key].append({
+        session_store.get(session_key).append({
             "role": "assistant",
             "content": response_text
         })
 
         # Save session to disk
-        save_session_history(session_key, chat_history[session_key])
+        save_session_history(session_key, session_store.get(session_key))
 
         # ═ DELEGATION: Check if PM wants to delegate sub-tasks to specialists
         # With memory sharing (session context) and auto-escalation
@@ -1715,7 +1768,7 @@ async def chat_endpoint(message: Message):
 
                 # Build shared context from session for memory sharing
                 session_context = ""
-                recent_history = chat_history.get(session_key, [])[-6:]  # Last 3 exchanges
+                recent_history = session_store.get(session_key)[-6:]  # Last 3 exchanges
                 if recent_history:
                     context_parts = []
                     for msg in recent_history:
@@ -1777,8 +1830,8 @@ async def chat_endpoint(message: Message):
                     tokens += extra_tokens + sum(r["tokens"] for r in delegation_results)
 
                     # Update session with synthesized response
-                    chat_history[session_key][-1] = {"role": "assistant", "content": response_text}
-                    save_session_history(session_key, chat_history[session_key])
+                    session_store.get(session_key)[-1] = {"role": "assistant", "content": response_text}
+                    save_session_history(session_key, session_store.get(session_key))
 
         # Broadcast response event
         broadcast_event({"type": "response_end", "agent": agent_id,
@@ -1797,7 +1850,7 @@ async def chat_endpoint(message: Message):
             "model": agent_config.get("model"),
             "tokens": tokens,
             "sessionKey": session_key,
-            "historyLength": len(chat_history[session_key])
+            "historyLength": len(session_store.get(session_key))
         }
 
         if delegation_results:
@@ -1856,9 +1909,7 @@ async def chat_stream_endpoint(message: Message):
         return JSONResponse(status_code=402, content={"success": False, "error": budget_check.message})
 
     # Load session
-    if session_key not in chat_history:
-        chat_history[session_key] = load_session_history(session_key)
-    chat_history[session_key].append({"role": "user", "content": message.content})
+    session_store.get(session_key).append({"role": "user", "content": message.content})
 
     # Build system prompt
     persona = agent_config.get("persona", "")
@@ -1909,9 +1960,11 @@ Remember: You ARE {name}. Stay in character!
             yield f"data: {json.dumps({'type': 'start', 'agent': agent_id, 'model': model, 'provider': provider})}\n\n"
 
             if provider == "anthropic":
+                _trimmed_stream = await trim_history_if_needed(
+                    session_store.get(session_key), client=anthropic_client)
                 with anthropic_client.messages.stream(
                     model=model, max_tokens=8192, system=system_prompt,
-                    messages=chat_history[session_key][-10:]
+                    messages=_trimmed_stream[-10:]
                 ) as stream:
                     for text in stream.text_stream:
                         full_response += text
@@ -1936,8 +1989,8 @@ Remember: You ARE {name}. Stay in character!
                     yield f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
 
             # Save to session
-            chat_history[session_key].append({"role": "assistant", "content": full_response})
-            save_session_history(session_key, chat_history[session_key])
+            session_store.get(session_key).append({"role": "assistant", "content": full_response})
+            save_session_history(session_key, session_store.get(session_key))
 
             # Log cost
             try:
@@ -3012,10 +3065,8 @@ async def handle_websocket(websocket: WebSocket):
                     })
 
                     try:
-                        if session_key not in chat_history:
-                            chat_history[session_key] = []
 
-                        chat_history[session_key].append({
+                        session_store.get(session_key).append({
                             "role": "user",
                             "content": message_text
                         })
@@ -3026,21 +3077,23 @@ async def handle_websocket(websocket: WebSocket):
 
                         # Call CORRECT model
                         logger.info(f"🎯 Routing to agent: {active_agent} ({route_decision['reason']})")
+                        _trimmed_ws = await trim_history_if_needed(
+                            session_store.get(session_key))
                         response_text, tokens = call_model_for_agent(
                             active_agent,
                             message_text,
-                            chat_history[session_key][-10:]  # Last 10 messages
+                            _trimmed_ws[-10:]  # Last 10 messages
                         )
 
                         timestamp = int(asyncio.get_event_loop().time() * 1000)
 
-                        chat_history[session_key].append({
+                        session_store.get(session_key).append({
                             "role": "assistant",
                             "content": response_text
                         })
 
                         # Save session to disk
-                        save_session_history(session_key, chat_history[session_key])
+                        save_session_history(session_key, session_store.get(session_key))
 
                         # Send response
                         await websocket.send_json({

@@ -73,6 +73,7 @@ class ErrorType(str, Enum):
     VALIDATION_ERROR = "validation_error"  # 400
     NOT_FOUND = "not_found"            # 404
     UNKNOWN = "unknown"
+    BILLING = "billing"           # 402 / credit exhausted
 
 
 class CircuitBreakerStateEnum(str, Enum):
@@ -231,6 +232,10 @@ def _should_retry(
     if error_type == ErrorType.NOT_FOUND:
         return False, 0.0
 
+    # Billing errors never retry — credits are exhausted, retrying won't help
+    if error_type == ErrorType.BILLING:
+        return False, 0.0
+
     # Rate limits: respect Retry-After header if present
     if error_type == ErrorType.RATE_LIMIT:
         wait_time = _extract_retry_after_header(error)
@@ -274,6 +279,14 @@ def _classify_error(error: Exception) -> ErrorType:
     """Classify an error to determine retry strategy."""
     error_str = str(error).lower()
     error_type_name = type(error).__name__.lower()
+
+    # Billing / credit exhaustion (check before rate limit so 402 isn't misclassified)
+    _BILLING_SIGNALS = [
+        "402", "credit", "insufficient_quota", "payment_required",
+        "billing", "balance", "top up", "exhausted", "credit balance is too low",
+    ]
+    if any(sig in error_str for sig in _BILLING_SIGNALS):
+        return ErrorType.BILLING
 
     # Rate limit
     if "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
@@ -322,6 +335,140 @@ def _extract_retry_after_header(error: Exception) -> Optional[float]:
             return float(match.group(1))
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Provider Cooldown Tracker
+# ---------------------------------------------------------------------------
+
+import threading as _threading
+
+class ProviderCooldownTracker:
+    """
+    Tracks billing and rate-limit failures per provider and enforces cooldowns.
+
+    Billing cooldown (exponential, capped at 24h):
+        wait = min(24h, 5h * 2^(n-1))   where n = consecutive billing failures
+
+    Rate-limit cooldown (stepped, capped at 1h):
+        1min → 5min → 25min → 60min
+
+    Methods
+    -------
+    mark_failure(provider, error_type)
+        Record a failure for the given provider.
+    is_available(provider) -> (bool, reason_str)
+        Return whether the provider can be used right now.
+    mark_success(provider)
+        Reset consecutive-failure counters on success.
+    """
+
+    _BILLING_STEPS_HOURS = [5, 10, 20, 24]   # hours; last value is the cap
+    _RATE_LIMIT_STEPS_MIN = [1, 5, 25, 60]   # minutes; last value is the cap
+
+    def __init__(self):
+        self._lock = _threading.Lock()
+        # Per-provider state
+        self._billing_failures: Dict[str, int] = {}       # consecutive billing failures
+        self._billing_cooldown_until: Dict[str, float] = {}  # epoch seconds
+        self._rate_failures: Dict[str, int] = {}           # consecutive rate-limit failures
+        self._rate_cooldown_until: Dict[str, float] = {}   # epoch seconds
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def mark_failure(self, provider: str, error_type: "ErrorType") -> None:
+        """Record a failure and update the appropriate cooldown."""
+        with self._lock:
+            if error_type == ErrorType.BILLING:
+                self._record_billing_failure(provider)
+            elif error_type == ErrorType.RATE_LIMIT:
+                self._record_rate_failure(provider)
+            # Other error types do not affect provider-level cooldowns
+
+    def is_available(self, provider: str) -> tuple[bool, str]:
+        """
+        Return (available, reason).
+
+        If available: (True, "")
+        If not: (False, human-readable reason with time remaining)
+        """
+        now = time.time()
+        with self._lock:
+            # Billing cooldown takes priority
+            billing_until = self._billing_cooldown_until.get(provider, 0.0)
+            if now < billing_until:
+                remaining = billing_until - now
+                hrs = remaining / 3600
+                reason = (
+                    f"Provider '{provider}' is in billing cooldown for "
+                    f"{hrs:.1f}h more (credit exhaustion)"
+                )
+                return False, reason
+
+            # Rate-limit cooldown
+            rate_until = self._rate_cooldown_until.get(provider, 0.0)
+            if now < rate_until:
+                remaining = rate_until - now
+                mins = remaining / 60
+                reason = (
+                    f"Provider '{provider}' is in rate-limit cooldown for "
+                    f"{mins:.1f}min more"
+                )
+                return False, reason
+
+        return True, ""
+
+    def mark_success(self, provider: str) -> None:
+        """Reset failure counters after a successful call."""
+        with self._lock:
+            self._billing_failures.pop(provider, None)
+            self._billing_cooldown_until.pop(provider, None)
+            self._rate_failures.pop(provider, None)
+            self._rate_cooldown_until.pop(provider, None)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _record_billing_failure(self, provider: str) -> None:
+        """Update billing failure count and set cooldown (called under lock)."""
+        n = self._billing_failures.get(provider, 0) + 1
+        self._billing_failures[provider] = n
+
+        # min(24h, 5h * 2^(n-1))
+        raw_hours = 5 * (2 ** (n - 1))
+        hours = min(24, raw_hours)
+        cooldown_sec = hours * 3600
+
+        self._billing_cooldown_until[provider] = time.time() + cooldown_sec
+        logger.warning(
+            f"Provider '{provider}' entered billing cooldown for {hours:.0f}h "
+            f"(consecutive billing failure #{n}). "
+            f"Check API credits at the provider dashboard."
+        )
+
+    def _record_rate_failure(self, provider: str) -> None:
+        """Update rate-limit failure count and set cooldown (called under lock)."""
+        n = self._rate_failures.get(provider, 0) + 1
+        self._rate_failures[provider] = n
+
+        # stepped: 1min, 5min, 25min, 60min (index capped at last element)
+        idx = min(n - 1, len(self._RATE_LIMIT_STEPS_MIN) - 1)
+        minutes = self._RATE_LIMIT_STEPS_MIN[idx]
+        cooldown_sec = minutes * 60
+
+        self._rate_cooldown_until[provider] = time.time() + cooldown_sec
+        logger.debug(
+            f"Provider '{provider}' rate-limit cooldown: {minutes}min "
+            f"(consecutive failure #{n})"
+        )
+
+
+# Module-level singleton — import and use directly:
+#   from error_recovery import provider_cooldowns
+provider_cooldowns = ProviderCooldownTracker()
 
 
 # ---------------------------------------------------------------------------

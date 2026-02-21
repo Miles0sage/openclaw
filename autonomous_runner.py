@@ -37,43 +37,12 @@ from typing import Optional
 
 from agent_tools import execute_tool, AGENT_TOOLS
 from job_manager import get_job, update_job_status, list_jobs, get_pending_jobs
-# cost_tracker removed — import inline stubs from gateway at runtime to avoid circular import
-# log_cost_event, calculate_cost, get_cost_metrics are defined inline in gateway.py
-# We redefine minimal versions here to avoid import errors
-
-import json as _json_ct
-import os as _os_ct
-import time as _time_ct
-
-_CT_PRICING = {
-    "claude-haiku-4-5-20251001": {"input": 0.8, "output": 4.0},
-    "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
-    "claude-opus-4-6": {"input": 15.0, "output": 75.0},
-    "kimi-2.5": {"input": 0.14, "output": 0.28},
-    "kimi": {"input": 0.27, "output": 0.68},
-    "m2.5": {"input": 0.30, "output": 1.20},
-}
-
-def calculate_cost(model: str, tokens_input: int, tokens_output: int) -> float:
-    pricing = _CT_PRICING.get(model, {"input": 3.0, "output": 15.0})
-    return round((tokens_input * pricing["input"] + tokens_output * pricing["output"]) / 1_000_000, 6)
-
-def log_cost_event(project: str = "openclaw", agent: str = "unknown", model: str = "unknown",
-                   tokens_input: int = 0, tokens_output: int = 0, cost: float = None, **kwargs) -> float:
-    calculated = cost if cost is not None else calculate_cost(model, tokens_input, tokens_output)
-    entry = {"timestamp": _time_ct.time(), "project": project, "agent": agent, "model": model,
-             "tokens_in": tokens_input, "tokens_out": tokens_output, "cost": calculated}
-    cost_path = _os_ct.environ.get("OPENCLAW_COSTS_PATH", _os_ct.path.join(_os_ct.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "costs", "costs.jsonl"))
-    try:
-        with open(cost_path, "a") as _f:
-            _f.write(_json_ct.dumps(entry) + "\n")
-    except Exception:
-        pass
-    return calculated
-
-def get_cost_metrics() -> dict:
-    return {"total_cost": 0.0, "entries_count": 0, "by_agent": {}}
-
+# Cost tracking — import from cost_tracker (single source of truth)
+from cost_tracker import (
+    calculate_cost,
+    log_cost_event,
+    get_cost_metrics,
+)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -1180,6 +1149,7 @@ class AutonomousRunner:
         self._progress: dict[str, JobProgress] = {}          # job_id -> JobProgress
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._cancelled_jobs: set = set()
+        self._job_available: asyncio.Event = asyncio.Event()
 
         # Ensure directories exist
         JOB_RUNS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1203,6 +1173,10 @@ class AutonomousRunner:
         self._semaphore = asyncio.Semaphore(self.max_concurrent)
         self._poll_task = asyncio.create_task(self._poll_loop())
         logger.info("AutonomousRunner STARTED — polling for jobs")
+
+    def notify_new_job(self):
+        """Signal the poll loop that a new job is available, waking it immediately."""
+        self._job_available.set()
 
     async def stop(self):
         """Gracefully stop the runner. Waits for active jobs to finish."""
@@ -1326,7 +1300,12 @@ class AutonomousRunner:
             except Exception as e:
                 logger.error(f"Poll loop error: {e}")
 
-            await asyncio.sleep(self.poll_interval)
+            self._job_available.clear()
+            try:
+                await asyncio.wait_for(self._job_available.wait(), timeout=self.poll_interval)
+                logger.debug("Job queue signaled — checking for new jobs")
+            except asyncio.TimeoutError:
+                pass  # Normal periodic poll
 
     async def _execute_with_semaphore(self, job: dict):
         """Wraps job execution with the concurrency semaphore."""

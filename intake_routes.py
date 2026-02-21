@@ -10,7 +10,7 @@ Endpoints for the client-facing job intake portal:
 - GET  /api/intake/stats   — Dashboard statistics
 """
 
-from fastapi import APIRouter, HTTPException, Query, Path
+from fastapi import APIRouter, HTTPException, Query, Path, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
@@ -19,6 +19,7 @@ import os
 import uuid
 import logging
 from datetime import datetime, timezone
+from client_auth import authenticate_client, can_submit_job, deduct_job_credit
 
 router = APIRouter(tags=["intake"])
 logger = logging.getLogger("openclaw_intake")
@@ -104,13 +105,40 @@ class IntakeResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.post("/api/intake", response_model=IntakeResponse)
-async def submit_intake(req: IntakeRequest) -> IntakeResponse:
+async def submit_intake(req: IntakeRequest, request: Request) -> IntakeResponse:
     """
     Accept a new client job submission.
 
+    Requires X-Client-Key header for authentication.
     Validates input, creates a job record with status 'queued',
     assigns a default agent based on task type, and returns the job ID.
     """
+    # Extract and validate X-Client-Key header
+    client_key = request.headers.get("X-Client-Key")
+    if not client_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing X-Client-Key header",
+        )
+    
+    # Authenticate the client
+    client = authenticate_client(client_key)
+    if not client:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired X-Client-Key",
+        )
+    
+    client_id = client.get("client_id")
+    
+    # Check if client can submit a job (respects plan limits and billing cycle)
+    can_submit, reason = can_submit_job(client)
+    if not can_submit:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Cannot submit job: {reason}",
+        )
+    
     # Validate enums
     if req.task_type not in VALID_TASK_TYPES:
         raise HTTPException(
@@ -134,6 +162,7 @@ async def submit_intake(req: IntakeRequest) -> IntakeResponse:
 
     job = {
         "job_id": job_id,
+        "client_id": client_id,
         "project_name": req.project_name,
         "description": req.description,
         "task_type": req.task_type,
@@ -156,14 +185,34 @@ async def submit_intake(req: IntakeRequest) -> IntakeResponse:
     jobs[job_id] = job
     _save_jobs(jobs)
 
+    # Deduct credit from client for job submission
+    deduct_success = deduct_job_credit(client_id)
+    if deduct_success:
+        logger.info("Credit deducted for job %s from client %s", job_id[:8], client_id[:8])
+        job["logs"].append({"timestamp": _now_iso(), "message": "Credit deducted from account"})
+        _save_jobs(jobs)
+    else:
+        logger.warning("Failed to deduct credit for job %s from client %s", job_id[:8], client_id[:8])
+
     # Also register with job_manager so the autonomous runner picks it up
     try:
         from job_manager import create_job as jm_create_job
         jm_job = jm_create_job(req.project_name, req.description, req.priority)
         job["jm_job_id"] = jm_job.id
         _save_jobs(jobs)
+        logger.info("Registered with job_manager as %s", jm_job.id)
     except Exception as e:
         logger.warning("Failed to register with job_manager: %s", e)
+
+    # Signal the autonomous runner to wake up immediately (event-driven, no poll delay)
+    try:
+        import gateway as _gw
+        runner = getattr(_gw, "runner", None)
+        if runner is not None and hasattr(runner, "notify_new_job"):
+            runner.notify_new_job()
+            logger.debug("Runner signaled for new job %s", job_id[:8])
+    except Exception as e:
+        logger.debug("Could not signal runner (non-fatal): %s", e)
 
     logger.info("New intake job %s — %s (%s)", job_id[:8], req.project_name, req.task_type)
 

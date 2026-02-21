@@ -70,19 +70,21 @@ def get_job(job_id: str) -> dict:
                 return job
     return None
 
-def get_pending_jobs():
-    """Get all pending jobs"""
+def get_pending_jobs(limit: int = 10):
+    """Get pending jobs up to the given limit (default 10)."""
     if not JOBS_FILE.exists():
         return []
-    
+
     jobs = []
     with open(JOBS_FILE, "r") as f:
         for line in f:
             job = json.loads(line)
             if job["status"] == "pending":
                 jobs.append(job)
-    
-    return jobs[:1]  # Process one at a time
+                if len(jobs) >= limit:
+                    break
+
+    return jobs
 
 def update_job_status(job_id: str, status: str, **kwargs):
     """Update job status"""
