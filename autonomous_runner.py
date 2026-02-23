@@ -327,17 +327,38 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
         # Get the event loop once before the iteration loop (Python 3.10+ compatible)
         loop = asyncio.get_running_loop()
 
+        # Cache system prompt (doesn't change between iterations)
+        cached_system = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}] if isinstance(system_prompt, str) else system_prompt
+
+        # Cache tool definitions (they don't change between calls)
+        cached_tools = list(tools) if tools else []
+        if cached_tools:
+            cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
+
         # Tool-use loop: agent may request tools multiple times.
         # Loop continues until Claude returns stop_reason="end_turn" with no tool_use blocks.
         iterations = 0
         while iterations < MAX_TOOL_ITERATIONS:
             iterations += 1
 
+            # Cache conversation prefix — mark last user message so the prefix is cached
+            if messages and len(messages) >= 2:
+                for i in range(len(messages) - 1, -1, -1):
+                    if messages[i]["role"] == "user":
+                        content = messages[i]["content"]
+                        if isinstance(content, str):
+                            messages[i]["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+                        elif isinstance(content, list):
+                            last_block = content[-1]
+                            if isinstance(last_block, dict) and "cache_control" not in last_block:
+                                content[-1] = {**last_block, "cache_control": {"type": "ephemeral"}}
+                        break
+
             # Snapshot current messages list length to avoid lambda closure mutation issues
             _current_messages = list(messages)
             _current_model = model
-            _current_tools = tools
-            _current_system = system_prompt
+            _current_tools = cached_tools or tools
+            _current_system = cached_system
 
             response = await loop.run_in_executor(
                 None,

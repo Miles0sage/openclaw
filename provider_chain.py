@@ -287,9 +287,26 @@ def _call_anthropic(
         "messages":   messages,
     }
     if system:
-        kwargs["system"] = system
+        kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
     if tools:
-        kwargs["tools"] = tools
+        # Cache tool definitions (they don't change between calls)
+        cached_tools = list(tools)
+        if cached_tools:
+            cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
+        kwargs["tools"] = cached_tools
+
+    # Cache conversation prefix — mark last user message
+    if messages and len(messages) >= 2:
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i]["role"] == "user":
+                content = messages[i]["content"]
+                if isinstance(content, str):
+                    messages[i]["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+                elif isinstance(content, list):
+                    last_block = content[-1]
+                    if isinstance(last_block, dict) and "cache_control" not in last_block:
+                        content[-1] = {**last_block, "cache_control": {"type": "ephemeral"}}
+                break
 
     response = client.messages.create(**kwargs)
 

@@ -448,16 +448,34 @@ async def call_claude_with_tools(client, model: str, system_prompt: str, message
     Runs synchronous Anthropic client in a thread pool to avoid blocking the event loop."""
     loop = asyncio.get_event_loop()
 
+    # Cache tool definitions (they don't change between calls)
+    cached_tools = list(AGENT_TOOLS)
+    if cached_tools:
+        cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
+
     for _ in range(max_rounds):
+        # Cache conversation prefix — mark last user message so the prefix is cached
+        if messages and len(messages) >= 2:
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i]["role"] == "user":
+                    content = messages[i]["content"]
+                    if isinstance(content, str):
+                        messages[i]["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+                    elif isinstance(content, list):
+                        last_block = content[-1]
+                        if isinstance(last_block, dict) and "cache_control" not in last_block:
+                            content[-1] = {**last_block, "cache_control": {"type": "ephemeral"}}
+                    break
+
         # Run synchronous API call in thread pool so we don't block the event loop
         response = await loop.run_in_executor(
             None,
             lambda: client.messages.create(
                 model=model,
                 max_tokens=8192,
-                system=system_prompt,
+                system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
                 messages=messages,
-                tools=AGENT_TOOLS
+                tools=cached_tools
             )
         )
 
@@ -753,6 +771,32 @@ class Message(BaseModel):
     use_tools: Optional[bool] = None  # Enable tool_use (auto-detected if None)
 
 
+class VisionRequest(BaseModel):
+    image: str  # base64-encoded JPEG image
+    query: str = "describe"  # Query type: describe, read_text, translate, remember, identify
+    session_key: Optional[str] = None
+    language: Optional[str] = None  # Target language for translate query
+    device_id: Optional[str] = None  # Device identifier for rate limiting
+
+
+# Rate limiter for vision endpoint: max 10 images/minute per device_id
+_vision_rate_limits: Dict[str, list] = {}  # {device_id: [timestamp, ...]}
+
+def _check_vision_rate_limit(device_id: str, max_requests: int = 10, window_seconds: int = 60) -> bool:
+    """Check if device_id has exceeded vision rate limit. Returns True if allowed."""
+    now = time.time()
+    if device_id not in _vision_rate_limits:
+        _vision_rate_limits[device_id] = []
+    # Prune old entries
+    _vision_rate_limits[device_id] = [
+        ts for ts in _vision_rate_limits[device_id] if now - ts < window_seconds
+    ]
+    if len(_vision_rate_limits[device_id]) >= max_requests:
+        return False
+    _vision_rate_limits[device_id].append(now)
+    return True
+
+
 def _build_system_prompt(agent_key: str, agent_config: dict = None) -> str:
     """Build system prompt for an agent (reused by tool calls and direct calls)."""
     if not agent_config:
@@ -1011,12 +1055,13 @@ Remember: You ARE {name}. Stay in character!
         ollama_prompt = f"{full_prompt}{ollama_suffix}"
         return call_ollama(model, ollama_prompt, endpoint)
     elif provider == "anthropic":
-        # For Anthropic, use system parameter with full identity stack
+        # For Anthropic, use system parameter with full identity stack + prompt caching
+        cached_system = [{"type": "text", "text": anthropic_system, "cache_control": {"type": "ephemeral"}}]
         if conversation:
             response = anthropic_client.messages.create(
                 model=model,
                 max_tokens=8192,
-                system=anthropic_system,
+                system=cached_system,
                 messages=conversation
             )
             response_text = response.content[0].text
@@ -1026,7 +1071,7 @@ Remember: You ARE {name}. Stay in character!
             response = anthropic_client.messages.create(
                 model=model,
                 max_tokens=8192,
-                system=anthropic_system,
+                system=cached_system,
                 messages=[{"role": "user", "content": prompt}]
             )
             response_text = response.content[0].text
@@ -1866,6 +1911,196 @@ async def chat_endpoint(message: Message):
             heartbeat.unregister_agent(agent_id)
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# VISION ENDPOINT — Smart Glasses Image Processing
+# Processes images via Claude Haiku 4.5 vision for real-time scene
+# description, OCR, translation, object identification, and memory.
+# ═══════════════════════════════════════════════════════════════════════
+
+# System prompts for each vision query type
+_VISION_SYSTEM_PROMPTS = {
+    "describe": (
+        "You analyze images from smart glasses in real-time. Describe the scene concisely "
+        "in under 100 words. Focus on what is most important or actionable for the wearer. "
+        "Mention key objects, people count, environment type, and any notable activity."
+    ),
+    "read_text": (
+        "You are an OCR assistant for smart glasses. Extract ALL visible text from the image "
+        "accurately. Preserve formatting where possible (signs, labels, screens, documents). "
+        "If text is partially obscured, indicate uncertain characters with [?]. "
+        "Return only the extracted text, no commentary."
+    ),
+    "translate": (
+        "You are a real-time translation assistant for smart glasses. Extract any visible text "
+        "from the image and translate it to {language}. Format as:\n"
+        "Original: <extracted text>\nTranslation: <translated text>\n"
+        "If multiple text elements are visible, translate each one."
+    ),
+    "remember": (
+        "You are a visual memory assistant for smart glasses. Analyze this image and create "
+        "a structured memory tag for later recall. Include:\n"
+        "- Scene type (indoor/outdoor, location type)\n"
+        "- Key objects and their positions\n"
+        "- Any text or signage visible\n"
+        "- People (count, general description, no identifying features)\n"
+        "- Timestamp context clues (lighting, shadows)\n"
+        "Format as a compact JSON-like summary for storage."
+    ),
+    "identify": (
+        "You are an object identification assistant for smart glasses. List every distinct "
+        "object visible in the image. Format as a numbered list. Include:\n"
+        "- Object name\n"
+        "- Approximate position (left/center/right, foreground/background)\n"
+        "- Notable attributes (color, size, state)\n"
+        "Be thorough but concise. Keep each entry to one line."
+    ),
+}
+
+
+@app.post("/api/vision")
+async def vision_endpoint(req: VisionRequest):
+    """Process images from smart glasses using Claude Haiku 4.5 vision.
+
+    Query types:
+    - describe: Concise scene description
+    - read_text: OCR text extraction
+    - translate: Extract and translate visible text (requires language param)
+    - remember: Tag image for memory/recall storage
+    - identify: List all objects in scene
+    """
+    # Validate query type
+    valid_queries = {"describe", "read_text", "translate", "remember", "identify"}
+    query_type = req.query.lower().strip()
+    if query_type not in valid_queries:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid query type '{req.query}'. Must be one of: {', '.join(sorted(valid_queries))}"
+        )
+
+    # Validate language for translate query
+    if query_type == "translate" and not req.language:
+        raise HTTPException(
+            status_code=400,
+            detail="Language parameter is required for 'translate' query type"
+        )
+
+    # Rate limiting per device_id
+    device_id = req.device_id or "anonymous"
+    if not _check_vision_rate_limit(device_id):
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded: max 10 images per minute per device"
+        )
+
+    # Validate base64 image
+    import base64 as _b64
+    try:
+        image_bytes = _b64.b64decode(req.image, validate=True)
+        if len(image_bytes) < 100:
+            raise ValueError("Image too small")
+        if len(image_bytes) > 20 * 1024 * 1024:  # 20MB max
+            raise ValueError("Image exceeds 20MB limit")
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid base64 image: {e}"
+        )
+
+    # Build system prompt
+    system_prompt = _VISION_SYSTEM_PROMPTS[query_type]
+    if query_type == "translate":
+        system_prompt = system_prompt.format(language=req.language)
+
+    # Build user prompt based on query type
+    user_prompts = {
+        "describe": "Describe this scene concisely.",
+        "read_text": "Read and extract all text visible in this image.",
+        "translate": f"Extract all visible text and translate it to {req.language}.",
+        "remember": "Analyze this image and create a structured memory tag for later recall.",
+        "identify": "Identify and list all objects visible in this image.",
+    }
+    user_prompt = user_prompts[query_type]
+
+    # Call Claude Haiku 4.5 vision API
+    try:
+        response = anthropic_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+            system=system_prompt,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": req.image,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": user_prompt,
+                    },
+                ],
+            }],
+        )
+    except anthropic.BadRequestError as e:
+        logger.error(f"Vision API bad request: {e}")
+        raise HTTPException(status_code=400, detail=f"Vision API error: {e}")
+    except anthropic.RateLimitError as e:
+        logger.error(f"Vision API rate limited: {e}")
+        raise HTTPException(status_code=429, detail="Anthropic API rate limit reached. Try again shortly.")
+    except Exception as e:
+        logger.error(f"Vision API call failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Vision processing failed: {e}")
+
+    # Extract response text
+    result_text = response.content[0].text if response.content else ""
+
+    # Calculate cost
+    tokens_in = response.usage.input_tokens
+    tokens_out = response.usage.output_tokens
+    cost_usd = _calc_cost("claude-haiku-4-5-20251001", tokens_in, tokens_out)
+
+    # Log cost event
+    log_cost_event(
+        model="claude-haiku-4-5-20251001",
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        cost_usd=cost_usd,
+        agent="vision_agent",
+        endpoint="/api/vision",
+    )
+
+    # Handle "remember" query: store to session memory if session_key provided
+    stored = False
+    if query_type == "remember" and req.session_key:
+        try:
+            session_store.get(req.session_key).append({
+                "role": "assistant",
+                "content": f"[Visual Memory] {result_text}",
+            })
+            save_session_history(req.session_key, session_store.get(req.session_key))
+            stored = True
+        except Exception as e:
+            logger.warning(f"Failed to store visual memory: {e}")
+
+    logger.info(
+        f"Vision processed: query={query_type} device={device_id} "
+        f"tokens_in={tokens_in} tokens_out={tokens_out} cost=${cost_usd:.4f}"
+    )
+
+    return {
+        "text": result_text,
+        "query_type": query_type,
+        "agent": "vision_agent",
+        "cost_usd": round(cost_usd, 6),
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "stored": stored,
+    }
+
+
 @app.post("/api/chat/stream")
 async def chat_stream_endpoint(message: Message):
     """REST chat with SSE streaming for real-time token delivery.
@@ -1963,7 +2198,8 @@ Remember: You ARE {name}. Stay in character!
                 _trimmed_stream = await trim_history_if_needed(
                     session_store.get(session_key), client=anthropic_client)
                 with anthropic_client.messages.stream(
-                    model=model, max_tokens=8192, system=system_prompt,
+                    model=model, max_tokens=8192,
+                    system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
                     messages=_trimmed_stream[-10:]
                 ) as stream:
                     for text in stream.text_stream:

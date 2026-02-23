@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import type { startGatewayServer } from "../../gateway/server.js";
 import type { defaultRuntime } from "../../runtime.js";
 import { acquireGatewayLock } from "../../infra/gateway-lock.js";
@@ -9,6 +10,53 @@ import { createSubsystemLogger } from "../../logging/subsystem.js";
 
 const gatewayLog = createSubsystemLogger("gateway");
 
+// ---------------------------------------------------------------------------
+// systemd watchdog integration
+// ---------------------------------------------------------------------------
+// When WATCHDOG_USEC is set (i.e. the service has WatchdogSec configured),
+// we periodically call `systemd-notify WATCHDOG=1` to prove liveness.
+// We also send READY=1 on startup so systemd knows the service is up (Type=notify).
+// ---------------------------------------------------------------------------
+
+function sdNotify(state: string): void {
+  try {
+    execFile("systemd-notify", [state], (err) => {
+      if (err) {
+        // Non-fatal: systemd-notify may not be available outside systemd.
+        gatewayLog.debug?.(`systemd-notify ${state} failed: ${String(err)}`);
+      }
+    });
+  } catch {
+    // execFile itself can throw if the binary is missing.
+  }
+}
+
+function startSystemdWatchdog(): (() => void) | null {
+  const watchdogUsec = process.env.WATCHDOG_USEC;
+  if (!watchdogUsec) {
+    return null;
+  }
+  const intervalUs = Number(watchdogUsec);
+  if (!Number.isFinite(intervalUs) || intervalUs <= 0) {
+    return null;
+  }
+  // Ping at half the watchdog interval to stay well within the deadline.
+  const intervalMs = Math.max(1000, Math.floor(intervalUs / 1000 / 2));
+  gatewayLog.info(`systemd watchdog: pinging every ${intervalMs}ms (deadline ${intervalUs}µs)`);
+
+  // Notify systemd the service is ready.
+  sdNotify("--ready");
+
+  const timer = setInterval(() => {
+    sdNotify("WATCHDOG=1");
+  }, intervalMs);
+  // Ensure the timer does not keep the process alive on shutdown.
+  if (typeof timer === "object" && "unref" in timer) {
+    timer.unref();
+  }
+  return () => clearInterval(timer);
+}
+
 type GatewayRunSignalAction = "stop" | "restart";
 
 export async function runGatewayLoop(params: {
@@ -16,6 +64,7 @@ export async function runGatewayLoop(params: {
   runtime: typeof defaultRuntime;
 }) {
   const lock = await acquireGatewayLock();
+  const stopWatchdog = startSystemdWatchdog();
   let server: Awaited<ReturnType<typeof startGatewayServer>> | null = null;
   let shuttingDown = false;
   let restartResolver: (() => void) | null = null;
@@ -98,6 +147,8 @@ export async function runGatewayLoop(params: {
       });
     }
   } finally {
+    stopWatchdog?.();
+    sdNotify("STOPPING=1");
     await lock?.release();
     cleanupSignals();
   }

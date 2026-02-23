@@ -8,7 +8,7 @@ Features:
 3. Performance Caching - Caches routing decisions for 5 min (sub-50ms latency)
 4. Fallback to Keyword Matching - Works offline without embeddings
 
-Routes queries to: project_manager, coder_agent, hacker_agent, or database_agent
+Routes queries to: project_manager, coder_agent, hacker_agent, database_agent, or vision_agent
 """
 
 import re
@@ -99,6 +99,17 @@ class AgentRouter:
                 "schema_exploration", "rls_policy_analysis", "real_time_subscriptions",
                 "transaction_handling", "data_validation"
             ]
+        },
+        "vision_agent": {
+            "id": "vision_agent",
+            "name": "Vision AI",
+            "model": "claude-haiku-4-5-20251001",  # Fast vision processing
+            "cost_per_token": 0.0005,  # $0.50/M input tokens
+            "cost_tier": "economy",
+            "skills": [
+                "scene_description", "ocr", "object_identification", "translation",
+                "visual_qa", "image_analysis", "text_extraction", "smart_glasses"
+            ]
         }
     }
 
@@ -136,6 +147,14 @@ class AgentRouter:
         "design", "approach", "workflow", "process", "milestone", "deadline",
         "estimate", "estimation", "breakdown", "decompose", "coordinate",
         "manage", "organize", "project", "phase", "sprint", "agile"
+    ]
+
+    VISION_KEYWORDS = [
+        "image", "photo", "picture", "camera", "vision", "see", "look",
+        "glasses", "smart glasses", "scene", "describe scene", "ocr",
+        "read text", "translate sign", "identify object", "what is this",
+        "what do you see", "recognize", "visual", "snapshot", "capture",
+        "scan", "barcode", "qr code", "label", "sign"
     ]
 
     COMPLEX_CODE_KEYWORDS = [
@@ -192,6 +211,7 @@ class AgentRouter:
                 self.DEVELOPMENT_KEYWORDS = routing_config.get("development", self.DEVELOPMENT_KEYWORDS)
                 self.DATABASE_KEYWORDS = routing_config.get("database", self.DATABASE_KEYWORDS)
                 self.PLANNING_KEYWORDS = routing_config.get("planning", self.PLANNING_KEYWORDS)
+                self.VISION_KEYWORDS = routing_config.get("vision", self.VISION_KEYWORDS)
         except Exception:
             pass  # Use defaults if config parsing fails
 
@@ -513,7 +533,9 @@ class AgentRouter:
 
     def _infer_agent_intent(self, agent_id: str) -> str:
         """Infer primary intent for an agent based on skills"""
-        if "security" in agent_id.lower() or agent_id == "hacker_agent":
+        if agent_id == "vision_agent":
+            return "vision"
+        elif "security" in agent_id.lower() or agent_id == "hacker_agent":
             return "security"
         elif agent_id == "elite_coder":
             return "development"  # Complex development, same embedding space
@@ -654,7 +676,7 @@ class AgentRouter:
 
     def _classify_intent(self, query: str) -> str:
         """
-        Classify query intent as: security_audit, complex_development, development, database, planning, or general
+        Classify query intent as: vision, security_audit, complex_development, development, database, planning, or general
         3-tier code routing: simple code → coder_agent, complex code → elite_coder, architecture → project_manager
         """
         security_count = sum(1 for kw in self.SECURITY_KEYWORDS if self.match_keyword(query, kw))
@@ -662,6 +684,11 @@ class AgentRouter:
         db_count = sum(1 for kw in self.DATABASE_KEYWORDS if self.match_keyword(query, kw))
         planning_count = sum(1 for kw in self.PLANNING_KEYWORDS if self.match_keyword(query, kw))
         complex_code_count = sum(1 for kw in self.COMPLEX_CODE_KEYWORDS if self.match_keyword(query, kw))
+        vision_count = sum(1 for kw in self.VISION_KEYWORDS if self.match_keyword(query, kw))
+
+        # Vision queries get highest priority when 2+ vision keywords detected
+        if vision_count >= 2:
+            return "vision"
 
         # Complex code gets highest priority when 2+ complex keywords detected
         # (signals multi-file refactors, architecture changes, deep debugging)
@@ -681,6 +708,8 @@ class AgentRouter:
         elif complex_code_count > 0:
             # Complex keywords without other dev keywords → complex development
             return "complex_development"
+        elif vision_count > 0:
+            return "vision"
         elif planning_count > 0:
             return "planning"
         else:
@@ -689,7 +718,7 @@ class AgentRouter:
     def _extract_keywords(self, query: str) -> List[str]:
         """Extract all matching keywords from query"""
         keywords = []
-        for kw in self.SECURITY_KEYWORDS + self.DEVELOPMENT_KEYWORDS + self.DATABASE_KEYWORDS + self.PLANNING_KEYWORDS + self.COMPLEX_CODE_KEYWORDS:
+        for kw in self.SECURITY_KEYWORDS + self.DEVELOPMENT_KEYWORDS + self.DATABASE_KEYWORDS + self.PLANNING_KEYWORDS + self.COMPLEX_CODE_KEYWORDS + self.VISION_KEYWORDS:
             if self.match_keyword(query, kw):
                 keywords.append(kw)
         return keywords
@@ -724,6 +753,14 @@ class AgentRouter:
         if intent == "general":
             # General queries routed to PM
             return 1.0 if agent_id == "project_manager" else 0.3
+
+        elif intent == "vision":
+            if agent_id == "vision_agent":
+                return 1.0
+            elif agent_id == "project_manager":
+                return 0.2
+            else:
+                return 0.1
 
         elif intent == "database":
             if agent_id == "database_agent":
@@ -827,6 +864,7 @@ class AgentRouter:
             "development": "Development task",
             "planning": "Planning/coordination task",
             "database": "Database query",
+            "vision": "Vision/image processing task",
             "general": "General inquiry"
         }.get(intent, "Query matched")
 

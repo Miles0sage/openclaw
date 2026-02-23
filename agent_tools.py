@@ -69,7 +69,8 @@ AGENT_TOOLS = [
                     "description": "What to fetch: issues, prs, status (general info), or recent commits"
                 }
             },
-            "required": ["repo", "action"]
+            "required": ["repo", "action"],
+            "additionalProperties": False
         }
     },
     {
@@ -96,7 +97,8 @@ AGENT_TOOLS = [
                     "description": "Labels to apply"
                 }
             },
-            "required": ["repo", "title"]
+            "required": ["repo", "title"],
+            "additionalProperties": False
         }
     },
     {
@@ -110,7 +112,8 @@ AGENT_TOOLS = [
                     "description": "Search query"
                 }
             },
-            "required": ["query"]
+            "required": ["query"],
+            "additionalProperties": False
         }
     },
     {
@@ -133,7 +136,8 @@ AGENT_TOOLS = [
                     "description": "Priority: P0=critical, P1=high, P2=medium, P3=low"
                 }
             },
-            "required": ["project", "task"]
+            "required": ["project", "task"],
+            "additionalProperties": False
         }
     },
     {
@@ -148,7 +152,8 @@ AGENT_TOOLS = [
                     "description": "Filter by status, or 'all' to see everything"
                 }
             },
-            "required": []
+            "required": [],
+            "additionalProperties": False
         }
     },
     {
@@ -163,7 +168,8 @@ AGENT_TOOLS = [
                 "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags: routing, security, fix, feature, maintenance, etc."},
                 "priority": {"type": "string", "enum": ["P0", "P1", "P2", "P3"], "description": "Priority level"}
             },
-            "required": ["title", "description"]
+            "required": ["title", "description"],
+            "additionalProperties": False
         }
     },
     {
@@ -172,7 +178,8 @@ AGENT_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {},
-            "required": []
+            "required": [],
+            "additionalProperties": False
         }
     },
     {
@@ -183,7 +190,8 @@ AGENT_TOOLS = [
             "properties": {
                 "job_id": {"type": "string", "description": "The job ID to approve"}
             },
-            "required": ["job_id"]
+            "required": ["job_id"],
+            "additionalProperties": False
         }
     },
     {
@@ -195,7 +203,8 @@ AGENT_TOOLS = [
                 "url": {"type": "string", "description": "The URL to fetch"},
                 "extract": {"type": "string", "enum": ["text", "links", "all"], "description": "What to extract: text content, links, or everything"}
             },
-            "required": ["url"]
+            "required": ["url"],
+            "additionalProperties": False
         }
     },
     {
@@ -207,7 +216,8 @@ AGENT_TOOLS = [
                 "limit": {"type": "integer", "description": "Number of events to return (default 10)"},
                 "event_type": {"type": "string", "description": "Filter by type: job.created, job.completed, job.failed, proposal.created, cost.alert"}
             },
-            "required": []
+            "required": [],
+            "additionalProperties": False
         }
     },
     {
@@ -220,7 +230,8 @@ AGENT_TOOLS = [
                 "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for categorization: project name, topic, etc."},
                 "importance": {"type": "integer", "description": "1-10 scale. 10=critical decision, 7=preference, 5=useful fact, 3=minor detail"}
             },
-            "required": ["content"]
+            "required": ["content"],
+            "additionalProperties": False
         }
     },
     {
@@ -232,7 +243,8 @@ AGENT_TOOLS = [
                 "query": {"type": "string", "description": "What to search for"},
                 "limit": {"type": "integer", "description": "Max results (default 5)"}
             },
-            "required": ["query"]
+            "required": ["query"],
+            "additionalProperties": False
         }
     },
     {
@@ -244,7 +256,8 @@ AGENT_TOOLS = [
                 "message": {"type": "string", "description": "The message to send"},
                 "channel": {"type": "string", "description": "Channel ID (default: report channel C0AFE4QHKH7)"}
             },
-            "required": ["message"]
+            "required": ["message"],
+            "additionalProperties": False
         }
     },
     # ═══════════════════════════════════════════════════════════════
@@ -260,7 +273,8 @@ AGENT_TOOLS = [
                 "cwd": {"type": "string", "description": "Working directory (default: /root)"},
                 "timeout": {"type": "integer", "description": "Timeout in seconds (default: 60, max: 300)"}
             },
-            "required": ["command"]
+            "required": ["command"],
+            "additionalProperties": False
         }
     },
     {
@@ -278,7 +292,8 @@ AGENT_TOOLS = [
                 "args": {"type": "string", "description": "Additional arguments (e.g. commit message, branch name, file paths)"},
                 "files": {"type": "array", "items": {"type": "string"}, "description": "Files to add (for 'add' action)"}
             },
-            "required": ["action"]
+            "required": ["action"],
+            "additionalProperties": False
         }
     },
     {
@@ -298,7 +313,8 @@ AGENT_TOOLS = [
                 "env_value": {"type": "string", "description": "Environment variable value (for env-set)"},
                 "production": {"type": "boolean", "description": "Deploy to production (default: true)"}
             },
-            "required": ["action"]
+            "required": ["action"],
+            "additionalProperties": False
         }
     },
     {
@@ -311,7 +327,8 @@ AGENT_TOOLS = [
                 "lines": {"type": "integer", "description": "Max lines to read (default: all, max: 500)"},
                 "offset": {"type": "integer", "description": "Start from this line number (0-based)"}
             },
-            "required": ["path"]
+            "required": ["path"],
+            "additionalProperties": False
         }
     },
     {
@@ -324,7 +341,8 @@ AGENT_TOOLS = [
                 "content": {"type": "string", "description": "Content to write"},
                 "mode": {"type": "string", "enum": ["write", "append"], "description": "Write mode (default: write)"}
             },
-            "required": ["path", "content"]
+            "required": ["path", "content"],
+            "additionalProperties": False
         }
     },
     {
@@ -337,7 +355,8 @@ AGENT_TOOLS = [
                 "manager": {"type": "string", "enum": ["npm", "pip", "apt", "binary"], "description": "Package manager to use"},
                 "global_install": {"type": "boolean", "description": "Install globally (default: true for CLI tools)"}
             },
-            "required": ["name", "manager"]
+            "required": ["name", "manager"],
+            "additionalProperties": False
         }
     },
     {
@@ -349,7 +368,8 @@ AGENT_TOOLS = [
                 "topic": {"type": "string", "description": "What to research (e.g. 'Next.js 16 deployment to Vercel', 'Supabase RLS best practices')"},
                 "depth": {"type": "string", "enum": ["quick", "medium", "deep"], "description": "Research depth (default: medium)"}
             },
-            "required": ["topic"]
+            "required": ["topic"],
+            "additionalProperties": False
         }
     },
     {
@@ -362,7 +382,8 @@ AGENT_TOOLS = [
                 "extract": {"type": "string", "enum": ["text", "links", "headings", "code", "tables", "all"], "description": "What to extract (default: text)"},
                 "selector": {"type": "string", "description": "CSS selector to target specific elements (optional)"}
             },
-            "required": ["url"]
+            "required": ["url"],
+            "additionalProperties": False
         }
     },
     # ═══════════════════════════════════════════════════════════════
@@ -379,7 +400,8 @@ AGENT_TOOLS = [
                 "new_string": {"type": "string", "description": "The replacement string"},
                 "replace_all": {"type": "boolean", "description": "Replace all occurrences (default: false, only first)"}
             },
-            "required": ["path", "old_string", "new_string"]
+            "required": ["path", "old_string", "new_string"],
+            "additionalProperties": False
         }
     },
     {
@@ -392,7 +414,8 @@ AGENT_TOOLS = [
                 "path": {"type": "string", "description": "Root directory to search in (default: /root)"},
                 "max_results": {"type": "integer", "description": "Max files to return (default: 50)"}
             },
-            "required": ["pattern"]
+            "required": ["pattern"],
+            "additionalProperties": False
         }
     },
     {
@@ -407,7 +430,8 @@ AGENT_TOOLS = [
                 "context_lines": {"type": "integer", "description": "Lines of context around matches (default: 2)"},
                 "max_results": {"type": "integer", "description": "Max matches to return (default: 20)"}
             },
-            "required": ["pattern"]
+            "required": ["pattern"],
+            "additionalProperties": False
         }
     },
     {
@@ -424,7 +448,8 @@ AGENT_TOOLS = [
                 "target": {"type": "string", "description": "PID, process name, or port number depending on action"},
                 "signal": {"type": "string", "enum": ["TERM", "KILL", "HUP"], "description": "Signal for kill (default: TERM)"}
             },
-            "required": ["action"]
+            "required": ["action"],
+            "additionalProperties": False
         }
     },
     {
@@ -443,7 +468,144 @@ AGENT_TOOLS = [
                 "env_file": {"type": "string", "description": "Path to .env file (default: /root/.env)"},
                 "filter": {"type": "string", "description": "Filter pattern for list (e.g. 'API', 'TOKEN')"}
             },
-            "required": ["action"]
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+
+    # ═══════════════════════════════════════════════════════════════
+    # COMPUTE TOOLS — Precise algorithms, math, data processing
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "compute_sort",
+        "description": "Sort a list of numbers or strings using O(n log n) algorithms. Returns sorted result with timing. Use when the user needs data sorted precisely — never approximate.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "data": {"type": "array", "description": "List of numbers or strings to sort"},
+                "algorithm": {
+                    "type": "string",
+                    "enum": ["auto", "mergesort", "heapsort", "quicksort", "timsort"],
+                    "description": "Sorting algorithm (default: auto picks optimal)"
+                },
+                "reverse": {"type": "boolean", "description": "Sort descending (default: false)"},
+                "key": {"type": "string", "description": "For dicts: key to sort by (e.g. 'price', 'name')"}
+            },
+            "required": ["data"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "compute_stats",
+        "description": "Calculate statistics on a list of numbers: mean, median, mode, std dev, variance, percentiles, min, max, sum. Precise — no LLM approximation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "data": {"type": "array", "items": {"type": "number"}, "description": "List of numbers"},
+                "percentiles": {"type": "array", "items": {"type": "number"}, "description": "Percentiles to calculate (e.g. [25, 50, 75, 90, 99])"}
+            },
+            "required": ["data"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "compute_math",
+        "description": "Evaluate mathematical expressions precisely. Supports arithmetic, trig, log, factorial, combinations, GCD, LCM, modular arithmetic. Use instead of mental math.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "expression": {"type": "string", "description": "Math expression (e.g. '2**64 - 1', 'math.factorial(20)', 'math.gcd(48, 18)')"},
+                "precision": {"type": "integer", "description": "Decimal places for float results (default: 10)"}
+            },
+            "required": ["expression"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "compute_search",
+        "description": "Search/filter data using binary search, linear scan, or regex. O(log n) for sorted data. Use to find items in large datasets precisely.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "data": {"type": "array", "description": "Data to search through"},
+                "target": {"description": "Value to find"},
+                "method": {
+                    "type": "string",
+                    "enum": ["binary", "linear", "filter", "regex"],
+                    "description": "Search method (binary requires sorted data)"
+                },
+                "condition": {"type": "string", "description": "For filter: Python expression using 'x' (e.g. 'x > 50', 'x % 2 == 0')"}
+            },
+            "required": ["data"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "compute_matrix",
+        "description": "Matrix operations: multiply, transpose, determinant, inverse, eigenvalues. For linear algebra computations.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["multiply", "transpose", "determinant", "inverse", "eigenvalues", "solve"],
+                    "description": "Matrix operation"
+                },
+                "matrix_a": {"type": "array", "description": "First matrix (2D array of numbers)"},
+                "matrix_b": {"type": "array", "description": "Second matrix (for multiply) or vector (for solve)"}
+            },
+            "required": ["action", "matrix_a"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "compute_prime",
+        "description": "Prime number operations: factorize, primality test, generate primes, find nth prime. Exact integer arithmetic.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["factorize", "is_prime", "generate", "nth_prime"],
+                    "description": "What to compute"
+                },
+                "n": {"type": "integer", "description": "The number to test/factorize, or count of primes to generate"},
+                "limit": {"type": "integer", "description": "Upper bound for 'generate' action"}
+            },
+            "required": ["action", "n"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "compute_hash",
+        "description": "Compute cryptographic hashes: SHA-256, SHA-512, MD5, BLAKE2. For data integrity verification and checksums.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "data": {"type": "string", "description": "String to hash"},
+                "algorithm": {
+                    "type": "string",
+                    "enum": ["sha256", "sha512", "md5", "blake2b", "sha1"],
+                    "description": "Hash algorithm (default: sha256)"
+                },
+                "file_path": {"type": "string", "description": "Hash a file instead of a string"}
+            },
+            "required": [],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "compute_convert",
+        "description": "Unit and base conversions: number bases (bin/oct/hex), temperatures, distances, data sizes, timestamps. Precise conversions.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "value": {"description": "Value to convert"},
+                "from_unit": {"type": "string", "description": "Source unit/base (e.g. 'celsius', 'hex', 'bytes', 'unix_timestamp')"},
+                "to_unit": {"type": "string", "description": "Target unit/base (e.g. 'fahrenheit', 'decimal', 'gb', 'iso8601')"}
+            },
+            "required": ["value", "from_unit", "to_unit"],
+            "additionalProperties": False
         }
     },
 ]
@@ -535,6 +697,27 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             return _env_manage(tool_input["action"], tool_input.get("key", ""),
                               tool_input.get("value", ""), tool_input.get("env_file", "/root/.env"),
                               tool_input.get("filter", ""))
+        # ═ Compute tools
+        elif tool_name == "compute_sort":
+            return _compute_sort(tool_input["data"], tool_input.get("algorithm", "auto"),
+                                tool_input.get("reverse", False), tool_input.get("key"))
+        elif tool_name == "compute_stats":
+            return _compute_stats(tool_input["data"], tool_input.get("percentiles"))
+        elif tool_name == "compute_math":
+            return _compute_math(tool_input["expression"], tool_input.get("precision", 10))
+        elif tool_name == "compute_search":
+            return _compute_search(tool_input["data"], tool_input.get("target"),
+                                  tool_input.get("method", "linear"), tool_input.get("condition"))
+        elif tool_name == "compute_matrix":
+            return _compute_matrix(tool_input["action"], tool_input["matrix_a"],
+                                  tool_input.get("matrix_b"))
+        elif tool_name == "compute_prime":
+            return _compute_prime(tool_input["action"], tool_input["n"], tool_input.get("limit"))
+        elif tool_name == "compute_hash":
+            return _compute_hash(tool_input.get("data", ""), tool_input.get("algorithm", "sha256"),
+                                tool_input.get("file_path"))
+        elif tool_name == "compute_convert":
+            return _compute_convert(tool_input["value"], tool_input["from_unit"], tool_input["to_unit"])
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:
@@ -1390,3 +1573,501 @@ def _env_manage(action: str, key: str = "", value: str = "",
         return f"Unknown action: {action}"
     except Exception as e:
         return f"Env error: {e}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# COMPUTE TOOL IMPLEMENTATIONS — Precise algorithms
+# ═══════════════════════════════════════════════════════════════
+
+def _compute_sort(data: list, algorithm: str = "auto", reverse: bool = False, key: str = None) -> str:
+    """Sort data using O(n log n) algorithms with timing."""
+    import time
+    import heapq
+    try:
+        n = len(data)
+        if n == 0:
+            return "[]  (empty input)"
+
+        # If data contains dicts and key specified, extract sort key
+        if key and isinstance(data[0], dict):
+            keyfunc = lambda x: x.get(key, 0)
+        else:
+            keyfunc = None
+
+        start = time.perf_counter_ns()
+
+        if algorithm == "mergesort":
+            # Pure mergesort implementation
+            def mergesort(arr):
+                if len(arr) <= 1:
+                    return arr
+                mid = len(arr) // 2
+                left = mergesort(arr[:mid])
+                right = mergesort(arr[mid:])
+                return merge(left, right)
+            def merge(l, r):
+                result, i, j = [], 0, 0
+                while i < len(l) and j < len(r):
+                    lv = l[i].get(key, 0) if key and isinstance(l[i], dict) else l[i]
+                    rv = r[j].get(key, 0) if key and isinstance(r[j], dict) else r[j]
+                    if lv <= rv:
+                        result.append(l[i]); i += 1
+                    else:
+                        result.append(r[j]); j += 1
+                result.extend(l[i:]); result.extend(r[j:])
+                return result
+            result = mergesort(list(data))
+            if reverse:
+                result.reverse()
+
+        elif algorithm == "heapsort":
+            if keyfunc:
+                decorated = [(keyfunc(x), i, x) for i, x in enumerate(data)]
+                heapq.heapify(decorated)
+                result = [heapq.heappop(decorated)[2] for _ in range(len(decorated))]
+            else:
+                heap = list(data)
+                heapq.heapify(heap)
+                result = [heapq.heappop(heap) for _ in range(len(heap))]
+            if reverse:
+                result.reverse()
+
+        else:  # auto / quicksort / timsort — Python's Timsort is optimal
+            result = sorted(data, key=keyfunc, reverse=reverse)
+
+        elapsed_ns = time.perf_counter_ns() - start
+        elapsed_ms = elapsed_ns / 1_000_000
+
+        # Format output
+        preview = json.dumps(result[:100])
+        if n > 100:
+            preview = preview[:-1] + f", ... ({n - 100} more)]"
+
+        algo_used = algorithm if algorithm != "auto" else "timsort"
+        return f"Sorted {n} items ({algo_used}, O(n·log·n)) in {elapsed_ms:.3f}ms\n{preview}"
+    except Exception as e:
+        return f"Sort error: {e}"
+
+
+def _compute_stats(data: list, percentiles: list = None) -> str:
+    """Calculate comprehensive statistics."""
+    import statistics
+    import math
+    try:
+        n = len(data)
+        if n == 0:
+            return "Error: empty dataset"
+
+        nums = [float(x) for x in data]
+        result = {
+            "count": n,
+            "sum": sum(nums),
+            "min": min(nums),
+            "max": max(nums),
+            "range": max(nums) - min(nums),
+            "mean": statistics.mean(nums),
+            "median": statistics.median(nums),
+        }
+
+        if n >= 2:
+            result["std_dev"] = statistics.stdev(nums)
+            result["variance"] = statistics.variance(nums)
+            result["pop_std_dev"] = statistics.pstdev(nums)
+
+        try:
+            result["mode"] = statistics.mode(nums)
+        except statistics.StatisticsError:
+            result["mode"] = "no unique mode"
+
+        if n >= 4:
+            sorted_nums = sorted(nums)
+            q1_idx = n // 4
+            q3_idx = (3 * n) // 4
+            result["q1"] = sorted_nums[q1_idx]
+            result["q3"] = sorted_nums[q3_idx]
+            result["iqr"] = sorted_nums[q3_idx] - sorted_nums[q1_idx]
+
+        # Custom percentiles
+        if percentiles:
+            sorted_nums = sorted(nums)
+            pct_results = {}
+            for p in percentiles:
+                idx = int(p / 100 * (n - 1))
+                pct_results[f"p{p}"] = sorted_nums[min(idx, n - 1)]
+            result["percentiles"] = pct_results
+
+        lines = [f"Statistics for {n} values:"]
+        for k, v in result.items():
+            if isinstance(v, float):
+                lines.append(f"  {k}: {v:.6f}")
+            elif isinstance(v, dict):
+                for pk, pv in v.items():
+                    lines.append(f"  {pk}: {pv:.6f}" if isinstance(pv, float) else f"  {pk}: {pv}")
+            else:
+                lines.append(f"  {k}: {v}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Stats error: {e}"
+
+
+def _compute_math(expression: str, precision: int = 10) -> str:
+    """Evaluate math expressions safely."""
+    import math
+    try:
+        # Allowed names for eval
+        safe_names = {
+            "math": math, "abs": abs, "round": round, "min": min, "max": max,
+            "sum": sum, "len": len, "pow": pow, "int": int, "float": float,
+            "pi": math.pi, "e": math.e, "inf": math.inf, "tau": math.tau,
+            "sqrt": math.sqrt, "log": math.log, "log2": math.log2, "log10": math.log10,
+            "sin": math.sin, "cos": math.cos, "tan": math.tan,
+            "asin": math.asin, "acos": math.acos, "atan": math.atan, "atan2": math.atan2,
+            "ceil": math.ceil, "floor": math.floor,
+            "factorial": math.factorial, "gcd": math.gcd, "lcm": math.lcm,
+            "comb": math.comb, "perm": math.perm,
+            "radians": math.radians, "degrees": math.degrees,
+            "isqrt": math.isqrt, "exp": math.exp,
+            "True": True, "False": False,
+        }
+
+        # Block dangerous builtins
+        for blocked in ["import", "__", "exec", "eval", "open", "compile", "globals", "locals", "getattr", "setattr", "delattr"]:
+            if blocked in expression:
+                return f"Error: '{blocked}' not allowed in expressions"
+
+        result = eval(expression, {"__builtins__": {}}, safe_names)
+
+        if isinstance(result, float):
+            if result == int(result) and abs(result) < 10**15:
+                return f"{expression} = {int(result)}"
+            return f"{expression} = {result:.{precision}f}"
+        return f"{expression} = {result}"
+    except Exception as e:
+        return f"Math error: {e}"
+
+
+def _compute_search(data: list, target=None, method: str = "linear", condition: str = None) -> str:
+    """Search/filter data using various algorithms."""
+    import bisect
+    import re
+    import time
+    try:
+        n = len(data)
+        start = time.perf_counter_ns()
+
+        if method == "binary":
+            if target is None:
+                return "Error: target required for binary search"
+            idx = bisect.bisect_left(data, target)
+            elapsed = (time.perf_counter_ns() - start) / 1_000_000
+            if idx < n and data[idx] == target:
+                return f"Found {target} at index {idx} (binary search, O(log n)) in {elapsed:.3f}ms"
+            return f"{target} not found (binary search, checked {n} items) in {elapsed:.3f}ms"
+
+        elif method == "filter":
+            if not condition:
+                return "Error: condition required for filter (e.g. 'x > 50')"
+            for blocked in ["import", "__", "exec", "eval", "open"]:
+                if blocked in condition:
+                    return f"Error: '{blocked}' not allowed"
+            results = [x for x in data if eval(condition, {"__builtins__": {}}, {"x": x})]
+            elapsed = (time.perf_counter_ns() - start) / 1_000_000
+            preview = json.dumps(results[:50])
+            return f"Filter '{condition}': {len(results)}/{n} items matched in {elapsed:.3f}ms\n{preview}"
+
+        elif method == "regex":
+            if target is None:
+                return "Error: target (regex pattern) required"
+            pattern = re.compile(str(target))
+            results = [x for x in data if pattern.search(str(x))]
+            elapsed = (time.perf_counter_ns() - start) / 1_000_000
+            return f"Regex '{target}': {len(results)}/{n} matched in {elapsed:.3f}ms\n{json.dumps(results[:50])}"
+
+        else:  # linear
+            if target is None:
+                return "Error: target required for linear search"
+            indices = [i for i, x in enumerate(data) if x == target]
+            elapsed = (time.perf_counter_ns() - start) / 1_000_000
+            if indices:
+                return f"Found {target} at {len(indices)} position(s): {indices[:20]} (linear, O(n)) in {elapsed:.3f}ms"
+            return f"{target} not found (linear search, {n} items) in {elapsed:.3f}ms"
+    except Exception as e:
+        return f"Search error: {e}"
+
+
+def _compute_matrix(action: str, matrix_a: list, matrix_b: list = None) -> str:
+    """Matrix operations — pure Python, no numpy required."""
+    try:
+        a = [[float(c) for c in row] for row in matrix_a]
+        rows_a, cols_a = len(a), len(a[0])
+
+        if action == "transpose":
+            result = [[a[j][i] for j in range(rows_a)] for i in range(cols_a)]
+            return f"Transpose ({rows_a}x{cols_a} → {cols_a}x{rows_a}):\n{json.dumps(result)}"
+
+        elif action == "multiply":
+            if not matrix_b:
+                return "Error: matrix_b required for multiply"
+            b = [[float(c) for c in row] if isinstance(row, list) else [float(row)] for row in matrix_b]
+            rows_b, cols_b = len(b), len(b[0])
+            if cols_a != rows_b:
+                return f"Error: incompatible dimensions {rows_a}x{cols_a} * {rows_b}x{cols_b}"
+            result = [[sum(a[i][k] * b[k][j] for k in range(cols_a)) for j in range(cols_b)] for i in range(rows_a)]
+            return f"Product ({rows_a}x{cols_a} * {rows_b}x{cols_b} = {rows_a}x{cols_b}):\n{json.dumps(result)}"
+
+        elif action == "determinant":
+            if rows_a != cols_a:
+                return "Error: determinant requires square matrix"
+            def det(m):
+                n = len(m)
+                if n == 1: return m[0][0]
+                if n == 2: return m[0][0]*m[1][1] - m[0][1]*m[1][0]
+                d = 0
+                for j in range(n):
+                    sub = [[m[i][k] for k in range(n) if k != j] for i in range(1, n)]
+                    d += ((-1)**j) * m[0][j] * det(sub)
+                return d
+            d = det(a)
+            return f"Determinant of {rows_a}x{cols_a} matrix = {d}"
+
+        elif action == "inverse":
+            if rows_a != cols_a:
+                return "Error: inverse requires square matrix"
+            n = rows_a
+            # Augment with identity
+            aug = [row + [1.0 if i == j else 0.0 for j in range(n)] for i, row in enumerate(a)]
+            for col in range(n):
+                max_row = max(range(col, n), key=lambda r: abs(aug[r][col]))
+                aug[col], aug[max_row] = aug[max_row], aug[col]
+                if abs(aug[col][col]) < 1e-12:
+                    return "Error: matrix is singular (no inverse)"
+                pivot = aug[col][col]
+                aug[col] = [x / pivot for x in aug[col]]
+                for row in range(n):
+                    if row != col:
+                        factor = aug[row][col]
+                        aug[row] = [aug[row][k] - factor * aug[col][k] for k in range(2 * n)]
+            inv = [row[n:] for row in aug]
+            return f"Inverse of {n}x{n} matrix:\n{json.dumps([[round(c, 8) for c in row] for row in inv])}"
+
+        elif action == "solve":
+            if not matrix_b:
+                return "Error: matrix_b (vector b) required for solve Ax=b"
+            b_vec = [float(x) if not isinstance(x, list) else float(x[0]) for x in matrix_b]
+            n = rows_a
+            aug = [list(a[i]) + [b_vec[i]] for i in range(n)]
+            for col in range(n):
+                max_row = max(range(col, n), key=lambda r: abs(aug[r][col]))
+                aug[col], aug[max_row] = aug[max_row], aug[col]
+                if abs(aug[col][col]) < 1e-12:
+                    return "Error: system has no unique solution"
+                pivot = aug[col][col]
+                aug[col] = [x / pivot for x in aug[col]]
+                for row in range(n):
+                    if row != col:
+                        factor = aug[row][col]
+                        aug[row] = [aug[row][k] - factor * aug[col][k] for k in range(n + 1)]
+            solution = [round(aug[i][n], 8) for i in range(n)]
+            return f"Solution x = {solution}"
+
+        elif action == "eigenvalues":
+            if rows_a != cols_a:
+                return "Error: eigenvalues require square matrix"
+            if rows_a == 2:
+                trace = a[0][0] + a[1][1]
+                det_val = a[0][0]*a[1][1] - a[0][1]*a[1][0]
+                disc = trace**2 - 4*det_val
+                if disc >= 0:
+                    e1 = (trace + disc**0.5) / 2
+                    e2 = (trace - disc**0.5) / 2
+                    return f"Eigenvalues: [{round(e1, 8)}, {round(e2, 8)}]"
+                else:
+                    real = trace / 2
+                    imag = (-disc)**0.5 / 2
+                    return f"Eigenvalues: [{real:.8f} + {imag:.8f}i, {real:.8f} - {imag:.8f}i]"
+            return "Eigenvalues for matrices >2x2 require numpy (not installed). Use 2x2 matrices or install numpy."
+
+        return f"Unknown matrix action: {action}"
+    except Exception as e:
+        return f"Matrix error: {e}"
+
+
+def _compute_prime(action: str, n: int, limit: int = None) -> str:
+    """Prime number operations."""
+    try:
+        if action == "is_prime":
+            if n < 2:
+                return f"{n} is NOT prime"
+            if n < 4:
+                return f"{n} IS prime"
+            if n % 2 == 0:
+                return f"{n} is NOT prime (divisible by 2)"
+            i = 3
+            while i * i <= n:
+                if n % i == 0:
+                    return f"{n} is NOT prime (divisible by {i})"
+                i += 2
+            return f"{n} IS prime"
+
+        elif action == "factorize":
+            if n < 2:
+                return f"{n} has no prime factorization"
+            factors = []
+            d = 2
+            temp = n
+            while d * d <= temp:
+                while temp % d == 0:
+                    factors.append(d)
+                    temp //= d
+                d += 1
+            if temp > 1:
+                factors.append(temp)
+            # Format as exponents
+            from collections import Counter
+            counts = Counter(factors)
+            factored = " × ".join(f"{p}^{e}" if e > 1 else str(p) for p, e in sorted(counts.items()))
+            return f"{n} = {factored}  (factors: {factors})"
+
+        elif action == "generate":
+            upper = limit if limit else n
+            if upper > 10_000_000:
+                return "Error: limit too large (max 10M for sieve)"
+            # Sieve of Eratosthenes — O(n log log n)
+            sieve = [True] * (upper + 1)
+            sieve[0] = sieve[1] = False
+            for i in range(2, int(upper**0.5) + 1):
+                if sieve[i]:
+                    for j in range(i*i, upper + 1, i):
+                        sieve[j] = False
+            primes = [i for i, is_p in enumerate(sieve) if is_p]
+            count = len(primes)
+            preview = primes[:100]
+            result = f"Found {count} primes up to {upper}\n{preview}"
+            if count > 100:
+                result += f"\n... and {count - 100} more"
+            return result
+
+        elif action == "nth_prime":
+            if n > 500_000:
+                return "Error: n too large (max 500K)"
+            count = 0
+            candidate = 2
+            while True:
+                is_p = True
+                if candidate < 2:
+                    is_p = False
+                elif candidate == 2:
+                    is_p = True
+                elif candidate % 2 == 0:
+                    is_p = False
+                else:
+                    i = 3
+                    while i * i <= candidate:
+                        if candidate % i == 0:
+                            is_p = False
+                            break
+                        i += 2
+                if is_p:
+                    count += 1
+                    if count == n:
+                        return f"The {n}th prime is {candidate}"
+                candidate += 1
+
+        return f"Unknown prime action: {action}"
+    except Exception as e:
+        return f"Prime error: {e}"
+
+
+def _compute_hash(data: str = "", algorithm: str = "sha256", file_path: str = None) -> str:
+    """Compute cryptographic hashes."""
+    import hashlib
+    try:
+        h = hashlib.new(algorithm)
+
+        if file_path:
+            if not os.path.exists(file_path):
+                return f"File not found: {file_path}"
+            with open(file_path, "rb") as f:
+                while chunk := f.read(8192):
+                    h.update(chunk)
+            size = os.path.getsize(file_path)
+            return f"{algorithm}({file_path}) [{size} bytes] = {h.hexdigest()}"
+
+        if not data:
+            return "Error: provide data string or file_path"
+
+        h.update(data.encode("utf-8"))
+        return f"{algorithm}(\"{data[:50]}{'...' if len(data) > 50 else ''}\") = {h.hexdigest()}"
+    except Exception as e:
+        return f"Hash error: {e}"
+
+
+def _compute_convert(value, from_unit: str, to_unit: str) -> str:
+    """Unit and base conversions."""
+    try:
+        from_u = from_unit.lower().strip()
+        to_u = to_unit.lower().strip()
+
+        # Number base conversions
+        base_map = {"bin": 2, "binary": 2, "oct": 8, "octal": 8, "dec": 10, "decimal": 10, "hex": 16, "hexadecimal": 16}
+        if from_u in base_map and to_u in base_map:
+            num = int(str(value), base_map[from_u])
+            if base_map[to_u] == 2:
+                result = bin(num)
+            elif base_map[to_u] == 8:
+                result = oct(num)
+            elif base_map[to_u] == 16:
+                result = hex(num)
+            else:
+                result = str(num)
+            return f"{value} (base {base_map[from_u]}) = {result} (base {base_map[to_u]})"
+
+        v = float(value)
+
+        # Temperature
+        temp_conversions = {
+            ("celsius", "fahrenheit"): lambda c: c * 9/5 + 32,
+            ("fahrenheit", "celsius"): lambda f: (f - 32) * 5/9,
+            ("celsius", "kelvin"): lambda c: c + 273.15,
+            ("kelvin", "celsius"): lambda k: k - 273.15,
+            ("fahrenheit", "kelvin"): lambda f: (f - 32) * 5/9 + 273.15,
+            ("kelvin", "fahrenheit"): lambda k: (k - 273.15) * 9/5 + 32,
+        }
+        if (from_u, to_u) in temp_conversions:
+            result = temp_conversions[(from_u, to_u)](v)
+            return f"{v} {from_u} = {result:.4f} {to_u}"
+
+        # Data sizes
+        data_units = {"bits": 1, "bytes": 8, "kb": 8*1024, "mb": 8*1024**2, "gb": 8*1024**3, "tb": 8*1024**4, "kib": 8*1024, "mib": 8*1024**2, "gib": 8*1024**3}
+        if from_u in data_units and to_u in data_units:
+            bits = v * data_units[from_u]
+            result = bits / data_units[to_u]
+            return f"{v} {from_unit} = {result:.6f} {to_unit}"
+
+        # Distance
+        dist_m = {"m": 1, "meters": 1, "km": 1000, "mi": 1609.344, "miles": 1609.344, "ft": 0.3048, "feet": 0.3048, "in": 0.0254, "inches": 0.0254, "cm": 0.01, "mm": 0.001, "yd": 0.9144, "yards": 0.9144, "nm": 1852, "nautical_miles": 1852}
+        if from_u in dist_m and to_u in dist_m:
+            meters = v * dist_m[from_u]
+            result = meters / dist_m[to_u]
+            return f"{v} {from_unit} = {result:.6f} {to_unit}"
+
+        # Weight
+        weight_kg = {"kg": 1, "g": 0.001, "mg": 0.000001, "lb": 0.453592, "lbs": 0.453592, "oz": 0.0283495, "ton": 907.185, "tonne": 1000, "st": 6.35029}
+        if from_u in weight_kg and to_u in weight_kg:
+            kg = v * weight_kg[from_u]
+            result = kg / weight_kg[to_u]
+            return f"{v} {from_unit} = {result:.6f} {to_unit}"
+
+        # Timestamp conversions
+        if from_u == "unix_timestamp" and to_u == "iso8601":
+            from datetime import datetime, timezone
+            dt = datetime.fromtimestamp(v, tz=timezone.utc)
+            return f"{value} unix = {dt.isoformat()}"
+        if from_u == "iso8601" and to_u == "unix_timestamp":
+            from datetime import datetime
+            dt = datetime.fromisoformat(str(value))
+            return f"{value} = {dt.timestamp()} unix"
+
+        return f"Unknown conversion: {from_unit} → {to_unit}"
+    except Exception as e:
+        return f"Convert error: {e}"

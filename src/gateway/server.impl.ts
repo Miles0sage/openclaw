@@ -32,6 +32,7 @@ import { onHeartbeatEvent } from "../infra/heartbeat-events.js";
 import { startHeartbeatRunner } from "../infra/heartbeat-runner.js";
 import { getMachineDisplayName } from "../infra/machine-name.js";
 import { ensureOpenClawCliOnPath } from "../infra/path-env.js";
+import { createRedisClient } from "../infra/redis-client.js";
 import { setGatewaySigusr1RestartPolicy } from "../infra/restart.js";
 import {
   primeRemoteSkillsCache,
@@ -42,6 +43,7 @@ import { scheduleGatewayUpdateCheck } from "../infra/update-startup.js";
 import { startDiagnosticHeartbeat, stopDiagnosticHeartbeat } from "../logging/diagnostic.js";
 import { createSubsystemLogger, runtimeForLogger } from "../logging/subsystem.js";
 import { runOnboardingWizard } from "../wizard/onboarding.js";
+import { initCostTracker } from "./agency-cost-tracker.js";
 import { startGatewayConfigReloader } from "./config-reload.js";
 import { ExecApprovalManager } from "./exec-approval-manager.js";
 import { NodeRegistry } from "./node-registry.js";
@@ -50,6 +52,7 @@ import { createAgentEventHandler } from "./server-chat.js";
 import { createGatewayCloseHandler } from "./server-close.js";
 import { buildGatewayCronService } from "./server-cron.js";
 import { startGatewayDiscovery } from "./server-discovery-runtime.js";
+import { initPerformanceProfiler } from "./server-http.js";
 import { applyGatewayLaneConcurrency } from "./server-lanes.js";
 import { startGatewayMaintenanceTimers } from "./server-maintenance.js";
 import { GATEWAY_EVENTS, listGatewayMethods } from "./server-methods-list.js";
@@ -557,6 +560,15 @@ export async function startGatewayServer(
     logChannels,
     logBrowser,
   }));
+
+  // Initialize Redis-backed services (cost tracker & performance profiler).
+  // Gracefully skipped when UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN are not set.
+  const redisClient = createRedisClient();
+  if (redisClient) {
+    initCostTracker(redisClient);
+    initPerformanceProfiler(redisClient);
+    log.info("gateway: redis-backed cost tracker and performance profiler initialized");
+  }
 
   const { applyHotReload, requestGatewayRestart } = createGatewayReloadHandlers({
     deps,

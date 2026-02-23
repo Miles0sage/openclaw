@@ -9,6 +9,7 @@ import { createReplyPrefixOptions } from "../../../channels/reply-prefix.js";
 import { createTypingCallbacks } from "../../../channels/typing.js";
 import { resolveStorePath, updateLastRoute } from "../../../config/sessions.js";
 import { danger, logVerbose, shouldLogVerbose } from "../../../globals.js";
+import { runAgentGraph, toRoutingDecision } from "../../../routing/agent-graph.js";
 import { removeSlackReaction } from "../../actions.js";
 import { resolveSlackThreadTargets } from "../../threading.js";
 import { createSlackReplyDeliveryPlan, deliverReplies } from "../replies.js";
@@ -101,6 +102,53 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
     channel: "slack",
     accountId: route.accountId,
   });
+
+  // ---------------------------------------------------------------------------
+  // Route message through the LangGraph agent graph for classification & agent
+  // selection.  The routing decision is attached to the context payload so
+  // downstream reply logic can leverage it (e.g. adaptive effort, skill
+  // filtering).  Failures are non-fatal: the existing dispatch pipeline
+  // continues with its default routing when the graph cannot be reached.
+  // ---------------------------------------------------------------------------
+  const rawBody =
+    prepared.ctxPayload.RawBody ??
+    prepared.ctxPayload.CommandBody ??
+    prepared.ctxPayload.Body ??
+    "";
+  try {
+    const graphResult = await runAgentGraph({
+      query: rawBody,
+      sessionKey: prepared.ctxPayload.SessionKey ?? route.sessionKey,
+      channel: "slack",
+      accountId: route.accountId,
+    });
+    const routingDecision = toRoutingDecision(graphResult);
+
+    // Attach the graph routing metadata to the context payload so the reply
+    // pipeline can inspect it (agent id, effort level, confidence, etc.).
+    (prepared.ctxPayload as Record<string, unknown>).AgentGraphRouting = {
+      agentId: routingDecision.agentId,
+      agentName: routingDecision.agentName,
+      effortLevel: routingDecision.effortLevel,
+      confidence: routingDecision.confidence,
+      selectedSkills: routingDecision.selectedSkills,
+      reason: routingDecision.reason,
+      finalResponse: graphResult.finalResponse,
+      // Attach pre-generated voice audio path so Slack replies can include it.
+      voiceAudioPath: graphResult.voice?.audioPath,
+      voiceEnabled: graphResult.voice?.enabled,
+      voiceProvider: graphResult.voice?.provider,
+    };
+
+    logVerbose(
+      `slack: agent-graph routed to ${routingDecision.agentName} ` +
+        `(effort=${routingDecision.effortLevel}, confidence=${routingDecision.confidence.toFixed(2)}` +
+        `${graphResult.voice?.enabled ? `, voice=${graphResult.voice.provider ?? "pending"}` : ""})`,
+    );
+  } catch (err) {
+    // Non-fatal: fall through to the standard dispatch pipeline.
+    logVerbose(`slack: agent-graph routing skipped: ${String(err)}`);
+  }
 
   const { dispatcher, replyOptions, markDispatchIdle } = createReplyDispatcherWithTyping({
     ...prefixOptions,

@@ -67,10 +67,10 @@
       "name": "CodeGen Pro",
       "emoji": "💻",
       "type": "developer",
-      "model": "kimi-2.5",
-      "apiProvider": "deepseek",
-      "apiKeyEnv": "DEEPSEEK_API_KEY",
-      "contextWindow": 64000,
+      "model": "claude-sonnet-4-5-20241022",
+      "apiProvider": "anthropic",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "contextWindow": 200000,
       "maxOutputTokens": 8192,
       "temperature": 0.3,
       "persona": "I'm CodeGen Pro. I write code that works on the first deploy. I've shipped enough broken PRs to know that 'it works on my machine' is never good enough. I think about edge cases before I write the happy path. Clean code isn't about elegance — it's about the next person reading it at 2 AM when production is down. I know my lane: button fixes, API endpoints, components, tests. When a task needs architectural reasoning, I flag it for escalation. I've learned that trying to be a hero on tasks above my weight class wastes more time than admitting the limitation. Every message ends with: — 💻 CodeGen Pro",
@@ -142,10 +142,10 @@
       "name": "Pentest AI",
       "emoji": "🔒",
       "type": "security",
-      "model": "kimi",
-      "apiProvider": "deepseek",
-      "apiKeyEnv": "DEEPSEEK_API_KEY",
-      "contextWindow": 128000,
+      "model": "claude-sonnet-4-5-20241022",
+      "apiProvider": "anthropic",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "contextWindow": 200000,
       "maxOutputTokens": 8192,
       "temperature": 0.5,
       "thinkingBudget": 5000,
@@ -221,6 +221,43 @@
       ],
       "talks_to": ["Cybershield PM", "CodeGen Pro", "Pentest AI"],
       "signature": "— 🗄️ SupabaseConnector"
+    },
+    "research_agent": {
+      "name": "Research AI",
+      "emoji": "🔍",
+      "type": "researcher",
+      "model": "claude-haiku-4-5-20251001",
+      "apiProvider": "anthropic",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "contextWindow": 200000,
+      "maxOutputTokens": 2048,
+      "temperature": 0.2,
+      "persona": "I'm Research AI. I find information fast and synthesize it clearly. I fetch web pages, parse PDFs, and search the internet to give you accurate, sourced answers. I use Haiku for speed — research shouldn't keep you waiting.",
+      "skills": ["web_search", "web_fetch", "pdf_parse", "summarization", "citation"],
+      "maxTokens": 2048,
+      "talks_to": ["Cybershield PM", "CodeGen Pro"],
+      "signature": "— 🔍 Research AI"
+    },
+    "memory_agent": {
+      "name": "Memory Agent",
+      "emoji": "🧠",
+      "type": "memory",
+      "local": true,
+      "persona": "I manage persistent knowledge across sessions. I store user profiles, conversation history, and contextual preferences using SQLite and Redis.",
+      "skills": ["session_management", "user_profiles", "context_recall"],
+      "talks_to": ["Cybershield PM"]
+    },
+    "vision_agent": {
+      "name": "Vision AI",
+      "emoji": "👁️",
+      "type": "vision",
+      "model": "claude-haiku-4-5-20251001",
+      "apiProvider": "anthropic",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "maxTokens": 1024,
+      "temperature": 0.2,
+      "persona": "I analyze images from smart glasses in real-time. I describe scenes concisely, read text accurately, identify objects, and translate signs. I keep responses under 100 words unless asked for detail.",
+      "skills": ["scene_description", "ocr", "object_identification", "translation", "visual_qa"]
     }
   },
   "workflows": {
@@ -423,6 +460,54 @@
         "phase",
         "sprint",
         "agile"
+      ],
+      "research": [
+        "search",
+        "research",
+        "lookup",
+        "find",
+        "google",
+        "web search",
+        "browse",
+        "latest",
+        "news",
+        "current",
+        "what is",
+        "who is",
+        "how to",
+        "summarize",
+        "citation",
+        "source",
+        "article",
+        "information"
+      ],
+      "vision": [
+        "image",
+        "photo",
+        "picture",
+        "camera",
+        "vision",
+        "see",
+        "look",
+        "glasses",
+        "smart glasses",
+        "scene",
+        "describe scene",
+        "ocr",
+        "read text",
+        "translate sign",
+        "identify object",
+        "what is this",
+        "what do you see",
+        "recognize",
+        "visual",
+        "snapshot",
+        "capture",
+        "scan",
+        "barcode",
+        "qr code",
+        "label",
+        "sign"
       ]
     }
   },
@@ -519,6 +604,40 @@
       "documentation": "https://platform.minimax.io/docs/api-reference/text-openai-api",
       "signupUrl": "https://platform.minimax.io",
       "notes": "OpenAI-compatible API. Alternative for high-throughput coding tasks."
+    }
+  },
+  "voice": {
+    "enabled": true,
+    "provider": "elevenlabs",
+    "defaultVoice": "rachel",
+    "maxChars": 5000
+  },
+  "messages": {
+    "tts": {
+      "auto": "tagged",
+      "mode": "final",
+      "provider": "elevenlabs",
+      "elevenlabs": {
+        "voiceId": "21m00Tcm4TlvDq8ikWAM",
+        "modelId": "eleven_turbo_v2_5",
+        "voiceSettings": {
+          "stability": 0.5,
+          "similarityBoost": 0.75,
+          "style": 0.0,
+          "useSpeakerBoost": true,
+          "speed": 1.0
+        }
+      },
+      "maxTextLength": 5000,
+      "timeoutMs": 30000,
+      "modelOverrides": {
+        "enabled": true,
+        "allowText": true,
+        "allowProvider": true,
+        "allowVoice": true,
+        "allowModelId": true,
+        "allowVoiceSettings": true
+      }
     }
   },
   "slack_alerts": {

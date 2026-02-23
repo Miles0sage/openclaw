@@ -26,6 +26,7 @@ import { createTypingCallbacks } from "../../channels/typing.js";
 import { resolveMarkdownTableMode } from "../../config/markdown-tables.js";
 import { readSessionUpdatedAt, resolveStorePath } from "../../config/sessions.js";
 import { danger, logVerbose, shouldLogVerbose } from "../../globals.js";
+import { runAgentGraph, toRoutingDecision } from "../../routing/agent-graph.js";
 import { buildAgentSessionKey } from "../../routing/resolve-route.js";
 import { resolveThreadSessionKeys } from "../../routing/session-key.js";
 import { buildUntrustedChannelMetadata } from "../../security/channel-metadata.js";
@@ -390,6 +391,52 @@ export async function processDiscordMessage(ctx: DiscordMessagePreflightContext)
       },
     }).onReplyStart,
   });
+
+  // ---------------------------------------------------------------------------
+  // Route message through the LangGraph agent graph for classification & agent
+  // selection.  The routing decision is attached to the context payload so
+  // downstream reply logic can leverage it (e.g. adaptive effort, skill
+  // filtering, Discord embed metadata).  Failures are non-fatal: the existing
+  // dispatch pipeline continues with its default routing when the graph cannot
+  // be reached.
+  // ---------------------------------------------------------------------------
+  const agentGraphQuery = ctxPayload.RawBody ?? ctxPayload.CommandBody ?? ctxPayload.Body ?? "";
+  try {
+    const graphResult = await runAgentGraph({
+      query: agentGraphQuery,
+      sessionKey: ctxPayload.SessionKey ?? baseSessionKey,
+      channel: "discord",
+      accountId,
+    });
+    const routingDecision = toRoutingDecision(graphResult);
+
+    // Attach the graph routing metadata to the context payload so the reply
+    // pipeline can inspect it (agent id, effort level, confidence, etc.).
+    // For Discord, embed-aware consumers can use AgentGraphRouting to build
+    // richer embed responses with agent name, confidence, and selected skills.
+    (ctxPayload as Record<string, unknown>).AgentGraphRouting = {
+      agentId: routingDecision.agentId,
+      agentName: routingDecision.agentName,
+      effortLevel: routingDecision.effortLevel,
+      confidence: routingDecision.confidence,
+      selectedSkills: routingDecision.selectedSkills,
+      reason: routingDecision.reason,
+      finalResponse: graphResult.finalResponse,
+      // Attach pre-generated voice audio path so Discord replies can include it.
+      voiceAudioPath: graphResult.voice?.audioPath,
+      voiceEnabled: graphResult.voice?.enabled,
+      voiceProvider: graphResult.voice?.provider,
+    };
+
+    logVerbose(
+      `discord: agent-graph routed to ${routingDecision.agentName} ` +
+        `(effort=${routingDecision.effortLevel}, confidence=${routingDecision.confidence.toFixed(2)}` +
+        `${graphResult.voice?.enabled ? `, voice=${graphResult.voice.provider ?? "pending"}` : ""})`,
+    );
+  } catch (err) {
+    // Non-fatal: fall through to the standard dispatch pipeline.
+    logVerbose(`discord: agent-graph routing skipped: ${String(err)}`);
+  }
 
   const { queuedFinal, counts } = await dispatchInboundMessage({
     ctx: ctxPayload,
