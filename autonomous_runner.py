@@ -117,6 +117,7 @@ class PlanStep:
     result: str = ""
     attempts: int = 0
     error: str = ""
+    delegate_to: str = ""           # agent key for delegation (empty = use default agent)
 
 
 @dataclass
@@ -198,8 +199,12 @@ def _save_progress(progress: JobProgress):
         json.dump(progress.to_dict(), f, indent=2)
 
 
-def _filter_tools_for_phase(phase: Phase) -> list:
-    """Return the AGENT_TOOLS definitions filtered for a given phase."""
+def _filter_tools_for_phase(phase: Phase, agent_key: str = None) -> list:
+    """Return the AGENT_TOOLS definitions filtered for a given phase.
+
+    If agent_key is provided, further restricts to the agent's tool profile
+    (intersection of phase tools and agent allowlist).
+    """
     allowed = {
         Phase.RESEARCH: RESEARCH_TOOLS,
         Phase.PLAN:     PLAN_TOOLS,
@@ -208,7 +213,19 @@ def _filter_tools_for_phase(phase: Phase) -> list:
         Phase.DELIVER:  DELIVER_TOOLS,
     }.get(phase, EXECUTE_TOOLS)
 
-    return [t for t in AGENT_TOOLS if t["name"] in allowed]
+    phase_tools = [t for t in AGENT_TOOLS if t["name"] in allowed]
+
+    # Apply agent-specific tool profile if available
+    if agent_key:
+        try:
+            from agent_tool_profiles import get_tools_for_agent
+            agent_allowlist = get_tools_for_agent(agent_key)
+            if agent_allowlist is not None:
+                phase_tools = [t for t in phase_tools if t["name"] in agent_allowlist]
+        except ImportError:
+            pass
+
+    return phase_tools
 
 
 def _select_agent_for_job(job: dict) -> str:
@@ -299,9 +316,9 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
     # to execute_tool(). Non-Anthropic providers (Kimi/deepseek, MiniMax/minimax)
     # write tool calls as prose/code in their text response, which never executes.
     if tools:
-        # For tool-executing phases (execute, verify, deliver), ALWAYS use Claude Haiku.
-        # It's the cheapest Anthropic model with native tool_use support.
-        if provider != "anthropic":
+        # For tool-executing phases (execute, verify, deliver), use a provider with
+        # native tool_use support. Anthropic and Gemini both support it.
+        if provider not in ("anthropic", "gemini"):
             logger.info(
                 f"Tool execution required but provider='{provider}' doesn't support tool_use. "
                 f"Switching to claude-haiku-4-5-20251001 for phase={phase}, assigned_agent={agent_key}"
@@ -336,124 +353,213 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
             cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
 
         # Tool-use loop: agent may request tools multiple times.
-        # Loop continues until Claude returns stop_reason="end_turn" with no tool_use blocks.
+        # Loop continues until the model returns no tool_use blocks.
+        # Supports both Anthropic SDK objects and Gemini dict-based responses.
         iterations = 0
+        use_gemini = provider == "gemini"
+
         while iterations < MAX_TOOL_ITERATIONS:
             iterations += 1
 
-            # Cache conversation prefix — mark last user message so the prefix is cached
-            if messages and len(messages) >= 2:
-                for i in range(len(messages) - 1, -1, -1):
-                    if messages[i]["role"] == "user":
-                        content = messages[i]["content"]
-                        if isinstance(content, str):
-                            messages[i]["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
-                        elif isinstance(content, list):
-                            last_block = content[-1]
-                            if isinstance(last_block, dict) and "cache_control" not in last_block:
-                                content[-1] = {**last_block, "cache_control": {"type": "ephemeral"}}
-                        break
+            if use_gemini:
+                # Gemini tool-use path — use GeminiClient directly
+                from gemini_client import GeminiClient as _GeminiClient
 
-            # Snapshot current messages list length to avoid lambda closure mutation issues
-            _current_messages = list(messages)
-            _current_model = model
-            _current_tools = cached_tools or tools
-            _current_system = cached_system
+                # Flatten messages to a single prompt for Gemini
+                prompt_parts = []
+                for m in messages:
+                    role_label = "User" if m["role"] == "user" else "Assistant"
+                    c = m["content"]
+                    if isinstance(c, str):
+                        prompt_parts.append(f"{role_label}: {c}")
+                    elif isinstance(c, list):
+                        for block in c:
+                            if isinstance(block, dict):
+                                if block.get("type") == "text":
+                                    prompt_parts.append(f"{role_label}: {block['text']}")
+                                elif block.get("type") == "tool_result":
+                                    prompt_parts.append(f"Tool result ({block.get('tool_use_id','')}): {block.get('content','')}")
 
-            response = await loop.run_in_executor(
-                None,
-                lambda: anthropic_client.messages.create(
-                    model=_current_model,
-                    max_tokens=8192,
-                    system=_current_system,
-                    messages=_current_messages,
-                    tools=_current_tools,
-                )
-            )
+                flat_prompt = "\n".join(prompt_parts)
+                _gemini_client = _GeminiClient()
 
-            tokens_in = response.usage.input_tokens
-            tokens_out = response.usage.output_tokens
-            total_tokens += tokens_out
-            step_cost = calculate_cost(model, tokens_in, tokens_out)
-            total_cost += step_cost
-
-            # Log cost
-            log_cost_event(
-                project=job_id.split("-")[0] if job_id else "openclaw",
-                agent=agent_key,
-                model=model,
-                tokens_input=tokens_in,
-                tokens_output=tokens_out,
-                cost=step_cost,
-            )
-
-            # Process response content blocks
-            tool_use_blocks = []
-            text_parts = []
-
-            for block in response.content:
-                if block.type == "text":
-                    text_parts.append(block.text)
-                elif block.type == "tool_use":
-                    tool_use_blocks.append(block)
-
-            final_text = "\n".join(text_parts)
-
-            # If no tool calls, we are done
-            if not tool_use_blocks:
-                break
-
-            # Execute each tool call
-            tool_results = []
-            for tool_block in tool_use_blocks:
-                tool_name = tool_block.name
-                tool_input = tool_block.input
-
-                _log_phase(job_id, phase, {
-                    "event": "tool_call",
-                    "tool": tool_name,
-                    "input": tool_input,
-                })
-
-                # Run tool in executor (some tools do subprocess/IO)
-                result_str = await loop.run_in_executor(
-                    None, execute_tool, tool_name, tool_input
+                _current_model = model
+                _current_tools = tools
+                gemini_response = await loop.run_in_executor(
+                    None,
+                    lambda: _gemini_client.call(
+                        model=_current_model,
+                        prompt=flat_prompt,
+                        system_prompt=system_prompt,
+                        max_tokens=8192,
+                        tools=_current_tools,
+                    )
                 )
 
-                all_tool_calls.append({
-                    "tool": tool_name,
-                    "input": tool_input,
-                    "result": result_str[:2000],
-                })
+                tokens_in = gemini_response.tokens_input
+                tokens_out = gemini_response.tokens_output
+                total_tokens += tokens_out
+                step_cost = calculate_cost(model, tokens_in, tokens_out)
+                total_cost += step_cost
 
-                _log_phase(job_id, phase, {
-                    "event": "tool_result",
-                    "tool": tool_name,
-                    "result": result_str[:500],
-                })
+                log_cost_event(
+                    project=job_id.split("-")[0] if job_id else "openclaw",
+                    agent=agent_key,
+                    model=model,
+                    tokens_input=tokens_in,
+                    tokens_output=tokens_out,
+                    cost=step_cost,
+                )
 
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_block.id,
-                    "content": result_str,
-                })
+                final_text = gemini_response.content or ""
+                tool_use_blocks = gemini_response.tool_calls or []
 
-            # Append assistant response + tool results to messages for next iteration
-            # IMPORTANT: Serialize response.content to dicts (not SDK objects) to avoid JSON serialization errors
-            serialized_content = []
-            for block in response.content:
-                if block.type == "text":
-                    serialized_content.append({"type": "text", "text": block.text})
-                elif block.type == "tool_use":
+                if not tool_use_blocks:
+                    break
+
+                # Execute each Gemini tool call (already normalized to dicts)
+                tool_results = []
+                serialized_content = []
+                if final_text:
+                    serialized_content.append({"type": "text", "text": final_text})
+
+                for tc in tool_use_blocks:
+                    tool_name = tc["name"]
+                    tool_input = tc.get("input", {})
+                    tc_id = tc.get("id", f"gemini_tc_{iterations}")
+
                     serialized_content.append({
-                        "type": "tool_use",
-                        "id": block.id,
-                        "name": block.name,
-                        "input": block.input
+                        "type": "tool_use", "id": tc_id,
+                        "name": tool_name, "input": tool_input,
                     })
 
-            messages.append({"role": "assistant", "content": serialized_content})
-            messages.append({"role": "user", "content": tool_results})
+                    _log_phase(job_id, phase, {"event": "tool_call", "tool": tool_name, "input": tool_input})
+
+                    result_str = await loop.run_in_executor(None, execute_tool, tool_name, tool_input)
+
+                    all_tool_calls.append({"tool": tool_name, "input": tool_input, "result": result_str[:2000]})
+                    _log_phase(job_id, phase, {"event": "tool_result", "tool": tool_name, "result": result_str[:500]})
+
+                    tool_results.append({"type": "tool_result", "tool_use_id": tc_id, "content": result_str})
+
+                messages.append({"role": "assistant", "content": serialized_content})
+                messages.append({"role": "user", "content": tool_results})
+
+            else:
+                # Anthropic tool-use path (original)
+                # Cache conversation prefix — mark last user message so the prefix is cached
+                if messages and len(messages) >= 2:
+                    for i in range(len(messages) - 1, -1, -1):
+                        if messages[i]["role"] == "user":
+                            content = messages[i]["content"]
+                            if isinstance(content, str):
+                                messages[i]["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+                            elif isinstance(content, list):
+                                last_block = content[-1]
+                                if isinstance(last_block, dict) and "cache_control" not in last_block:
+                                    content[-1] = {**last_block, "cache_control": {"type": "ephemeral"}}
+                            break
+
+                # Snapshot current messages list length to avoid lambda closure mutation issues
+                _current_messages = list(messages)
+                _current_model = model
+                _current_tools = cached_tools or tools
+                _current_system = cached_system
+
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: anthropic_client.messages.create(
+                        model=_current_model,
+                        max_tokens=8192,
+                        system=_current_system,
+                        messages=_current_messages,
+                        tools=_current_tools,
+                    )
+                )
+
+                tokens_in = response.usage.input_tokens
+                tokens_out = response.usage.output_tokens
+                total_tokens += tokens_out
+                step_cost = calculate_cost(model, tokens_in, tokens_out)
+                total_cost += step_cost
+
+                # Log cost
+                log_cost_event(
+                    project=job_id.split("-")[0] if job_id else "openclaw",
+                    agent=agent_key,
+                    model=model,
+                    tokens_input=tokens_in,
+                    tokens_output=tokens_out,
+                    cost=step_cost,
+                )
+
+                # Process response content blocks
+                tool_use_blocks = []
+                text_parts = []
+
+                for block in response.content:
+                    if block.type == "text":
+                        text_parts.append(block.text)
+                    elif block.type == "tool_use":
+                        tool_use_blocks.append(block)
+
+                final_text = "\n".join(text_parts)
+
+                # If no tool calls, we are done
+                if not tool_use_blocks:
+                    break
+
+                # Execute each tool call
+                tool_results = []
+                for tool_block in tool_use_blocks:
+                    tool_name = tool_block.name
+                    tool_input = tool_block.input
+
+                    _log_phase(job_id, phase, {
+                        "event": "tool_call",
+                        "tool": tool_name,
+                        "input": tool_input,
+                    })
+
+                    # Run tool in executor (some tools do subprocess/IO)
+                    result_str = await loop.run_in_executor(
+                        None, execute_tool, tool_name, tool_input
+                    )
+
+                    all_tool_calls.append({
+                        "tool": tool_name,
+                        "input": tool_input,
+                        "result": result_str[:2000],
+                    })
+
+                    _log_phase(job_id, phase, {
+                        "event": "tool_result",
+                        "tool": tool_name,
+                        "result": result_str[:500],
+                    })
+
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_block.id,
+                        "content": result_str,
+                    })
+
+                # Append assistant response + tool results to messages for next iteration
+                # IMPORTANT: Serialize response.content to dicts (not SDK objects)
+                serialized_content = []
+                for block in response.content:
+                    if block.type == "text":
+                        serialized_content.append({"type": "text", "text": block.text})
+                    elif block.type == "tool_use":
+                        serialized_content.append({
+                            "type": "tool_use",
+                            "id": block.id,
+                            "name": block.name,
+                            "input": block.input
+                        })
+
+                messages.append({"role": "assistant", "content": serialized_content})
+                messages.append({"role": "user", "content": tool_results})
 
         return {
             "text": final_text,
@@ -555,11 +661,13 @@ async def _plan_phase(job: dict, agent_key: str, research: str,
         f"RESEARCH FINDINGS:\n{research}\n\n"
         f"Create a plan with numbered steps. For each step specify:\n"
         f"- A clear description of what to do\n"
-        f"- Which tools to use (file_write, file_edit, shell_execute, git_operations, etc.)\n\n"
+        f"- Which tools to use (file_write, file_edit, shell_execute, git_operations, etc.)\n"
+        f"- Optionally, a 'delegate_to' agent key if the step should be handled by a specialist:\n"
+        f"  Available agents: coder_agent, elite_coder, hacker_agent, database_agent, research_agent\n\n"
         f"IMPORTANT: Respond ONLY with valid JSON in this exact format:\n"
         f'{{"steps": [\n'
         f'  {{"description": "Step 1: ...", "tools": ["file_write", "shell_execute"]}},\n'
-        f'  {{"description": "Step 2: ...", "tools": ["file_edit"]}}\n'
+        f'  {{"description": "Step 2: ...", "tools": ["file_edit"], "delegate_to": "elite_coder"}}\n'
         f"]}}\n\n"
         f"Keep the plan focused and practical. Maximum {MAX_PLAN_STEPS} steps.\n"
         f"Do NOT include markdown fences or any text outside the JSON."
@@ -599,6 +707,7 @@ async def _plan_phase(job: dict, agent_key: str, research: str,
             index=i,
             description=step_data.get("description", f"Step {i+1}"),
             tool_hints=step_data.get("tools", []),
+            delegate_to=step_data.get("delegate_to", ""),
         ))
 
     progress.total_steps = len(plan.steps)
@@ -632,7 +741,6 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
     progress.phase_status = "running"
     _save_progress(progress)
 
-    tools = _filter_tools_for_phase(Phase.EXECUTE)
     results = []
     conversation_context = []
     workspace = progress.workspace
@@ -646,6 +754,16 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
         step.status = "running"
         progress.step_index = step.index
         _save_progress(progress)
+
+        # Determine which agent runs this step (delegation support)
+        step_agent = step.delegate_to if step.delegate_to else agent_key
+        tools = _filter_tools_for_phase(Phase.EXECUTE, agent_key=step_agent)
+
+        if step.delegate_to:
+            logger.info(
+                f"Step {step.index} delegated to {step.delegate_to} "
+                f"(tools: {len(tools)}) for job {job['id']}"
+            )
 
         prompt = (
             f"You are executing step {step.index + 1} of {len(plan.steps)} for a job.\n\n"
@@ -677,7 +795,7 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
         step_result = None
         for attempt in range(DEFAULT_MAX_RETRIES):
             try:
-                result = await _call_agent(agent_key, prompt, tools=tools,
+                result = await _call_agent(step_agent, prompt, tools=tools,
                                            job_id=job["id"], phase="execute")
                 progress.cost_usd += result["cost_usd"]
 

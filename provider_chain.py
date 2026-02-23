@@ -44,13 +44,17 @@ logger = logging.getLogger("openclaw.provider_chain")
 # ---------------------------------------------------------------------------
 PROVIDER_CHAINS: dict = {
     "tool_executor": [
-        # Only Anthropic supports tool_use — do not add other providers here.
+        # Gemini 2.5 Flash supports native function calling — try it first.
+        # Fall back to Anthropic if Gemini fails or key is missing.
+        {"provider": "gemini",   "model": "gemini-2.5-flash"},
         {"provider": "anthropic", "model": "claude-haiku-4-5-20251001"},
     ],
     "text_reasoner": [
-        # Cheapest provider first — fall through to Anthropic as last resort.
+        # Cheapest provider first — Gemini 3 Flash Preview is FREE.
+        {"provider": "gemini",   "model": "gemini-3-flash-preview"},
         {"provider": "kimi",     "model": "kimi-2.5"},
         {"provider": "minimax",  "model": "m2.5"},
+        {"provider": "gemini",   "model": "gemini-2.5-flash-lite"},
         {"provider": "anthropic","model": "claude-haiku-4-5-20251001"},
     ],
 }
@@ -255,6 +259,12 @@ async def _call_provider(
             lambda: _call_minimax(model, messages, system=system, max_tokens=max_tokens),
         )
 
+    elif provider == "gemini":
+        return await loop.run_in_executor(
+            None,
+            lambda: _call_gemini(model, messages, tools=tools, system=system, max_tokens=max_tokens),
+        )
+
     else:
         raise ValueError(f"Unknown provider: {provider!r}")
 
@@ -428,6 +438,77 @@ def _call_minimax(
     return {
         "content":     response.content,
         "provider":    "minimax",
+        "model":       model,
+        "usage": {
+            "input_tokens":  response.tokens_input,
+            "output_tokens": response.tokens_output,
+        },
+        "stop_reason": response.stop_reason,
+    }
+
+
+def _call_gemini(
+    model: str,
+    messages: list,
+    tools: list = None,
+    system: str = None,
+    max_tokens: int = 4096,
+) -> dict:
+    """Synchronous Gemini call via gemini_client.GeminiClient.
+
+    Same flattening strategy as _call_kimi — GeminiClient.call() takes
+    (model, prompt, system_prompt) rather than a messages array.
+
+    When tools are provided, they are converted to Gemini functionDeclarations
+    and any functionCall responses are normalized to Anthropic-style tool_use
+    content blocks (list format matching Anthropic provider output).
+    """
+    from gemini_client import GeminiClient  # type: ignore
+
+    sys_prompt = system
+    user_messages = []
+    for msg in messages:
+        if msg.get("role") == "system" and sys_prompt is None:
+            sys_prompt = msg["content"]
+        else:
+            user_messages.append(msg)
+
+    if not user_messages:
+        raise ValueError("No user messages provided for gemini call")
+
+    if len(user_messages) == 1:
+        prompt = user_messages[-1]["content"]
+    else:
+        parts = []
+        for m in user_messages:
+            role_label = "User" if m["role"] == "user" else "Assistant"
+            parts.append(f"{role_label}: {m['content']}")
+        prompt = "\n".join(parts)
+
+    client = GeminiClient()
+    response = client.call(
+        model=model,
+        prompt=prompt,
+        system_prompt=sys_prompt,
+        max_tokens=max_tokens,
+        tools=tools,
+    )
+
+    # Build content — if tool calls present, return as list of content blocks
+    # (matching Anthropic format for tool_executor chain compatibility).
+    if response.tool_calls:
+        content_blocks = []
+        if response.content:
+            content_blocks.append({"type": "text", "text": response.content})
+        for tc in response.tool_calls:
+            content_blocks.append(tc)
+        content = content_blocks
+    else:
+        content = response.content
+
+    return {
+        "content":     content,
+        "provider":    "gemini",
         "model":       model,
         "usage": {
             "input_tokens":  response.tokens_input,

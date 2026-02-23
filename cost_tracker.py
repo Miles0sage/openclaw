@@ -21,6 +21,9 @@ COST_PRICING = {
     "kimi-2.5":                   {"input": 0.14, "output": 0.28},
     "kimi":                       {"input": 0.27, "output": 0.68},
     "m2.5":                       {"input": 0.30, "output": 1.20},
+    "gemini-2.5-flash-lite":      {"input": 0.10, "output": 0.40},
+    "gemini-2.5-flash":           {"input": 0.30, "output": 2.50},
+    "gemini-3-flash-preview":     {"input": 0.00, "output": 0.00},
 }
 
 # Default fallback when a model is not in the table

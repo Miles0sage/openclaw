@@ -39,6 +39,19 @@ PRICING = {
         "input": 15.0,      # $15.00 per million input tokens
         "output": 60.0,     # $60.00 per million output tokens
     },
+    # Gemini Models (Google)
+    "gemini-2.5-flash-lite": {
+        "input": 0.10,      # $0.10 per million input tokens
+        "output": 0.40,     # $0.40 per million output tokens
+    },
+    "gemini-2.5-flash": {
+        "input": 0.30,      # $0.30 per million input tokens
+        "output": 2.50,     # $2.50 per million output tokens
+    },
+    "gemini-3-flash-preview": {
+        "input": 0.0,       # FREE during preview
+        "output": 0.0,      # FREE during preview
+    },
     # Old aliases for backward compat
     "claude-3-5-haiku-20241022": {"input": 0.8, "output": 4.0},
     "claude-3-5-sonnet-20241022": {"input": 3.0, "output": 15.0},

@@ -126,6 +126,7 @@ from audit_routes import router as audit_router
 
 from deepseek_client import DeepseekClient
 from minimax_client import MiniMaxClient
+from gemini_client import GeminiClient
 
 # Import response cache
 from response_cache import init_response_cache, get_response_cache
@@ -1165,6 +1166,44 @@ Remember: You ARE {name}. Stay in character!
             return response_text, tokens_output
         except Exception as e:
             logger.error(f"❌ MiniMax API error: {e}")
+            raise
+    elif provider == "gemini":
+        # For Gemini models
+        try:
+            gemini_client = GeminiClient()
+
+            # Map model names if needed
+            valid_models = list(GeminiClient.MODELS.keys())
+            api_model = model if model in valid_models else "gemini-2.5-flash"
+
+            response = gemini_client.call(
+                model=api_model,
+                prompt=prompt if not conversation else full_prompt,
+                system_prompt=anthropic_system,
+                max_tokens=8192,
+                temperature=0.3
+            )
+
+            response_text = response.content
+            tokens_input = response.tokens_input
+            tokens_output = response.tokens_output
+
+            # Log cost event (non-blocking)
+            try:
+                cost = log_cost_event(
+                    project="openclaw",
+                    agent=agent_key,
+                    model=api_model,
+                    tokens_input=tokens_input,
+                    tokens_output=tokens_output
+                )
+                logger.info(f"💰 Cost logged: ${cost:.4f} ({agent_key} / {api_model})")
+            except Exception as e:
+                logger.warning(f"⚠️ Cost logging failed: {e}")
+
+            return response_text, tokens_output
+        except Exception as e:
+            logger.error(f"❌ Gemini API error: {e}")
             raise
     else:
         raise ValueError(f"Unknown provider: {provider}")

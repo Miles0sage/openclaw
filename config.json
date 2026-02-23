@@ -226,17 +226,19 @@
       "name": "Research AI",
       "emoji": "🔍",
       "type": "researcher",
-      "model": "claude-haiku-4-5-20251001",
-      "apiProvider": "anthropic",
-      "apiKeyEnv": "ANTHROPIC_API_KEY",
-      "contextWindow": 200000,
-      "maxOutputTokens": 2048,
+      "model": "gemini-3-flash-preview",
+      "apiProvider": "gemini",
+      "apiKeyEnv": "GEMINI_API_KEY",
+      "contextWindow": 1048576,
+      "maxOutputTokens": 8192,
       "temperature": 0.2,
-      "persona": "I'm Research AI. I find information fast and synthesize it clearly. I fetch web pages, parse PDFs, and search the internet to give you accurate, sourced answers. I use Haiku for speed — research shouldn't keep you waiting.",
+      "persona": "I'm Research AI. I find information fast and synthesize it clearly. I fetch web pages, parse PDFs, and search the internet to give you accurate, sourced answers. I run on Gemini 3 Flash Preview — free research at scale.",
       "skills": ["web_search", "web_fetch", "pdf_parse", "summarization", "citation"],
-      "maxTokens": 2048,
+      "maxTokens": 8192,
       "talks_to": ["Cybershield PM", "CodeGen Pro"],
-      "signature": "— 🔍 Research AI"
+      "signature": "— 🔍 Research AI",
+      "costSavings": "100% free (Gemini 3 Flash Preview)",
+      "notes": "Gemini 3 Flash Preview is free during preview period. 1M token context window."
     },
     "memory_agent": {
       "name": "Memory Agent",
@@ -604,6 +606,45 @@
       "documentation": "https://platform.minimax.io/docs/api-reference/text-openai-api",
       "signupUrl": "https://platform.minimax.io",
       "notes": "OpenAI-compatible API. Alternative for high-throughput coding tasks."
+    },
+    "gemini": {
+      "name": "Google Gemini",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "apiKeyEnv": "GEMINI_API_KEY",
+      "description": "Google Gemini models — free preview tier + cheap production models with native tool calling",
+      "models": {
+        "gemini-2.5-flash-lite": {
+          "name": "Gemini 2.5 Flash-Lite",
+          "type": "text",
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "costPer1MInputTokens": 0.1,
+          "costPer1MOutputTokens": 0.4,
+          "useCase": "Simple text tasks, classification, extraction"
+        },
+        "gemini-2.5-flash": {
+          "name": "Gemini 2.5 Flash",
+          "type": "text",
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "costPer1MInputTokens": 0.3,
+          "costPer1MOutputTokens": 2.5,
+          "features": ["functionCalling", "largeContext"],
+          "useCase": "Tool execution, coding, multi-step reasoning"
+        },
+        "gemini-3-flash-preview": {
+          "name": "Gemini 3 Flash Preview",
+          "type": "text",
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "costPer1MInputTokens": 0.0,
+          "costPer1MOutputTokens": 0.0,
+          "useCase": "Research, planning, text generation (FREE during preview)"
+        }
+      },
+      "documentation": "https://ai.google.dev/gemini-api/docs",
+      "signupUrl": "https://aistudio.google.com",
+      "notes": "Gemini 3 Flash Preview is FREE. Native function calling support. 1M token context window."
     }
   },
   "voice": {
