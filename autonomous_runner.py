@@ -447,8 +447,9 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
 
             else:
                 # Anthropic tool-use path (original)
-                # Cache conversation prefix — mark last user message so the prefix is cached
-                if messages and len(messages) >= 2:
+                # Cache the FIRST user message only (iteration 1) — avoids
+                # accumulating >4 cache_control blocks across tool-loop iterations.
+                if iterations == 1 and messages:
                     for i in range(len(messages) - 1, -1, -1):
                         if messages[i]["role"] == "user":
                             content = messages[i]["content"]
