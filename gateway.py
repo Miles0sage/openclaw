@@ -1549,7 +1549,7 @@ async def list_agents():
 from tmux_spawner import get_spawner
 
 class SpawnRequest(BaseModel):
-    job_id: str
+    job_id: Optional[str] = None
     prompt: str
     worktree_repo: Optional[str] = None
     use_worktree: bool = False
@@ -1574,9 +1574,11 @@ async def list_agent_panes():
 async def spawn_agent(req: SpawnRequest):
     """Spawn a single Claude Code agent in a tmux pane."""
     try:
+        import uuid
+        job_id = req.job_id or f"ui-{uuid.uuid4().hex[:8]}"
         spawner = get_spawner()
         pane_id = spawner.spawn_agent(
-            job_id=req.job_id,
+            job_id=job_id,
             prompt=req.prompt,
             worktree_repo=req.worktree_repo,
             use_worktree=req.use_worktree,
@@ -1584,7 +1586,7 @@ async def spawn_agent(req: SpawnRequest):
             timeout_minutes=req.timeout_minutes,
             claude_args=req.claude_args,
         )
-        return {"success": True, "pane_id": pane_id, "job_id": req.job_id}
+        return {"success": True, "pane_id": pane_id, "job_id": job_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

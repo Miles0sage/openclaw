@@ -2481,7 +2481,7 @@
           return;
         }
 
-        const panesList = panes.panes || panes.data || [];
+        const panesList = panes.agents || panes.panes || panes.data || [];
         if (!panesList.length) {
           el.innerHTML = `<div class="pane-placeholder">
             <div class="pane-placeholder-icon">&#x25A3;</div>
@@ -2500,7 +2500,7 @@
                 <span class="pane-id">${p.pane_id || p.id || "--"}</span>
                 ${p.job_id ? `<span style="margin-left:8px;font-size:11px;color:var(--text3)">Job: <code>${shortId(p.job_id)}</code></span>` : ""}
               </div>
-              <span class="pane-runtime">${elapsed(p.started_at, null)}</span>
+              <span class="pane-runtime">${p.runtime_human || elapsed(p.started_at, null)}</span>
             </div>
             <div class="pane-output">${(p.last_output || p.output || "No output").replace(/</g, "&lt;")}</div>
             <div class="pane-actions">
@@ -2515,8 +2515,8 @@
       async function killPane(paneId) {
         if (!confirm("Kill agent pane " + paneId + "?")) return;
         try {
-          const r = await fetch("/api/agents/panes/" + paneId + "/kill", {
-            method: "POST",
+          const r = await fetch("/api/agents/panes/" + encodeURIComponent(paneId), {
+            method: "DELETE",
             headers: { "Content-Type": "application/json", "X-Auth-Token": getToken() },
           });
           if (r.ok) {
