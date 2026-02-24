@@ -3846,101 +3846,133 @@ GOOGLE_SCOPES = [
 
 @app.get("/oauth/start")
 async def oauth_start():
-    """Start Google OAuth flow — open this URL in your browser."""
+    """Start Google OAuth flow — Desktop client OOB, Google shows code on screen."""
     try:
         with open(GOOGLE_CREDS_FILE) as f:
             creds_data = json.load(f)
-        web = creds_data.get("web", creds_data.get("installed", {}))
-        client_id = web["client_id"]
-        redirect_uri = web["redirect_uris"][0]
+        creds = creds_data.get("installed", creds_data.get("web", {}))
+        client_id = creds["client_id"]
 
         import urllib.parse
         params = urllib.parse.urlencode({
             "client_id": client_id,
-            "redirect_uri": redirect_uri,
+            "redirect_uri": "urn:ietf:wg:oauth:2.0:oob",
             "response_type": "code",
             "scope": " ".join(GOOGLE_SCOPES),
             "access_type": "offline",
             "prompt": "consent",
         })
         auth_url = f"https://accounts.google.com/o/oauth2/auth?{params}"
-        # Return a nice HTML page with the link
+        gateway_url = "https://gateway.overseerclaw.uk/oauth/exchange"
         html = f"""<!DOCTYPE html>
 <html><head><title>OpenClaw — Google OAuth</title>
 <style>body{{font-family:system-ui;background:#09090b;color:#fafafa;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}}
-.card{{background:#18181b;border:1px solid #3f3f46;border-radius:12px;padding:40px;max-width:500px;text-align:center}}
-a{{color:#3b82f6;font-size:18px}}</style></head>
+.card{{background:#18181b;border:1px solid #3f3f46;border-radius:12px;padding:40px;max-width:600px;text-align:center}}
+a{{color:#3b82f6;font-size:18px}}
+.steps{{text-align:left;margin-top:20px;line-height:2}}
+.steps b{{color:#22c55e}}
+code{{background:#27272a;padding:2px 8px;border-radius:4px;font-size:13px}}
+input{{width:100%;padding:12px;margin:10px 0;background:#27272a;border:1px solid #3f3f46;color:#fafafa;border-radius:8px;font-size:16px}}
+button{{padding:12px 24px;background:#3b82f6;color:white;border:none;border-radius:8px;font-size:16px;cursor:pointer}}
+button:hover{{background:#2563eb}}
+.result{{margin-top:16px;padding:12px;border-radius:8px;display:none}}</style></head>
 <body><div class="card">
 <h1>OpenClaw OAuth</h1>
-<p>Click below to authorize Gmail + Calendar access:</p>
-<p><a href="{auth_url}">Authorize with Google</a></p>
-<p style="color:#71717a;font-size:12px;margin-top:20px">Scopes: Gmail (read/send/modify) + Calendar (read/events)</p>
+<div class="steps">
+<b>Step 1:</b> <a href="{auth_url}" target="_blank">Click here to authorize with Google</a><br>
+<b>Step 2:</b> Sign in and approve the permissions<br>
+<b>Step 3:</b> Google will show you a code on screen — copy it<br>
+<b>Step 4:</b> Paste the code below:
+</div>
+<form onsubmit="return submitCode()">
+<input type="text" id="codeInput" placeholder="Paste the authorization code here..." autofocus>
+<button type="submit">Save Token</button>
+</form>
+<div id="result" class="result"></div>
+<script>
+async function submitCode() {{
+    const code = document.getElementById('codeInput').value.trim();
+    const result = document.getElementById('result');
+    if (!code) {{
+        result.style.display = 'block';
+        result.style.background = '#7f1d1d';
+        result.textContent = 'Please paste the code from Google.';
+        return false;
+    }}
+    try {{
+        const resp = await fetch('{gateway_url}?code=' + encodeURIComponent(code));
+        const data = await resp.json();
+        if (data.status === 'ok') {{
+            result.style.display = 'block';
+            result.style.background = '#14532d';
+            result.innerHTML = '&#9989; ' + data.message;
+        }} else {{
+            result.style.display = 'block';
+            result.style.background = '#7f1d1d';
+            result.textContent = 'Error: ' + (data.error || 'Unknown error');
+        }}
+    }} catch(e) {{
+        result.style.display = 'block';
+        result.style.background = '#7f1d1d';
+        result.textContent = 'Network error: ' + e.message;
+    }}
+    return false;
+}}
+</script>
 </div></body></html>"""
         return HTMLResponse(html)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.get("/oauth/callback")
-async def oauth_callback(code: str = None, error: str = None):
-    """Google OAuth callback — exchanges code for tokens and saves them."""
-    if error:
-        return HTMLResponse(f"<h1>OAuth Error</h1><p>{error}</p>", status_code=400)
+@app.get("/oauth/exchange")
+async def oauth_exchange(code: str = None):
+    """Exchange an OAuth code for tokens — Desktop client OOB flow."""
     if not code:
-        return HTMLResponse("<h1>Missing code</h1><p>No authorization code received.</p>", status_code=400)
+        return JSONResponse({"error": "No code provided"}, status_code=400)
 
     try:
         with open(GOOGLE_CREDS_FILE) as f:
             creds_data = json.load(f)
-        web = creds_data.get("web", creds_data.get("installed", {}))
+        creds = creds_data.get("installed", creds_data.get("web", {}))
 
-        # Exchange code for tokens
         import httpx as hx
-        token_resp = hx.post(web["token_uri"], data={
+        token_resp = hx.post(creds["token_uri"], data={
             "code": code,
-            "client_id": web["client_id"],
-            "client_secret": web["client_secret"],
-            "redirect_uri": web["redirect_uris"][0],
+            "client_id": creds["client_id"],
+            "client_secret": creds["client_secret"],
+            "redirect_uri": "urn:ietf:wg:oauth:2.0:oob",
             "grant_type": "authorization_code",
         }, timeout=15)
         token_data = token_resp.json()
 
         if "error" in token_data:
-            return HTMLResponse(
-                f"<h1>Token Error</h1><p>{token_data['error']}: {token_data.get('error_description','')}</p>",
-                status_code=400
-            )
+            return JSONResponse({
+                "error": f"{token_data['error']}: {token_data.get('error_description', '')}"
+            }, status_code=400)
 
-        # Save token for Gmail MCP
+        # Save tokens for both Gmail and Calendar MCP
         os.makedirs(GOOGLE_TOKEN_DIR, exist_ok=True)
-        gmail_token_path = os.path.join(GOOGLE_TOKEN_DIR, "token.json")
-        with open(gmail_token_path, "w") as f:
-            json.dump(token_data, f, indent=2)
-
-        # Save token for Calendar MCP (same token, different file)
-        calendar_token_path = os.path.join(GOOGLE_TOKEN_DIR, "calendar_token.json")
-        with open(calendar_token_path, "w") as f:
-            json.dump(token_data, f, indent=2)
+        for fname in ("token.json", "calendar_token.json"):
+            with open(os.path.join(GOOGLE_TOKEN_DIR, fname), "w") as f:
+                json.dump(token_data, f, indent=2)
 
         logger.info("Google OAuth tokens saved successfully")
-
         scopes = token_data.get("scope", "").split()
-        html = f"""<!DOCTYPE html>
-<html><head><title>OpenClaw — OAuth Success</title>
-<style>body{{font-family:system-ui;background:#09090b;color:#fafafa;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}}
-.card{{background:#18181b;border:1px solid #22c55e;border-radius:12px;padding:40px;max-width:500px;text-align:center}}
-.check{{font-size:48px;margin-bottom:16px}}</style></head>
-<body><div class="card">
-<div class="check">&#9989;</div>
-<h1>Authorized!</h1>
-<p>Gmail + Calendar tokens saved. You can close this tab.</p>
-<p style="color:#71717a;font-size:12px;margin-top:20px">Scopes: {', '.join(scopes)}</p>
-<p style="color:#71717a;font-size:12px">Tokens: {gmail_token_path}, {calendar_token_path}</p>
-</div></body></html>"""
-        return HTMLResponse(html)
+        return {"status": "ok", "message": f"Authorized! Tokens saved. Scopes: {', '.join(scopes)}"}
     except Exception as e:
-        logger.error(f"OAuth callback error: {e}")
-        return HTMLResponse(f"<h1>Error</h1><p>{e}</p>", status_code=500)
+        logger.error(f"OAuth exchange error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/oauth/callback")
+async def oauth_callback(code: str = None, error: str = None):
+    """Legacy callback — redirects to exchange."""
+    if error:
+        return HTMLResponse(f"<h1>OAuth Error</h1><p>{error}</p>", status_code=400)
+    if code:
+        return await oauth_exchange(code=code)
+    return HTMLResponse("<h1>Missing code</h1>", status_code=400)
 
 
 # ═══════════════════════════════════════════════════════════════════════
