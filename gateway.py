@@ -558,7 +558,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -4444,6 +4444,46 @@ async def runner_cancel_job(job_id: str):
         raise HTTPException(status_code=503, detail="Runner not initialized")
     success = runner.cancel_job(job_id)
     return {"success": success}
+
+
+@app.post("/api/jobs/{job_id}/kill")
+async def kill_job(job_id: str, request: Request):
+    """
+    Kill switch — immediately flags a running job for termination.
+    The runner checks this flag at every iteration and will stop the job
+    with status 'killed_manual'. Works even if the runner cancel mechanism
+    fails, because it uses a file-based flag that the guardrails check.
+
+    Body (optional): {"reason": "why you're killing it"}
+    """
+    from autonomous_runner import _set_kill_flag, _load_kill_flags
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    reason = body.get("reason", "manual kill via API")
+
+    _set_kill_flag(job_id, reason)
+
+    # Also try the soft cancel path
+    runner = get_runner()
+    if runner:
+        runner.cancel_job(job_id)
+
+    logger.info(f"Kill switch activated for job {job_id}: {reason}")
+    return {
+        "success": True,
+        "job_id": job_id,
+        "reason": reason,
+        "message": f"Kill flag set for {job_id}. Job will terminate at next iteration check.",
+    }
+
+
+@app.get("/api/jobs/kill-flags")
+async def list_kill_flags():
+    """List all active kill flags (for debugging)."""
+    from autonomous_runner import _load_kill_flags
+    return {"kill_flags": _load_kill_flags()}
 
 
 if __name__ == "__main__":

@@ -285,7 +285,8 @@ def _select_agent_for_job(job: dict) -> str:
 
 
 async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
-                      tools: list = None, job_id: str = "", phase: str = "") -> dict:
+                      tools: list = None, job_id: str = "", phase: str = "",
+                      guardrails: "JobGuardrails | None" = None) -> dict:
     """
     Call an agent model. Wraps the synchronous call_model_for_agent in an
     executor so it doesn't block the event loop. If tools are provided,
@@ -361,6 +362,14 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
         while iterations < MAX_TOOL_ITERATIONS:
             iterations += 1
 
+            # --- Guardrail check at every tool-loop iteration ---
+            if guardrails:
+                guardrails.record_iteration(cost_increment=0)  # cost added after API call
+                try:
+                    guardrails.check()
+                except GuardrailViolation:
+                    raise  # Propagate to pipeline handler
+
             if use_gemini:
                 # Gemini tool-use path — use GeminiClient directly
                 from gemini_client import GeminiClient as _GeminiClient
@@ -401,6 +410,10 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                 total_tokens += tokens_out
                 step_cost = calculate_cost(model, tokens_in, tokens_out)
                 total_cost += step_cost
+
+                # Update guardrails with actual cost from this API call
+                if guardrails:
+                    guardrails.cost_usd += step_cost
 
                 log_cost_event(
                     project=job_id.split("-")[0] if job_id else "openclaw",
@@ -483,6 +496,10 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                 total_tokens += tokens_out
                 step_cost = calculate_cost(model, tokens_in, tokens_out)
                 total_cost += step_cost
+
+                # Update guardrails with actual cost from this API call
+                if guardrails:
+                    guardrails.cost_usd += step_cost
 
                 # Log cost
                 log_cost_event(
@@ -589,7 +606,8 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
 # Execution Pipeline — 5 Phases
 # ---------------------------------------------------------------------------
 
-async def _research_phase(job: dict, agent_key: str, progress: JobProgress) -> str:
+async def _research_phase(job: dict, agent_key: str, progress: JobProgress,
+                          guardrails: "JobGuardrails | None" = None) -> str:
     """
     Phase 1: RESEARCH
     Gather context about the task — read relevant files, search the web,
@@ -625,7 +643,8 @@ async def _research_phase(job: dict, agent_key: str, progress: JobProgress) -> s
 
     tools = _filter_tools_for_phase(Phase.RESEARCH)
     result = await _call_agent(agent_key, prompt, tools=tools,
-                               job_id=job["id"], phase="research")
+                               job_id=job["id"], phase="research",
+                               guardrails=guardrails)
 
     progress.cost_usd += result["cost_usd"]
     progress.phase_status = "done"
@@ -642,7 +661,8 @@ async def _research_phase(job: dict, agent_key: str, progress: JobProgress) -> s
 
 
 async def _plan_phase(job: dict, agent_key: str, research: str,
-                      progress: JobProgress) -> ExecutionPlan:
+                      progress: JobProgress,
+                      guardrails: "JobGuardrails | None" = None) -> ExecutionPlan:
     """
     Phase 2: PLAN
     Create a step-by-step execution plan based on research findings.
@@ -676,7 +696,8 @@ async def _plan_phase(job: dict, agent_key: str, research: str,
 
     tools = _filter_tools_for_phase(Phase.PLAN)
     result = await _call_agent(agent_key, prompt, tools=tools,
-                               job_id=job["id"], phase="plan")
+                               job_id=job["id"], phase="plan",
+                               guardrails=guardrails)
 
     progress.cost_usd += result["cost_usd"]
 
@@ -730,7 +751,8 @@ async def _plan_phase(job: dict, agent_key: str, research: str,
 
 
 async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
-                         research: str, progress: JobProgress) -> list:
+                         research: str, progress: JobProgress,
+                         guardrails: "JobGuardrails | None" = None) -> list:
     """
     Phase 3: EXECUTE
     Run each step in the plan. The agent gets the step description plus
@@ -797,14 +819,19 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
         for attempt in range(DEFAULT_MAX_RETRIES):
             try:
                 result = await _call_agent(step_agent, prompt, tools=tools,
-                                           job_id=job["id"], phase="execute")
+                                           job_id=job["id"], phase="execute",
+                                           guardrails=guardrails)
                 progress.cost_usd += result["cost_usd"]
 
-                # Budget check
+                # Budget check (legacy — guardrails also check this)
                 if progress.cost_usd > DEFAULT_BUDGET_LIMIT_USD:
                     raise BudgetExceededError(
                         f"Job budget exceeded: ${progress.cost_usd:.4f} > ${DEFAULT_BUDGET_LIMIT_USD}"
                     )
+
+                # Clear error streak on success (for circuit breaker)
+                if guardrails:
+                    guardrails.clear_errors()
 
                 step.status = "done"
                 step.result = result["text"][:5000]
@@ -819,10 +846,13 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                 }
                 break
 
-            except BudgetExceededError:
-                raise  # Don't retry budget failures
+            except (BudgetExceededError, GuardrailViolation):
+                raise  # Don't retry budget/guardrail failures
 
             except Exception as e:
+                # Record error for circuit breaker
+                if guardrails:
+                    guardrails.record_error(str(e))
                 step.attempts = attempt + 1
                 backoff = (2 ** attempt) * 2  # 2s, 4s, 8s
                 logger.warning(
@@ -864,7 +894,8 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
 
 
 async def _verify_phase(job: dict, agent_key: str, execution_results: list,
-                        progress: JobProgress) -> dict:
+                        progress: JobProgress,
+                        guardrails: "JobGuardrails | None" = None) -> dict:
     """
     Phase 4: VERIFY
     Run tests, lint checks, and quality verification.
@@ -899,7 +930,8 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
 
     tools = _filter_tools_for_phase(Phase.VERIFY)
     result = await _call_agent(agent_key, prompt, tools=tools,
-                               job_id=job["id"], phase="verify")
+                               job_id=job["id"], phase="verify",
+                               guardrails=guardrails)
 
     progress.cost_usd += result["cost_usd"]
 
@@ -978,7 +1010,8 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
 
 
 async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
-                         progress: JobProgress) -> dict:
+                         progress: JobProgress,
+                         guardrails: "JobGuardrails | None" = None) -> dict:
     """
     Phase 5: DELIVER
     Git commit, push, deploy if needed, send notifications.
@@ -1036,7 +1069,8 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
 
     tools = _filter_tools_for_phase(Phase.DELIVER)
     result = await _call_agent(agent_key, prompt, tools=tools,
-                               job_id=job["id"], phase="deliver")
+                               job_id=job["id"], phase="deliver",
+                               guardrails=guardrails)
 
     progress.cost_usd += result["cost_usd"]
 
@@ -1261,6 +1295,223 @@ def _extract_json_block(text: str) -> Optional[str]:
 class BudgetExceededError(Exception):
     """Raised when a job exceeds its cost budget."""
     pass
+
+
+class GuardrailViolation(Exception):
+    """Raised when any guardrail limit is breached."""
+    def __init__(self, job_id: str, reason: str, kill_status: str):
+        self.job_id = job_id
+        self.reason = reason
+        self.kill_status = kill_status
+        super().__init__(f"Job {job_id} killed ({kill_status}): {reason}")
+
+
+# ---------------------------------------------------------------------------
+# Kill Flags — file-based kill switch
+# ---------------------------------------------------------------------------
+
+KILL_FLAGS_PATH = Path(os.path.join(DATA_DIR, "jobs", "kill_flags.json"))
+
+
+def _load_kill_flags() -> dict:
+    """Load kill flags from disk. Returns {job_id: {"reason": ..., "timestamp": ...}}."""
+    try:
+        if KILL_FLAGS_PATH.exists():
+            with open(KILL_FLAGS_PATH) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _set_kill_flag(job_id: str, reason: str = "manual"):
+    """Set a kill flag for a job (called from the API)."""
+    flags = _load_kill_flags()
+    flags[job_id] = {"reason": reason, "timestamp": _now_iso()}
+    KILL_FLAGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(KILL_FLAGS_PATH, "w") as f:
+        json.dump(flags, f, indent=2)
+
+
+def _clear_kill_flag(job_id: str):
+    """Remove a kill flag after a job finishes."""
+    flags = _load_kill_flags()
+    if job_id in flags:
+        del flags[job_id]
+        with open(KILL_FLAGS_PATH, "w") as f:
+            json.dump(flags, f, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# JobGuardrails — per-job safety limits
+# ---------------------------------------------------------------------------
+
+class JobGuardrails:
+    """
+    Tracks cost, iterations, wall-clock time, error patterns, and kill flags
+    for a single job. Call check() at every iteration boundary — it raises
+    GuardrailViolation if any limit is breached.
+
+    Defaults:
+        max_cost_usd      = $2.00   (hard kill)
+        max_iterations     = 50      (total agent calls across all phases)
+        max_duration_secs  = 1800    (30 minutes wall-clock)
+        circuit_breaker_n  = 3       (same error 3x in a row → kill)
+
+    Progressive warnings are logged at 50%, 75%, 90% of cost and iteration
+    limits so operators see problems before the hard kill fires.
+    """
+
+    WARNING_THRESHOLDS = (0.50, 0.75, 0.90)
+
+    def __init__(
+        self,
+        job_id: str,
+        max_cost_usd: float = 2.0,
+        max_iterations: int = 50,
+        max_duration_secs: int = 1800,
+        circuit_breaker_n: int = 3,
+    ):
+        self.job_id = job_id
+        self.max_cost_usd = max_cost_usd
+        self.max_iterations = max_iterations
+        self.max_duration_secs = max_duration_secs
+        self.circuit_breaker_n = circuit_breaker_n
+
+        self.iterations = 0
+        self.cost_usd = 0.0
+        self.start_time = time.monotonic()
+
+        # Circuit breaker state
+        self._recent_errors: list[str] = []
+
+        # Track which warning thresholds have already fired (to avoid spam)
+        self._cost_warnings_fired: set[float] = set()
+        self._iter_warnings_fired: set[float] = set()
+
+        logger.info(
+            f"[Guardrails] Job {job_id}: max_cost=${max_cost_usd}, "
+            f"max_iter={max_iterations}, max_duration={max_duration_secs}s, "
+            f"circuit_breaker={circuit_breaker_n}"
+        )
+
+    # ------------------------------------------------------------------
+    # Public: call after every agent iteration / tool loop turn
+    # ------------------------------------------------------------------
+
+    def record_iteration(self, cost_increment: float = 0.0):
+        """Record one agent iteration and its cost. Call this BEFORE check()."""
+        self.iterations += 1
+        self.cost_usd += cost_increment
+
+    def record_error(self, error_msg: str):
+        """Record an error message for circuit breaker detection."""
+        # Normalize: strip whitespace and truncate
+        normalized = error_msg.strip()[:200]
+        self._recent_errors.append(normalized)
+        # Only keep last N errors for comparison
+        if len(self._recent_errors) > self.circuit_breaker_n + 2:
+            self._recent_errors = self._recent_errors[-(self.circuit_breaker_n + 2):]
+
+    def clear_errors(self):
+        """Reset the error streak (call after a successful iteration)."""
+        self._recent_errors.clear()
+
+    def check(self):
+        """
+        Check all guardrails. Raises GuardrailViolation if any limit breached.
+        Also logs progressive warnings. Call this at every iteration boundary.
+        """
+        # 1. Kill switch (file-based, checked from disk)
+        flags = _load_kill_flags()
+        if self.job_id in flags:
+            reason = flags[self.job_id].get("reason", "manual kill")
+            raise GuardrailViolation(
+                self.job_id, f"Kill switch activated: {reason}", "killed_manual"
+            )
+
+        # 2. Cost cap
+        self._check_progressive_warnings(
+            "cost", self.cost_usd, self.max_cost_usd, self._cost_warnings_fired
+        )
+        if self.cost_usd > self.max_cost_usd:
+            raise GuardrailViolation(
+                self.job_id,
+                f"Cost ${self.cost_usd:.4f} exceeds cap ${self.max_cost_usd:.2f}",
+                "killed_cost_limit",
+            )
+
+        # 3. Iteration cap
+        self._check_progressive_warnings(
+            "iterations", self.iterations, self.max_iterations, self._iter_warnings_fired
+        )
+        if self.iterations > self.max_iterations:
+            raise GuardrailViolation(
+                self.job_id,
+                f"Iterations {self.iterations} exceeds cap {self.max_iterations}",
+                "killed_iteration_limit",
+            )
+
+        # 4. Wall-clock timeout
+        elapsed = time.monotonic() - self.start_time
+        if elapsed > self.max_duration_secs:
+            raise GuardrailViolation(
+                self.job_id,
+                f"Wall-clock {elapsed:.0f}s exceeds cap {self.max_duration_secs}s",
+                "killed_timeout",
+            )
+
+        # 5. Circuit breaker — same error N times in a row
+        if len(self._recent_errors) >= self.circuit_breaker_n:
+            tail = self._recent_errors[-self.circuit_breaker_n:]
+            if len(set(tail)) == 1:
+                raise GuardrailViolation(
+                    self.job_id,
+                    f"Same error repeated {self.circuit_breaker_n}x: {tail[0][:100]}",
+                    "killed_circuit_breaker",
+                )
+
+    def elapsed_seconds(self) -> float:
+        return time.monotonic() - self.start_time
+
+    def summary(self) -> dict:
+        """Return current guardrail metrics for logging/progress."""
+        return {
+            "iterations": self.iterations,
+            "max_iterations": self.max_iterations,
+            "cost_usd": round(self.cost_usd, 6),
+            "max_cost_usd": self.max_cost_usd,
+            "elapsed_seconds": round(self.elapsed_seconds(), 1),
+            "max_duration_seconds": self.max_duration_secs,
+            "recent_errors": len(self._recent_errors),
+        }
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _check_progressive_warnings(
+        self, metric_name: str, current: float, limit: float, fired: set
+    ):
+        """Log warnings at 50%, 75%, 90% of a limit."""
+        if limit <= 0:
+            return
+        ratio = current / limit
+        for threshold in self.WARNING_THRESHOLDS:
+            if ratio >= threshold and threshold not in fired:
+                fired.add(threshold)
+                pct = int(threshold * 100)
+                logger.warning(
+                    f"[Guardrails] Job {self.job_id}: {metric_name} at {pct}% "
+                    f"({current:.4f} / {limit:.4f})"
+                )
+                _log_phase(self.job_id, "guardrails", {
+                    "event": "warning",
+                    "metric": metric_name,
+                    "threshold_pct": pct,
+                    "current": current,
+                    "limit": limit,
+                })
 
 
 # ---------------------------------------------------------------------------
@@ -1492,6 +1743,18 @@ class AutonomousRunner:
         # Update job status to running
         update_job_status(job_id, "analyzing")
 
+        # --- Initialize guardrails for this job ---
+        # Job-level overrides can be set in job data (e.g. from API)
+        job_max_cost = job.get("max_cost_usd", 2.0)
+        job_max_iter = job.get("max_iterations", 50)
+        job_max_dur  = job.get("max_duration_seconds", 1800)
+        guardrails = JobGuardrails(
+            job_id=job_id,
+            max_cost_usd=float(job_max_cost),
+            max_iterations=int(job_max_iter),
+            max_duration_secs=int(job_max_dur),
+        )
+
         result = {
             "job_id": job_id,
             "agent": agent_key,
@@ -1506,7 +1769,7 @@ class AutonomousRunner:
             # ---- Phase 1: RESEARCH ----
             research = await self._run_phase_with_retry(
                 "research",
-                lambda: _research_phase(job, agent_key, progress),
+                lambda: _research_phase(job, agent_key, progress, guardrails=guardrails),
                 progress,
             )
             result["phases"]["research"] = {"status": "done", "length": len(research)}
@@ -1517,7 +1780,7 @@ class AutonomousRunner:
             # ---- Phase 2: PLAN ----
             plan = await self._run_phase_with_retry(
                 "plan",
-                lambda: _plan_phase(job, agent_key, research, progress),
+                lambda: _plan_phase(job, agent_key, research, progress, guardrails=guardrails),
                 progress,
             )
             result["phases"]["plan"] = {
@@ -1532,7 +1795,7 @@ class AutonomousRunner:
             update_job_status(job_id, "code_generated")
             exec_results = await self._run_phase_with_retry(
                 "execute",
-                lambda: _execute_phase(job, agent_key, plan, research, progress),
+                lambda: _execute_phase(job, agent_key, plan, research, progress, guardrails=guardrails),
                 progress,
             )
 
@@ -1549,7 +1812,7 @@ class AutonomousRunner:
             # ---- Phase 4: VERIFY ----
             verify_result = await self._run_phase_with_retry(
                 "verify",
-                lambda: _verify_phase(job, agent_key, exec_results, progress),
+                lambda: _verify_phase(job, agent_key, exec_results, progress, guardrails=guardrails),
                 progress,
             )
             result["phases"]["verify"] = verify_result
@@ -1560,7 +1823,7 @@ class AutonomousRunner:
             # ---- Phase 5: DELIVER ----
             delivery = await self._run_phase_with_retry(
                 "deliver",
-                lambda: _deliver_phase(job, agent_key, verify_result, progress),
+                lambda: _deliver_phase(job, agent_key, verify_result, progress, guardrails=guardrails),
                 progress,
             )
             result["phases"]["deliver"] = delivery
@@ -1624,6 +1887,34 @@ class AutonomousRunner:
             update_job_status(job_id, "failed", error=str(e))
             logger.error(f"Job {job_id} BUDGET EXCEEDED: {e}")
 
+        except GuardrailViolation as e:
+            result["error"] = str(e)
+            result["cost_usd"] = progress.cost_usd
+            result["kill_status"] = e.kill_status
+            result["guardrails"] = guardrails.summary()
+            progress.error = str(e)
+            progress.phase_status = "failed"
+            _save_progress(progress)
+            update_job_status(job_id, e.kill_status, error=str(e))
+            _clear_kill_flag(job_id)  # Clean up kill flag if it was a manual kill
+            logger.error(
+                f"Job {job_id} GUARDRAIL VIOLATION ({e.kill_status}): {e.reason} "
+                f"| guardrails={guardrails.summary()}"
+            )
+            # Notify about guardrail kills
+            try:
+                from gateway import send_slack_message
+                await send_slack_message("", (
+                    f"🛑 *Job Killed — {e.kill_status}*\n"
+                    f"*Job:* {job_id}\n"
+                    f"*Reason:* {e.reason}\n"
+                    f"*Cost:* ${guardrails.cost_usd:.4f} / ${guardrails.max_cost_usd:.2f}\n"
+                    f"*Iterations:* {guardrails.iterations} / {guardrails.max_iterations}\n"
+                    f"*Elapsed:* {guardrails.elapsed_seconds():.0f}s / {guardrails.max_duration_secs}s"
+                ))
+            except Exception:
+                pass
+
         except CancelledError as e:
             result["error"] = "Job cancelled"
             result["cost_usd"] = progress.cost_usd
@@ -1639,6 +1930,9 @@ class AutonomousRunner:
             update_job_status(job_id, "failed", error=str(e))
             logger.error(f"Job {job_id} FAILED: {e}\n{traceback.format_exc()}")
 
+        # Include final guardrail metrics in result
+        result["guardrails"] = guardrails.summary()
+
         # Save final result
         run_dir = _job_run_dir(job_id)
         result["completed_at"] = _now_iso()
@@ -1653,8 +1947,8 @@ class AutonomousRunner:
         for attempt in range(DEFAULT_MAX_RETRIES):
             try:
                 return await phase_fn()
-            except BudgetExceededError:
-                raise  # Never retry budget failures
+            except (BudgetExceededError, GuardrailViolation):
+                raise  # Never retry budget/guardrail failures
             except Exception as e:
                 last_error = e
                 progress.retries += 1

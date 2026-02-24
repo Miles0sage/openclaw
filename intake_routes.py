@@ -235,14 +235,54 @@ async def list_jobs(
     """
     List all jobs with optional status filter and pagination.
 
-    Returns an array of job summaries sorted by creation time (newest first).
+    Merges jobs from both the intake portal (intake.json) and the
+    autonomous runner (jobs.jsonl) into a single unified list, sorted
+    by creation time (newest first).
     """
-    jobs = _load_jobs()
+    # --- Source 1: Intake portal jobs ---
+    intake_jobs = _load_jobs()
 
-    if status and status not in VALID_STATUSES:
-        raise HTTPException(status_code=400, detail=f"Invalid status filter '{status}'")
+    # --- Source 2: Runner/MCP jobs from jobs.jsonl ---
+    jsonl_path = os.path.join(DATA_DIR, "jobs", "jobs.jsonl")
+    runner_jobs: Dict[str, Any] = {}
+    if os.path.exists(jsonl_path):
+        try:
+            with open(jsonl_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    j = json.loads(line)
+                    jid = j.get("id", j.get("job_id", ""))
+                    runner_jobs[jid] = j
+        except (json.JSONDecodeError, IOError):
+            logger.warning("Error reading jobs.jsonl, skipping runner jobs")
 
-    all_jobs = sorted(jobs.values(), key=lambda j: j.get("created_at", ""), reverse=True)
+    # --- Normalise runner jobs to the same summary shape ---
+    def _normalise_runner(j: dict) -> dict:
+        return {
+            "job_id": j.get("id", j.get("job_id", "")),
+            "project_name": j.get("project", j.get("project_name", "unknown")),
+            "description": (j.get("task", j.get("description", "")))[:200],
+            "task_type": j.get("task_type", "other"),
+            "priority": j.get("priority", "P2"),
+            "status": j.get("status", "unknown"),
+            "assigned_agent": j.get("assigned_agent"),
+            "cost_so_far": j.get("cost_so_far", 0.0),
+            "budget_limit": j.get("budget_limit"),
+            "contact_email": j.get("contact_email"),
+            "created_at": j.get("created_at", ""),
+            "updated_at": j.get("updated_at", j.get("completed_at", j.get("created_at", ""))),
+        }
+
+    # Merge: intake jobs take priority if same ID exists in both
+    merged: Dict[str, dict] = {}
+    for jid, j in runner_jobs.items():
+        merged[jid] = _normalise_runner(j)
+    for jid, j in intake_jobs.items():
+        merged[jid] = j  # intake overwrites runner if duplicate
+
+    all_jobs = sorted(merged.values(), key=lambda j: j.get("created_at", ""), reverse=True)
 
     if status:
         all_jobs = [j for j in all_jobs if j.get("status") == status]
@@ -250,25 +290,7 @@ async def list_jobs(
     total = len(all_jobs)
     page = all_jobs[offset : offset + limit]
 
-    # Return summary fields only
-    summaries = []
-    for j in page:
-        summaries.append({
-            "job_id": j["job_id"],
-            "project_name": j["project_name"],
-            "description": j.get("description", "")[:200],
-            "task_type": j["task_type"],
-            "priority": j["priority"],
-            "status": j["status"],
-            "assigned_agent": j.get("assigned_agent"),
-            "cost_so_far": j.get("cost_so_far", 0.0),
-            "budget_limit": j.get("budget_limit"),
-            "contact_email": j.get("contact_email"),
-            "created_at": j["created_at"],
-            "updated_at": j.get("updated_at", j["created_at"]),
-        })
-
-    return {"jobs": summaries, "total": total, "limit": limit, "offset": offset}
+    return {"jobs": page, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/api/jobs/{job_id}")

@@ -920,8 +920,23 @@
       // ============================================
       // STATE & CONFIG
       // ============================================
+      // Auto-detect gateway URL: if served from the gateway itself, use current origin
+      function detectGatewayUrl() {
+        const saved = localStorage.getItem("gatewayUrl");
+        if (saved) return saved;
+        // If we're on the gateway domain (not localhost file://), use current origin
+        if (
+          window.location.protocol.startsWith("http") &&
+          window.location.hostname !== "localhost" &&
+          window.location.hostname !== "127.0.0.1"
+        ) {
+          return window.location.origin;
+        }
+        return "http://localhost:18789";
+      }
+
       const STATE = {
-        gatewayUrl: localStorage.getItem("gatewayUrl") || "http://localhost:18789",
+        gatewayUrl: detectGatewayUrl(),
         authToken: localStorage.getItem("authToken") || "",
         currentTab: "overview",
         agents: [
@@ -1157,30 +1172,35 @@
 
       async function refreshMetrics() {
         // Cost summary
-        const costs = await apiCall("/api/costs/summary");
-        if (costs) {
-          document.getElementById("costToday").textContent = formatCost(costs.today_total || 0.42);
+        const costsResp = await apiCall("/api/costs/summary");
+        if (costsResp) {
+          const costs = costsResp.data || costsResp;
+          document.getElementById("costToday").textContent = formatCost(
+            costs.today_usd || costs.daily_total || 0,
+          );
           document.getElementById("costSubtext").textContent =
-            `Daily limit: ${formatCost(costs.daily_limit || 20)}`;
+            `${costs.entries_count || 0} requests tracked`;
           document.getElementById("requestsToday").textContent = (
-            costs.today_requests || 87
+            costs.entries_count || 0
           ).toString();
-          document.getElementById("requestsSubtext").textContent = "in 12 hours";
+          document.getElementById("requestsSubtext").textContent =
+            `$${(costs.monthly_total || costs.month_usd || 0).toFixed(2)} this month`;
         }
 
         // Cache stats
-        const cache = await apiCall("/api/cache/stats");
-        if (cache) {
-          const hitRate = cache.hit_rate || 0.67;
+        const cacheResp = await apiCall("/api/cache/stats");
+        if (cacheResp) {
+          const cache = cacheResp.data || cacheResp;
+          const hitRate = cache.hit_rate || 0;
           document.getElementById("cacheHitRate").textContent = (hitRate * 100).toFixed(1) + "%";
           document.getElementById("cacheSubtext").textContent =
-            `${cache.total_cached || 847} items cached`;
+            `${cache.total_entries || 0} items cached`;
         }
 
-        // Agent health
-        const health = await apiCall("/api/agents/health");
-        if (health) {
-          STATE.agentHealth = health.agents || {};
+        // Agent status
+        const statusResp = await apiCall("/api/agents/status");
+        if (statusResp) {
+          STATE.agentHealth = statusResp.agents || {};
         }
       }
 
@@ -1212,11 +1232,8 @@
       // ============================================
       async function loadTasksFromAPI() {
         try {
-          const url = STATE.gatewayUrl + "/api/tasks";
-          const headers = STATE.authToken ? { Authorization: "Bearer " + STATE.authToken } : {};
-          const res = await fetch(url, { headers });
-          const data = await res.json();
-          if (data.success && data.tasks) {
+          const data = await apiCall("/api/tasks");
+          if (data && data.success && data.tasks) {
             STATE.tasks = data.tasks.map((t) => ({
               id: t.id,
               title: t.title || "Untitled",
@@ -1295,12 +1312,8 @@
 
             // Update via API
             try {
-              const url = STATE.gatewayUrl + "/api/tasks/" + taskId;
-              const headers = { "Content-Type": "application/json" };
-              if (STATE.authToken) headers["Authorization"] = "Bearer " + STATE.authToken;
-              await fetch(url, {
+              await apiCall("/api/tasks/" + taskId, {
                 method: "PATCH",
-                headers,
                 body: JSON.stringify({ status: newStatus }),
               });
             } catch (e) {
@@ -1324,15 +1337,10 @@
         const agent = prompt(`Agent (${agents}):`, STATE.agents[0].name);
 
         try {
-          const url = STATE.gatewayUrl + "/api/tasks";
-          const headers = { "Content-Type": "application/json" };
-          if (STATE.authToken) headers["Authorization"] = "Bearer " + STATE.authToken;
-          const res = await fetch(url, {
+          const data = await apiCall("/api/tasks", {
             method: "POST",
-            headers,
             body: JSON.stringify({ title, agent: agent || "project_manager", status: "todo" }),
           });
-          const data = await res.json();
           if (data.success && data.task) {
             STATE.tasks.push({
               id: data.task.id,
@@ -1386,18 +1394,26 @@
       // COSTS TAB
       // ============================================
       async function renderCosts() {
-        const costs = await apiCall("/api/costs/summary");
-        if (!costs) return;
+        const costsResp = await apiCall("/api/costs/summary");
+        if (!costsResp) return;
+        const costs = costsResp.data || costsResp;
 
-        // Cost by Agent
+        // Cost by Agent — use real data from API
         const costByAgent = document.getElementById("costByAgent");
-        const agentCosts = [
-          { name: "Overseer", cost: 0.18 },
-          { name: "CodeGen Pro", cost: 0.14 },
-          { name: "Pentest AI", cost: 0.08 },
-          { name: "CodeGen Elite", cost: 0.02 },
-        ];
-        const maxCost = Math.max(...agentCosts.map((a) => a.cost));
+        const byAgent = costs.by_agent || {};
+        const agentNameMap = {
+          project_manager: "Overseer",
+          "pm-agent": "PM Agent",
+          pm: "PM",
+          coder_agent: "CodeGen Pro",
+          elite_coder: "CodeGen Elite",
+          database_agent: "SupabaseConnector",
+          pentest_agent: "Pentest AI",
+        };
+        const agentCosts = Object.entries(byAgent)
+          .map(([key, cost]) => ({ name: agentNameMap[key] || key, cost }))
+          .sort((a, b) => b.cost - a.cost);
+        const maxCost = Math.max(...agentCosts.map((a) => a.cost), 0.01);
         costByAgent.innerHTML = agentCosts
           .map(
             (a) => `
@@ -1416,14 +1432,14 @@
 
         // Budget Status
         const budgetStatus = document.getElementById("budgetStatus");
-        const dailyLimit = costs.daily_limit || 20;
-        const monthlyLimit = costs.monthly_limit || 1000;
-        const dailyUsed = costs.today_total || 0.42;
-        const monthlyUsed = costs.monthly_total || 8.5;
+        const dailyLimit = 100;
+        const monthlyLimit = 1000;
+        const dailyUsed = costs.today_usd || costs.daily_total || 0;
+        const monthlyUsed = costs.month_usd || costs.monthly_total || 0;
         budgetStatus.innerHTML = `
                 <div class="cost-bar">
                     <div class="cost-bar-label">
-                        <span class="cost-bar-name">Daily Budget</span>
+                        <span class="cost-bar-name">Daily Spend</span>
                         <span class="cost-bar-value">${formatCost(dailyUsed)} / ${formatCost(dailyLimit)}</span>
                     </div>
                     <div class="cost-bar-bg">
@@ -1432,7 +1448,7 @@
                 </div>
                 <div class="cost-bar">
                     <div class="cost-bar-label">
-                        <span class="cost-bar-name">Monthly Budget</span>
+                        <span class="cost-bar-name">Monthly Spend</span>
                         <span class="cost-bar-value">${formatCost(monthlyUsed)} / ${formatCost(monthlyLimit)}</span>
                     </div>
                     <div class="cost-bar-bg">
@@ -1442,18 +1458,20 @@
             `;
 
         // Cache Savings
-        const cache = await apiCall("/api/cache/stats");
+        const cacheResp = await apiCall("/api/cache/stats");
         const cacheSavings = document.getElementById("cacheSavings");
-        const savingsAmount = cache && cache.savings_amount ? cache.savings_amount : 3.27;
-        const savingsPercent = cache && cache.savings_percent ? cache.savings_percent : 28;
+        const cache = cacheResp ? cacheResp.data || cacheResp : {};
+        const savingsAmount = cache.total_cost_saved_usd || 0;
+        const hitRate = cache.hit_rate || 0;
+        const savingsPercent = Math.round(hitRate * 100);
         cacheSavings.innerHTML = `
                 <div style="margin-bottom: 1.5rem;">
                     <div style="font-size: 1.8rem; color: var(--success); font-weight: 600;">${formatCost(savingsAmount)}</div>
-                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.5rem;">Saved by caching</div>
+                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.5rem;">Saved by caching (${cache.total_tokens_saved || 0} tokens)</div>
                 </div>
                 <div class="cost-bar">
                     <div class="cost-bar-label">
-                        <span class="cost-bar-name">Cache Efficiency</span>
+                        <span class="cost-bar-name">Cache Hit Rate</span>
                         <span class="cost-bar-value">${savingsPercent}%</span>
                     </div>
                     <div class="cost-bar-bg">
