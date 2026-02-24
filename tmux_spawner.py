@@ -33,6 +33,10 @@ WORKTREE_BASE = "/root/openclaw/.worktrees"
 LOG_FILE = "/root/openclaw/data/tmux_agents.log"
 DEFAULT_REPO = "/root/openclaw"
 CLAUDE_CMD = "claude"  # Claude Code CLI
+# Full tool access mode for spawned agents.
+# --allowedTools with wildcards gives full tool access without interactive prompts.
+# --dangerously-skip-permissions doesn't work as root, so we use allowedTools instead.
+CLAUDE_FULL_ACCESS = '--allowedTools "Bash(*)" "Read(*)" "Write(*)" "Edit(*)" "Glob(*)" "Grep(*)" "WebSearch(*)" "WebFetch(*)"'
 
 
 def _log(msg: str):
@@ -159,18 +163,24 @@ class TmuxSpawner:
 
         # Build a shell script to avoid quoting nightmares
         script_file = f"/tmp/openclaw-agent-{job_id}.sh"
+        output_file = f"/tmp/openclaw-output-{job_id}.txt"
         with open(script_file, "w") as sf:
             sf.write("#!/usr/bin/env bash\n")
             sf.write("unset CLAUDECODE\n")
             sf.write("unset CLAUDE_CODE_SESSION\n")
             sf.write(f"cd {work_dir}\n")
-            sf.write(f'{CLAUDE_CMD} --print "$(cat {prompt_file})" {claude_args}\n')
+            sf.write(f'echo "[AGENT_START] $(date)" >> {LOG_FILE}\n')
+            sf.write(f'echo "Agent {job_id} starting in {work_dir}..."\n')
+            # Use -p (print mode) with --dangerously-skip-permissions for full tool access
+            # This lets agents read, write, edit files and run commands without prompting
+            sf.write(f'{CLAUDE_CMD} -p {CLAUDE_FULL_ACCESS} --output-format text "$(cat {prompt_file})" {claude_args} 2>&1 | tee {output_file}\n')
+            sf.write('EXIT_CODE=$?\n')
             sf.write('echo ""\n')
-            sf.write('echo "[AGENT_EXIT code=$?]"\n')
-            sf.write(f'echo "[AGENT_DONE] $(date)" >> {LOG_FILE}\n')
-            # Keep pane open for 60s so output can be collected
-            sf.write('echo "Agent finished. Pane closes in 60s..."\n')
-            sf.write('sleep 60\n')
+            sf.write('echo "[AGENT_EXIT code=$EXIT_CODE]"\n')
+            sf.write(f'echo "[AGENT_DONE] job={job_id} exit=$EXIT_CODE $(date)" >> {LOG_FILE}\n')
+            # Keep pane open for 120s so output can be collected
+            sf.write('echo "Agent finished. Pane closes in 120s..."\n')
+            sf.write('sleep 120\n')
         os.chmod(script_file, 0o755)
 
         # Wrap with timeout if specified
@@ -298,16 +308,22 @@ class TmuxSpawner:
     # Output collection
     # ───────────────────────────────────────────────────────────
 
-    def collect_output(self, pane_id: str, lines: int = 5000) -> str:
-        """Capture the tmux pane scrollback buffer."""
+    def collect_output(self, pane_id: str, lines: int = 5000, job_id: str = None) -> str:
+        """Capture the tmux pane scrollback buffer, or read from output file."""
         result = _tmux(
             "capture-pane", "-t", pane_id, "-p",
             "-S", f"-{lines}",  # Start from N lines back
             timeout=10,
         )
-        if result.returncode != 0:
-            return f"Error capturing output: {result.stderr.strip()}"
-        return result.stdout
+        if result.returncode == 0:
+            return result.stdout
+        # Pane gone — try the saved output file
+        if job_id:
+            output_file = f"/tmp/openclaw-output-{job_id}.txt"
+            if os.path.exists(output_file):
+                with open(output_file, "r") as f:
+                    return f.read()
+        return f"Error capturing output: {result.stderr.strip()}"
 
     def collect_all_outputs(self) -> dict[str, str]:
         """Collect output from all agent panes. Returns {pane_id: output}."""

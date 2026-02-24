@@ -1602,11 +1602,11 @@ async def spawn_parallel_agents(req: SpawnParallelRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/agents/panes/{pane_id:path}/output")
-async def get_agent_output(pane_id: str):
+async def get_agent_output(pane_id: str, job_id: str = None):
     """Get the output buffer from a tmux agent pane."""
     try:
         spawner = get_spawner()
-        output = spawner.collect_output(pane_id)
+        output = spawner.collect_output(pane_id, job_id=job_id)
         status = spawner.get_agent_status(pane_id)
         return {
             "success": True,
