@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OpenClaw Monitoring Dashboard</title>
+    <title>OpenClaw Dashboard</title>
     <style>
       * {
         margin: 0;
@@ -11,114 +11,183 @@
         box-sizing: border-box;
       }
       :root {
-        --bg: #0d1117;
-        --surface: #161b22;
-        --surface2: #21262d;
-        --border: #30363d;
-        --text: #e6edf3;
-        --text2: #8b949e;
-        --text3: #484f58;
-        --green: #3fb950;
-        --green-bg: rgba(63, 185, 80, 0.15);
-        --yellow: #d29922;
-        --yellow-bg: rgba(210, 153, 34, 0.15);
-        --red: #f85149;
-        --red-bg: rgba(248, 81, 73, 0.15);
-        --blue: #58a6ff;
-        --blue-bg: rgba(88, 166, 255, 0.15);
-        --purple: #bc8cff;
-        --purple-bg: rgba(188, 140, 255, 0.15);
-        --orange: #f0883e;
-        --accent: #58a6ff;
+        --bg: #09090b;
+        --surface: #18181b;
+        --surface2: #27272a;
+        --border: #3f3f46;
+        --border2: #52525b;
+        --text: #fafafa;
+        --text2: #a1a1aa;
+        --text3: #71717a;
+        --green: #22c55e;
+        --green-bg: rgba(34, 197, 94, 0.12);
+        --yellow: #eab308;
+        --yellow-bg: rgba(234, 179, 8, 0.12);
+        --red: #ef4444;
+        --red-bg: rgba(239, 68, 68, 0.12);
+        --blue: #3b82f6;
+        --blue-bg: rgba(59, 130, 246, 0.12);
+        --purple: #a855f7;
+        --purple-bg: rgba(168, 85, 247, 0.12);
+        --orange: #f97316;
+        --orange-bg: rgba(249, 115, 22, 0.12);
+        --cyan: #06b6d4;
+        --accent: #3b82f6;
+        --radius: 10px;
       }
       body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        font-family:
+          "Inter",
+          system-ui,
+          -apple-system,
+          sans-serif;
         background: var(--bg);
         color: var(--text);
         min-height: 100vh;
+        -webkit-font-smoothing: antialiased;
       }
       a {
         color: var(--accent);
         text-decoration: none;
+      }
+      code {
+        font-family: "JetBrains Mono", "Fira Code", monospace;
+        font-size: 12px;
+        background: var(--surface2);
+        padding: 2px 6px;
+        border-radius: 4px;
       }
 
       /* Header */
       .header {
         background: var(--surface);
         border-bottom: 1px solid var(--border);
-        padding: 12px 24px;
+        padding: 0 32px;
+        height: 56px;
         display: flex;
         align-items: center;
         justify-content: space-between;
         position: sticky;
         top: 0;
         z-index: 100;
+        backdrop-filter: blur(12px);
+        background: rgba(24, 24, 27, 0.85);
       }
       .header-left {
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 16px;
       }
       .logo {
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 700;
         letter-spacing: -0.5px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
-      .logo span {
-        color: var(--accent);
+      .logo-icon {
+        width: 28px;
+        height: 28px;
+        background: linear-gradient(135deg, var(--blue), var(--purple));
+        border-radius: 7px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        font-weight: 800;
+        color: #fff;
+      }
+      .status-pill {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+        background: var(--green-bg);
+        color: var(--green);
+      }
+      .status-pill.warn {
+        background: var(--yellow-bg);
+        color: var(--yellow);
+      }
+      .status-pill.err {
+        background: var(--red-bg);
+        color: var(--red);
       }
       .status-dot {
-        width: 10px;
-        height: 10px;
+        width: 6px;
+        height: 6px;
         border-radius: 50%;
-        display: inline-block;
-        margin-right: 6px;
+        background: currentColor;
+        animation: pulse 2s infinite;
       }
-      .status-dot.ok {
-        background: var(--green);
-        box-shadow: 0 0 8px var(--green);
-      }
-      .status-dot.warn {
-        background: var(--yellow);
-        box-shadow: 0 0 8px var(--yellow);
-      }
-      .status-dot.err {
-        background: var(--red);
-        box-shadow: 0 0 8px var(--red);
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
       }
       .header-right {
         display: flex;
         align-items: center;
-        gap: 12px;
-        font-size: 13px;
-        color: var(--text2);
+        gap: 10px;
       }
       .auth-input {
-        background: var(--surface2);
+        background: var(--bg);
         border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 6px 10px;
+        border-radius: 8px;
+        padding: 7px 12px;
         color: var(--text);
         font-size: 12px;
-        width: 200px;
+        width: 180px;
         font-family: monospace;
+        transition: border-color 0.2s;
       }
       .auth-input:focus {
         outline: none;
         border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
       }
-      .refresh-btn {
+      .btn {
         background: var(--surface2);
         border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 6px 12px;
+        border-radius: 8px;
+        padding: 7px 14px;
         color: var(--text);
         cursor: pointer;
         font-size: 12px;
+        font-weight: 500;
+        transition: all 0.15s;
       }
-      .refresh-btn:hover {
+      .btn:hover {
+        border-color: var(--text3);
+        background: var(--border);
+      }
+      .btn-primary {
+        background: var(--accent);
         border-color: var(--accent);
-        color: var(--accent);
+        color: #fff;
+      }
+      .btn-primary:hover {
+        background: #2563eb;
+      }
+      .btn-danger {
+        background: transparent;
+        border-color: var(--red);
+        color: var(--red);
+      }
+      .btn-danger:hover {
+        background: var(--red-bg);
+      }
+      .btn-sm {
+        padding: 4px 10px;
+        font-size: 11px;
       }
 
       /* Tabs */
@@ -127,30 +196,36 @@
         gap: 0;
         background: var(--surface);
         border-bottom: 1px solid var(--border);
-        padding: 0 24px;
+        padding: 0 32px;
         overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .tabs::-webkit-scrollbar {
+        display: none;
       }
       .tab {
-        padding: 10px 16px;
+        padding: 12px 20px;
         cursor: pointer;
         font-size: 13px;
-        color: var(--text2);
+        font-weight: 500;
+        color: var(--text3);
         border-bottom: 2px solid transparent;
         white-space: nowrap;
         transition: all 0.15s;
+        user-select: none;
       }
       .tab:hover {
-        color: var(--text);
+        color: var(--text2);
       }
       .tab.active {
-        color: var(--accent);
+        color: var(--text);
         border-bottom-color: var(--accent);
       }
 
       /* Layout */
       .content {
-        padding: 20px 24px;
-        max-width: 1400px;
+        padding: 24px 32px;
+        max-width: 1440px;
         margin: 0 auto;
       }
       .grid {
@@ -158,85 +233,108 @@
         gap: 16px;
       }
       .grid-4 {
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: repeat(4, 1fr);
       }
       .grid-3 {
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        grid-template-columns: repeat(3, 1fr);
       }
       .grid-2 {
-        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .section {
+        margin-bottom: 24px;
+      }
+      .section-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text2);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 12px;
       }
 
       /* Cards */
       .card {
         background: var(--surface);
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 16px;
-        transition: border-color 0.15s;
+        border-radius: var(--radius);
+        padding: 20px;
+        transition: border-color 0.2s;
       }
       .card:hover {
-        border-color: var(--text3);
+        border-color: var(--border2);
       }
       .card-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 12px;
+        margin-bottom: 16px;
       }
       .card-title {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text2);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-      }
-      .card-value {
-        font-size: 28px;
-        font-weight: 700;
-        margin: 4px 0;
-      }
-      .card-sub {
         font-size: 12px;
-        color: var(--text2);
+        font-weight: 600;
+        color: var(--text3);
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
       }
 
       /* Stat cards */
-      .stat-card {
+      .stat {
         position: relative;
         overflow: hidden;
       }
-      .stat-card .icon {
+      .stat .stat-icon {
         position: absolute;
-        right: 12px;
-        top: 12px;
-        font-size: 32px;
-        opacity: 0.15;
+        right: 16px;
+        top: 16px;
+        font-size: 28px;
+        opacity: 0.08;
+        font-weight: 800;
       }
-      .stat-card.green .card-value {
+      .stat-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text3);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+      }
+      .stat-value {
+        font-size: 32px;
+        font-weight: 700;
+        letter-spacing: -1px;
+        line-height: 1;
+      }
+      .stat-sub {
+        font-size: 12px;
+        color: var(--text3);
+        margin-top: 6px;
+      }
+      .stat.green .stat-value {
         color: var(--green);
       }
-      .stat-card.blue .card-value {
-        color: var(--accent);
+      .stat.blue .stat-value {
+        color: var(--blue);
       }
-      .stat-card.yellow .card-value {
+      .stat.yellow .stat-value {
         color: var(--yellow);
       }
-      .stat-card.red .card-value {
+      .stat.red .stat-value {
         color: var(--red);
       }
-      .stat-card.purple .card-value {
+      .stat.purple .stat-value {
         color: var(--purple);
       }
 
       /* Badge */
       .badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 12px;
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 10px;
+        border-radius: 6px;
         font-size: 11px;
         font-weight: 600;
-        text-transform: uppercase;
+        letter-spacing: 0.3px;
       }
       .badge-green {
         background: var(--green-bg);
@@ -258,6 +356,10 @@
         background: var(--purple-bg);
         color: var(--purple);
       }
+      .badge-orange {
+        background: var(--orange-bg);
+        color: var(--orange);
+      }
 
       /* Table */
       .table-wrap {
@@ -270,35 +372,42 @@
       }
       th {
         text-align: left;
-        padding: 8px 12px;
-        color: var(--text2);
+        padding: 10px 14px;
+        color: var(--text3);
         font-weight: 600;
         font-size: 11px;
         text-transform: uppercase;
         letter-spacing: 0.5px;
         border-bottom: 1px solid var(--border);
+        background: var(--bg);
       }
       td {
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--border);
-        vertical-align: top;
+        padding: 10px 14px;
+        border-bottom: 1px solid rgba(63, 63, 70, 0.5);
+        vertical-align: middle;
       }
       tr:hover td {
-        background: var(--surface2);
+        background: rgba(59, 130, 246, 0.03);
+      }
+      .td-truncate {
+        max-width: 320px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       /* Progress bar */
-      .progress-bar {
-        height: 6px;
+      .progress {
+        height: 4px;
         background: var(--surface2);
-        border-radius: 3px;
+        border-radius: 2px;
         overflow: hidden;
-        margin-top: 6px;
+        margin-top: 8px;
       }
       .progress-fill {
         height: 100%;
-        border-radius: 3px;
-        transition: width 0.5s ease;
+        border-radius: 2px;
+        transition: width 0.6s ease;
       }
       .progress-fill.green {
         background: var(--green);
@@ -310,68 +419,80 @@
         background: var(--red);
       }
 
-      /* Chart (simple bar chart in CSS) */
-      .chart-bar-group {
+      /* Charts */
+      .chart-bars {
         display: flex;
         align-items: flex-end;
-        gap: 4px;
-        height: 120px;
-        padding: 8px 0;
+        gap: 6px;
+        height: 140px;
+        padding: 12px 0 24px;
       }
       .chart-bar {
         flex: 1;
-        min-width: 24px;
-        max-width: 60px;
-        border-radius: 4px 4px 0 0;
+        min-width: 32px;
+        max-width: 80px;
+        border-radius: 6px 6px 0 0;
         position: relative;
-        transition: height 0.5s ease;
+        transition:
+          height 0.5s ease,
+          opacity 0.2s;
         cursor: pointer;
       }
       .chart-bar:hover {
         opacity: 0.8;
       }
-      .chart-bar .label {
-        position: absolute;
-        bottom: -20px;
-        left: 50%;
-        transform: translateX(-50%);
-        font-size: 10px;
-        color: var(--text2);
-        white-space: nowrap;
-      }
       .chart-bar .val {
         position: absolute;
-        top: -18px;
+        top: -20px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text);
+        white-space: nowrap;
+      }
+      .chart-bar .label {
+        position: absolute;
+        bottom: -22px;
         left: 50%;
         transform: translateX(-50%);
         font-size: 10px;
-        color: var(--text);
+        color: var(--text3);
         white-space: nowrap;
+        max-width: 70px;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       /* Agent card */
       .agent-card {
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 12px;
+        gap: 14px;
+        padding: 16px;
         background: var(--surface);
         border: 1px solid var(--border);
-        border-radius: 8px;
+        border-radius: var(--radius);
+        transition: border-color 0.2s;
+      }
+      .agent-card:hover {
+        border-color: var(--border2);
       }
       .agent-avatar {
-        width: 40px;
-        height: 40px;
-        border-radius: 8px;
+        width: 42px;
+        height: 42px;
+        border-radius: 10px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 700;
-        color: white;
+        color: #fff;
+        flex-shrink: 0;
       }
       .agent-info {
         flex: 1;
+        min-width: 0;
       }
       .agent-name {
         font-weight: 600;
@@ -379,34 +500,63 @@
       }
       .agent-meta {
         font-size: 12px;
-        color: var(--text2);
+        color: var(--text3);
         margin-top: 2px;
       }
 
-      /* Event log */
+      /* Events */
       .event-item {
         display: flex;
-        gap: 12px;
-        padding: 10px 0;
-        border-bottom: 1px solid var(--border);
+        gap: 14px;
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(63, 63, 70, 0.4);
         font-size: 13px;
       }
+      .event-item:last-child {
+        border-bottom: none;
+      }
       .event-time {
-        color: var(--text2);
+        color: var(--text3);
         font-size: 11px;
         white-space: nowrap;
-        min-width: 80px;
-      }
-      .event-type {
-        font-weight: 600;
+        min-width: 90px;
+        font-family: monospace;
       }
       .event-detail {
-        color: var(--text2);
-        margin-top: 2px;
+        color: var(--text3);
+        margin-top: 4px;
         font-size: 12px;
+        line-height: 1.4;
       }
 
-      /* Panel visibility */
+      /* Filter bar */
+      .filter-bar {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .filter-btn {
+        padding: 5px 14px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text3);
+        transition: all 0.15s;
+      }
+      .filter-btn:hover {
+        color: var(--text);
+        border-color: var(--border2);
+      }
+      .filter-btn.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+
+      /* Panel */
       .panel {
         display: none;
       }
@@ -417,12 +567,12 @@
       /* Spinner */
       .spinner {
         display: inline-block;
-        width: 16px;
-        height: 16px;
+        width: 14px;
+        height: 14px;
         border: 2px solid var(--border);
         border-top-color: var(--accent);
         border-radius: 50%;
-        animation: spin 0.6s linear infinite;
+        animation: spin 0.5s linear infinite;
       }
       @keyframes spin {
         to {
@@ -433,59 +583,106 @@
       /* Toast */
       .toast {
         position: fixed;
-        bottom: 20px;
-        right: 20px;
+        bottom: 24px;
+        right: 24px;
         background: var(--surface);
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 12px 16px;
+        border-radius: 10px;
+        padding: 12px 20px;
         font-size: 13px;
         z-index: 200;
         opacity: 0;
-        transform: translateY(10px);
-        transition: all 0.3s;
+        transform: translateY(8px);
+        transition: all 0.25s;
+        pointer-events: none;
       }
       .toast.show {
         opacity: 1;
         transform: translateY(0);
       }
 
+      /* Empty state */
+      .empty {
+        text-align: center;
+        padding: 40px 20px;
+        color: var(--text3);
+        font-size: 13px;
+      }
+
       /* Responsive */
-      @media (max-width: 768px) {
-        .header {
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-        .auth-input {
-          width: 140px;
-        }
+      @media (max-width: 1024px) {
         .grid-4 {
           grid-template-columns: repeat(2, 1fr);
         }
+        .grid-3 {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      @media (max-width: 768px) {
+        .header {
+          padding: 0 16px;
+        }
+        .tabs {
+          padding: 0 16px;
+        }
         .content {
-          padding: 12px;
+          padding: 16px;
+        }
+        .grid-4,
+        .grid-3,
+        .grid-2 {
+          grid-template-columns: 1fr;
+        }
+        .auth-input {
+          width: 120px;
+        }
+        .stat-value {
+          font-size: 24px;
         }
       }
     </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
     <!-- Header -->
     <div class="header">
       <div class="header-left">
-        <div class="logo"><span>Open</span>Claw</div>
-        <span id="systemStatus"><span class="status-dot ok"></span>Operational</span>
+        <div class="logo">
+          <div class="logo-icon">OC</div>
+          <span>OpenClaw</span>
+        </div>
+        <div class="status-pill" id="systemStatus">
+          <span class="status-dot"></span>
+          <span>Connecting...</span>
+        </div>
       </div>
       <div class="header-right">
-        <span id="lastRefresh">--</span>
-        <input
-          type="text"
-          class="auth-input"
-          id="authToken"
-          placeholder="Auth token (for protected endpoints)"
-        />
-        <button class="refresh-btn" onclick="refreshAll()">Refresh</button>
-        <label style="font-size: 11px; display: flex; align-items: center; gap: 4px">
-          <input type="checkbox" id="autoRefresh" checked onchange="toggleAutoRefresh()" /> Auto 30s
+        <span id="lastRefresh" style="font-size: 12px; color: var(--text3)">--</span>
+        <input type="text" class="auth-input" id="authToken" placeholder="Auth token..." />
+        <button class="btn" onclick="refreshAll()">Refresh</button>
+        <label
+          style="
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            color: var(--text3);
+            cursor: pointer;
+            user-select: none;
+          "
+        >
+          <input
+            type="checkbox"
+            id="autoRefresh"
+            checked
+            onchange="toggleAutoRefresh()"
+            style="accent-color: var(--accent)"
+          />
+          Auto
         </label>
       </div>
     </div>
@@ -503,62 +700,70 @@
 
     <!-- Content -->
     <div class="content">
-      <!-- OVERVIEW PANEL -->
+      <!-- OVERVIEW -->
       <div class="panel active" id="panel-overview">
-        <div class="grid grid-4" style="margin-bottom: 16px" id="statCards">
-          <!-- filled by JS -->
-        </div>
-        <div class="grid grid-2">
-          <div class="card">
-            <div class="card-header"><span class="card-title">Cost by Model</span></div>
-            <div id="costByModelChart" class="chart-bar-group"></div>
-          </div>
+        <div class="grid grid-4 section" id="statCards"></div>
+        <div class="grid grid-2 section">
           <div class="card">
             <div class="card-header"><span class="card-title">Cost by Agent</span></div>
-            <div id="costByAgentChart" class="chart-bar-group"></div>
+            <div id="costByAgentChart" class="chart-bars"></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">Recent Jobs</span></div>
+            <div id="recentJobs"></div>
           </div>
         </div>
-        <div class="grid grid-2" style="margin-top: 16px">
+        <div class="grid grid-2 section">
           <div class="card">
             <div class="card-header"><span class="card-title">Recent Events</span></div>
-            <div id="recentEvents">Loading...</div>
+            <div id="recentEvents"></div>
           </div>
           <div class="card">
             <div class="card-header"><span class="card-title">Agent Status</span></div>
-            <div id="agentStatusOverview">Loading...</div>
+            <div id="agentStatusOverview"></div>
           </div>
         </div>
       </div>
 
-      <!-- AGENTS PANEL -->
+      <!-- AGENTS -->
       <div class="panel" id="panel-agents">
-        <div class="grid grid-2" id="agentCards">Loading...</div>
+        <div class="grid grid-2" id="agentCards"></div>
       </div>
 
-      <!-- COSTS PANEL -->
+      <!-- COSTS -->
       <div class="panel" id="panel-costs">
-        <div class="grid grid-4" style="margin-bottom: 16px" id="costStatCards"></div>
-        <div class="grid grid-2" style="margin-bottom: 16px">
+        <div class="grid grid-4 section" id="costStatCards"></div>
+        <div class="grid grid-2 section">
           <div class="card">
-            <div class="card-header"><span class="card-title">Cost by Model</span></div>
-            <div id="costModelChartFull" class="chart-bar-group" style="height: 160px"></div>
+            <div class="card-header"><span class="card-title">Cost by Agent</span></div>
+            <div id="costAgentFull" class="chart-bars" style="height: 180px"></div>
           </div>
           <div class="card">
             <div class="card-header"><span class="card-title">Cost by Project</span></div>
-            <div id="costProjectChartFull" class="chart-bar-group" style="height: 160px"></div>
+            <div id="costProjectFull" class="chart-bars" style="height: 180px"></div>
           </div>
         </div>
         <div class="card">
-          <div class="card-header"><span class="card-title">Budget Status</span></div>
-          <div id="budgetStatus">Loading...</div>
+          <div class="card-header"><span class="card-title">Budget Details</span></div>
+          <div id="budgetStatus"></div>
         </div>
       </div>
 
-      <!-- JOBS PANEL -->
+      <!-- JOBS -->
       <div class="panel" id="panel-jobs">
         <div class="card">
           <div class="card-header">
-            <span class="card-title">All Jobs</span><span class="card-sub" id="jobCount"></span>
+            <div style="display: flex; align-items: center; gap: 12px">
+              <span class="card-title">Jobs</span>
+              <span style="font-size: 12px; color: var(--text3)" id="jobCount"></span>
+            </div>
+            <div class="filter-bar" id="jobFilters">
+              <button class="filter-btn active" data-filter="all">All</button>
+              <button class="filter-btn" data-filter="done">Done</button>
+              <button class="filter-btn" data-filter="pending">Pending</button>
+              <button class="filter-btn" data-filter="failed">Failed</button>
+              <button class="filter-btn" data-filter="running">Running</button>
+            </div>
           </div>
           <div class="table-wrap">
             <table>
@@ -570,11 +775,12 @@
                   <th>Priority</th>
                   <th>Status</th>
                   <th>Created</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody id="jobsTable">
                 <tr>
-                  <td colspan="6">Loading... (requires auth token)</td>
+                  <td colspan="7" class="empty">Loading...</td>
                 </tr>
               </tbody>
             </table>
@@ -582,12 +788,14 @@
         </div>
       </div>
 
-      <!-- PROPOSALS PANEL -->
+      <!-- PROPOSALS -->
       <div class="panel" id="panel-proposals">
         <div class="card">
           <div class="card-header">
-            <span class="card-title">Proposals</span
-            ><span class="card-sub" id="proposalCount"></span>
+            <div style="display: flex; align-items: center; gap: 12px">
+              <span class="card-title">Proposals</span>
+              <span style="font-size: 12px; color: var(--text3)" id="proposalCount"></span>
+            </div>
           </div>
           <div class="table-wrap">
             <table>
@@ -603,7 +811,7 @@
               </thead>
               <tbody id="proposalsTable">
                 <tr>
-                  <td colspan="6">Loading...</td>
+                  <td colspan="6" class="empty">Loading...</td>
                 </tr>
               </tbody>
             </table>
@@ -611,33 +819,36 @@
         </div>
       </div>
 
-      <!-- EVENTS PANEL -->
+      <!-- EVENTS -->
       <div class="panel" id="panel-events">
         <div class="card">
           <div class="card-header">
-            <span class="card-title">Event Log</span><span class="card-sub" id="eventCount"></span>
+            <div style="display: flex; align-items: center; gap: 12px">
+              <span class="card-title">Event Log</span>
+              <span style="font-size: 12px; color: var(--text3)" id="eventCount"></span>
+            </div>
           </div>
-          <div id="eventLog">Loading...</div>
+          <div id="eventLog"></div>
         </div>
       </div>
 
-      <!-- SYSTEM PANEL -->
+      <!-- SYSTEM -->
       <div class="panel" id="panel-system">
-        <div class="grid grid-3" style="margin-bottom: 16px">
+        <div class="grid grid-3 section">
           <div class="card">
-            <div class="card-header"><span class="card-title">Heartbeat Monitor</span></div>
-            <div id="heartbeatInfo">Loading...</div>
+            <div class="card-header"><span class="card-title">Heartbeat</span></div>
+            <div id="heartbeatInfo"></div>
           </div>
           <div class="card">
-            <div class="card-header"><span class="card-title">Router Health</span></div>
-            <div id="routerInfo">Loading...</div>
+            <div class="card-header"><span class="card-title">Router</span></div>
+            <div id="routerInfo"></div>
           </div>
           <div class="card">
             <div class="card-header"><span class="card-title">Approval Policy</span></div>
-            <div id="policyInfo">Loading...</div>
+            <div id="policyInfo"></div>
           </div>
         </div>
-        <div class="grid grid-2" style="margin-bottom: 16px">
+        <div class="grid grid-2 section">
           <div class="card">
             <div class="card-header"><span class="card-title">Cron Jobs</span></div>
             <div class="table-wrap">
@@ -653,7 +864,7 @@
                 </thead>
                 <tbody id="cronTable">
                   <tr>
-                    <td colspan="5">Loading...</td>
+                    <td colspan="5" class="empty">Loading...</td>
                   </tr>
                 </tbody>
               </table>
@@ -661,27 +872,24 @@
           </div>
           <div class="card">
             <div class="card-header">
-              <span class="card-title">Memories</span
-              ><span class="card-sub" id="memoryCount"></span>
+              <span class="card-title">Memories</span>
+              <span style="font-size: 12px; color: var(--text3)" id="memoryCount"></span>
             </div>
-            <div id="memoryList">Loading...</div>
+            <div id="memoryList"></div>
           </div>
         </div>
         <div class="card">
           <div class="card-header"><span class="card-title">Quota Status</span></div>
-          <div id="quotaDetail">Loading...</div>
+          <div id="quotaDetail"></div>
         </div>
       </div>
     </div>
 
-    <!-- Toast -->
     <div class="toast" id="toast"></div>
 
     <script>
-      // ============================================================
-      // State
-      // ============================================================
-      let refreshTimer = null;
+      let refreshTimer = null,
+        jobFilter = "all";
       const STATE = {
         health: null,
         agents: null,
@@ -697,31 +905,24 @@
         policy: null,
       };
 
-      // ============================================================
       // Helpers
-      // ============================================================
       function getToken() {
         return document.getElementById("authToken").value.trim();
       }
-
       async function api(path) {
         const headers = { Accept: "application/json" };
         const token = getToken();
         if (token) headers["X-Auth-Token"] = token;
         try {
           const r = await fetch(path, { headers });
-          if (!r.ok) {
-            if (r.status === 401) return { _error: "unauthorized" };
-            return { _error: r.status };
-          }
+          if (!r.ok) return { _error: r.status };
           return await r.json();
         } catch (e) {
           return { _error: e.message };
         }
       }
-
       function fmt$(v) {
-        return "$" + Number(v || 0).toFixed(4);
+        return "$" + Number(v || 0).toFixed(2);
       }
       function fmtDate(s) {
         if (!s) return "--";
@@ -732,11 +933,21 @@
           d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
         );
       }
+      function timeAgo(s) {
+        if (!s) return "--";
+        const ms = Date.now() - new Date(s).getTime();
+        const m = Math.floor(ms / 60000);
+        if (m < 1) return "just now";
+        if (m < 60) return m + "m ago";
+        const h = Math.floor(m / 60);
+        if (h < 24) return h + "h ago";
+        return Math.floor(h / 24) + "d ago";
+      }
       function shortId(s) {
         return s ? s.slice(-8) : "--";
       }
       function statusBadge(s) {
-        const map = {
+        const m = {
           done: "green",
           completed: "green",
           approved: "green",
@@ -744,43 +955,46 @@
           running: "blue",
           active: "blue",
           pending: "yellow",
+          queued: "yellow",
           pr_ready: "purple",
           failed: "red",
           rejected: "red",
           error: "red",
+          killed_cost_limit: "red",
+          killed_timeout: "red",
+          killed_circuit_breaker: "red",
+          killed_manual: "orange",
+          killed_iteration_limit: "red",
         };
-        return `<span class="badge badge-${map[s] || "yellow"}">${s || "unknown"}</span>`;
+        return `<span class="badge badge-${m[s] || "yellow"}">${(s || "unknown").replace(/_/g, " ")}</span>`;
       }
       function priorityBadge(p) {
-        const map = { P0: "red", P1: "yellow", P2: "blue", P3: "green" };
-        return `<span class="badge badge-${map[p] || "blue"}">${p || "--"}</span>`;
+        const m = { P0: "red", P1: "orange", P2: "blue", P3: "green" };
+        return `<span class="badge badge-${m[p] || "blue"}">${p || "--"}</span>`;
       }
-
-      function toast(msg, dur = 3000) {
+      function toast(msg, dur = 2500) {
         const t = document.getElementById("toast");
         t.textContent = msg;
         t.classList.add("show");
         setTimeout(() => t.classList.remove("show"), dur);
       }
-
       const COLORS = [
-        "#58a6ff",
-        "#3fb950",
-        "#d29922",
-        "#f85149",
-        "#bc8cff",
-        "#f0883e",
-        "#79c0ff",
-        "#7ee787",
+        "#3b82f6",
+        "#22c55e",
+        "#eab308",
+        "#ef4444",
+        "#a855f7",
+        "#f97316",
+        "#06b6d4",
+        "#ec4899",
       ];
 
-      function renderBarChart(containerId, data, heightPx) {
-        const el = document.getElementById(containerId);
+      function renderBarChart(id, data, h) {
+        const el = document.getElementById(id);
         if (!el) return;
-        const h = heightPx || 120;
-        el.style.height = h + "px";
+        el.style.height = (h || 140) + "px";
         if (!data || Object.keys(data).length === 0) {
-          el.innerHTML = '<span style="color:var(--text2);font-size:12px">No data</span>';
+          el.innerHTML = '<div class="empty">No data</div>';
           return;
         }
         const max = Math.max(...Object.values(data), 0.001);
@@ -788,17 +1002,16 @@
           .map(([k, v], i) => {
             const pct = (v / max) * 100;
             const color = COLORS[i % COLORS.length];
-            return `<div class="chart-bar" style="height:${Math.max(pct, 4)}%;background:${color}" title="${k}: ${fmt$(v)}">
-      <span class="val">${fmt$(v)}</span>
-      <span class="label">${k.replace(/-/g, " ").replace(/claude.*/, "claude")}</span>
-    </div>`;
+            const name = k
+              .replace(/_/g, " ")
+              .replace(/claude.*/, "claude")
+              .replace(/-agent/, "");
+            return `<div class="chart-bar" style="height:${Math.max(pct, 5)}%;background:${color}" title="${k}: ${fmt$(v)}"><span class="val">${fmt$(v)}</span><span class="label">${name}</span></div>`;
           })
           .join("");
       }
 
-      // ============================================================
-      // Tab switching
-      // ============================================================
+      // Tabs
       document.querySelectorAll(".tab").forEach((tab) => {
         tab.addEventListener("click", () => {
           document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
@@ -808,9 +1021,18 @@
         });
       });
 
-      // ============================================================
-      // Data fetching
-      // ============================================================
+      // Job filters
+      document.getElementById("jobFilters").addEventListener("click", (e) => {
+        if (!e.target.classList.contains("filter-btn")) return;
+        document
+          .querySelectorAll("#jobFilters .filter-btn")
+          .forEach((b) => b.classList.remove("active"));
+        e.target.classList.add("active");
+        jobFilter = e.target.dataset.filter;
+        renderJobsPanel();
+      });
+
+      // Data fetch
       async function fetchAll() {
         const [
           health,
@@ -839,99 +1061,106 @@
           api("/api/policy"),
           api("/api/jobs"),
         ]);
-        STATE.health = health;
-        STATE.agents = agents;
-        STATE.costs = costs;
-        STATE.quotas = quotas;
-        STATE.proposals = proposals;
-        STATE.events = events;
-        STATE.memories = memories;
-        STATE.cron = cron;
-        STATE.heartbeat = heartbeat;
-        STATE.router = router;
-        STATE.policy = policy;
-        STATE.jobs = jobs;
+        Object.assign(STATE, {
+          health,
+          agents,
+          costs,
+          quotas,
+          proposals,
+          events,
+          memories,
+          cron,
+          heartbeat,
+          router,
+          policy,
+          jobs,
+        });
       }
 
-      // ============================================================
       // Renderers
-      // ============================================================
       function renderSystemStatus() {
         const el = document.getElementById("systemStatus");
         const h = STATE.health;
         if (!h || h._error) {
-          el.innerHTML = '<span class="status-dot err"></span>Offline';
+          el.className = "status-pill err";
+          el.innerHTML = '<span class="status-dot"></span>Offline';
           return;
         }
-        el.innerHTML = `<span class="status-dot ok"></span>${h.status || "Operational"} &middot; v${h.version || "?"} &middot; ${h.agents_active || 0} agents`;
+        el.className = "status-pill";
+        el.innerHTML = `<span class="status-dot"></span>${h.status || "Operational"} &middot; v${h.version || "?"} &middot; ${h.agents_active || 0} agents`;
       }
 
       function renderStatCards() {
         const el = document.getElementById("statCards");
         const costs = STATE.costs?.data || STATE.costs || {};
-        const quotas = STATE.quotas?.data || STATE.quotas || {};
         const agents = STATE.agents?.agents || [];
         const jobs = STATE.jobs?.jobs || [];
-        const proposals = STATE.proposals?.proposals || [];
         const events = STATE.events?.events || [];
-
-        const activeJobs = jobs.filter(
-          (j) => j.status === "running" || j.status === "active",
+        const doneJobs = jobs.filter((j) => j.status === "done" || j.status === "completed").length;
+        const failedJobs = jobs.filter(
+          (j) => j.status === "failed" || j.status?.startsWith("killed"),
         ).length;
-        const pendingProposals = proposals.filter((p) => p.status === "pending").length;
-        const dailyPct = quotas.daily_percent || 0;
-
+        const activeJobs = jobs.filter(
+          (j) =>
+            j.status === "running" ||
+            j.status === "active" ||
+            j.status === "pending" ||
+            j.status === "queued",
+        ).length;
         el.innerHTML = `
-    <div class="card stat-card green"><div class="icon">A</div>
-      <div class="card-title">Agents</div>
-      <div class="card-value">${agents.length}</div>
-      <div class="card-sub">${agents.filter((a) => a.status === "idle").length} idle, ${agents.filter((a) => a.status !== "idle").length} busy</div>
-    </div>
-    <div class="card stat-card blue"><div class="icon">$</div>
-      <div class="card-title">Total Cost</div>
-      <div class="card-value">${fmt$(costs.total_cost)}</div>
-      <div class="card-sub">${costs.entries_count || 0} API calls</div>
-    </div>
-    <div class="card stat-card ${pendingProposals > 0 ? "yellow" : "green"}"><div class="icon">P</div>
-      <div class="card-title">Proposals</div>
-      <div class="card-value">${pendingProposals}</div>
-      <div class="card-sub">pending of ${proposals.length} total</div>
-    </div>
-    <div class="card stat-card ${dailyPct > 80 ? "red" : dailyPct > 50 ? "yellow" : "green"}"><div class="icon">Q</div>
-      <div class="card-title">Daily Budget</div>
-      <div class="card-value">${dailyPct.toFixed(1)}%</div>
-      <div class="card-sub">${fmt$(quotas.daily_used)} / ${fmt$(quotas.daily_budget)}</div>
-      <div class="progress-bar"><div class="progress-fill ${dailyPct > 80 ? "red" : dailyPct > 50 ? "yellow" : "green"}" style="width:${Math.min(dailyPct, 100)}%"></div></div>
-    </div>
-  `;
+          <div class="card stat green"><span class="stat-icon">A</span><div class="stat-label">Agents</div><div class="stat-value">${agents.length}</div><div class="stat-sub">${agents.filter((a) => a.status === "idle").length} idle</div></div>
+          <div class="card stat blue"><span class="stat-icon">$</span><div class="stat-label">Total Cost</div><div class="stat-value">${fmt$(costs.total_cost)}</div><div class="stat-sub">${costs.entries_count || 0} API calls</div></div>
+          <div class="card stat ${failedJobs > 0 ? "red" : "green"}"><span class="stat-icon">J</span><div class="stat-label">Jobs</div><div class="stat-value">${jobs.length}</div><div class="stat-sub">${doneJobs} done, ${failedJobs} failed, ${activeJobs} active</div></div>
+          <div class="card stat purple"><span class="stat-icon">E</span><div class="stat-label">Events</div><div class="stat-value">${events.length}</div><div class="stat-sub">last: ${timeAgo(events[0]?.timestamp)}</div></div>
+        `;
       }
 
       function renderOverviewCharts() {
         const costs = STATE.costs?.data || STATE.costs || {};
-        renderBarChart("costByModelChart", costs.by_model);
         renderBarChart("costByAgentChart", costs.by_agent);
+      }
+
+      function renderRecentJobs() {
+        const el = document.getElementById("recentJobs");
+        const jobs = (STATE.jobs?.jobs || []).slice(0, 6);
+        if (!jobs.length) {
+          el.innerHTML = '<div class="empty">No jobs</div>';
+          return;
+        }
+        el.innerHTML = jobs
+          .map(
+            (j) => `
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(63,63,70,.3)">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${j.description || j.task || "--"}</div>
+              <div style="font-size:11px;color:var(--text3);margin-top:2px">${j.project_name || j.project || "--"} &middot; ${timeAgo(j.created_at)}</div>
+            </div>
+            ${statusBadge(j.status)}
+          </div>
+        `,
+          )
+          .join("");
       }
 
       function renderRecentEvents() {
         const el = document.getElementById("recentEvents");
         const events = (STATE.events?.events || []).slice(0, 5);
         if (!events.length) {
-          el.innerHTML =
-            '<span style="color:var(--text2);font-size:13px">No events recorded</span>';
+          el.innerHTML = '<div class="empty">No events</div>';
           return;
         }
         el.innerHTML = events
-          .map(
-            (e) => `
-    <div class="event-item">
-      <div class="event-time">${fmtDate(e.timestamp)}</div>
-      <div>
-        <div class="event-type">${e.event_type}</div>
-        <div class="event-detail">${e.data?.title || e.data?.job_id || JSON.stringify(e.data).slice(0, 80)}</div>
-      </div>
-    </div>
-  `,
-          )
+          .map((e) => {
+            const tc = {
+              "proposal.created": "blue",
+              "job.created": "green",
+              "job.completed": "green",
+              "job.failed": "red",
+              "agent.error": "red",
+              "agent.timeout": "yellow",
+            };
+            return `<div class="event-item"><div class="event-time">${timeAgo(e.timestamp)}</div><div style="flex:1"><span class="badge badge-${tc[e.event_type] || "yellow"}" style="font-size:10px">${e.event_type}</span><div class="event-detail">${e.data?.title || e.data?.job_id || e.data?.reason || JSON.stringify(e.data).slice(0, 100)}</div></div></div>`;
+          })
           .join("");
       }
 
@@ -939,26 +1168,20 @@
         const el = document.getElementById("agentStatusOverview");
         const agents = STATE.agents?.agents || [];
         if (!agents.length) {
-          el.innerHTML = '<span style="color:var(--text2)">No agents</span>';
+          el.innerHTML = '<div class="empty">No agents</div>';
           return;
         }
+        const roleColors = {
+          coordinator: "#3b82f6",
+          developer: "#22c55e",
+          security: "#ef4444",
+          data_specialist: "#a855f7",
+          elite_developer: "#f97316",
+        };
         el.innerHTML = agents
           .map((a) => {
-            const colors = {
-              coordinator: "#58a6ff",
-              developer: "#3fb950",
-              security: "#f85149",
-              data_specialist: "#bc8cff",
-            };
-            const bg = colors[a.role] || "#58a6ff";
-            return `<div class="agent-card" style="margin-bottom:8px">
-      <div class="agent-avatar" style="background:${bg}">${a.name ? a.name[0] : "?"}</div>
-      <div class="agent-info">
-        <div class="agent-name">${a.name}</div>
-        <div class="agent-meta">${a.model} &middot; ${a.provider}</div>
-      </div>
-      ${statusBadge(a.status)}
-    </div>`;
+            const bg = roleColors[a.role] || "#3b82f6";
+            return `<div class="agent-card" style="margin-bottom:8px"><div class="agent-avatar" style="background:${bg}">${(a.name || "?")[0]}</div><div class="agent-info"><div class="agent-name">${a.name}</div><div class="agent-meta">${a.model?.split("-").slice(0, 2).join(" ") || "--"}</div></div>${statusBadge(a.status)}</div>`;
           })
           .join("");
       }
@@ -967,34 +1190,25 @@
         const el = document.getElementById("agentCards");
         const agents = STATE.agents?.agents || [];
         if (!agents.length) {
-          el.innerHTML =
-            '<div class="card"><span style="color:var(--text2)">No agents found</span></div>';
+          el.innerHTML = '<div class="card"><div class="empty">No agents</div></div>';
           return;
         }
-        const colors = {
-          coordinator: "#58a6ff",
-          developer: "#3fb950",
-          security: "#f85149",
-          data_specialist: "#bc8cff",
+        const roleColors = {
+          coordinator: "#3b82f6",
+          developer: "#22c55e",
+          security: "#ef4444",
+          data_specialist: "#a855f7",
+          elite_developer: "#f97316",
         };
         el.innerHTML = agents
           .map((a) => {
-            const bg = colors[a.role] || "#58a6ff";
-            return `<div class="card">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <div class="agent-avatar" style="background:${bg};font-size:22px;width:48px;height:48px">${a.name ? a.name[0] : "?"}</div>
-        <div>
-          <div style="font-size:16px;font-weight:700">${a.name}</div>
-          <div style="font-size:12px;color:var(--text2)">${a.id}</div>
-        </div>
-        <div style="margin-left:auto">${statusBadge(a.status)}</div>
-      </div>
-      <table>
-        <tr><td style="color:var(--text2);width:100px">Provider</td><td>${a.provider}</td></tr>
-        <tr><td style="color:var(--text2)">Model</td><td><code>${a.model}</code></td></tr>
-        <tr><td style="color:var(--text2)">Role</td><td>${a.role}</td></tr>
-      </table>
-    </div>`;
+            const bg = roleColors[a.role] || "#3b82f6";
+            return `<div class="card"><div style="display:flex;align-items:center;gap:14px;margin-bottom:16px"><div class="agent-avatar" style="background:${bg};width:48px;height:48px;font-size:20px">${(a.name || "?")[0]}</div><div style="flex:1"><div style="font-size:16px;font-weight:700">${a.name}</div><div style="font-size:12px;color:var(--text3)">${a.id}</div></div>${statusBadge(a.status)}</div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px">
+            <span style="color:var(--text3)">Provider</span><span>${a.provider}</span>
+            <span style="color:var(--text3)">Model</span><span><code>${a.model}</code></span>
+            <span style="color:var(--text3)">Role</span><span>${a.role}</span>
+          </div></div>`;
           })
           .join("");
       }
@@ -1002,93 +1216,124 @@
       function renderCostsPanel() {
         const costs = STATE.costs?.data || STATE.costs || {};
         const quotas = STATE.quotas?.data || STATE.quotas || {};
-
-        // Stat cards
-        const el = document.getElementById("costStatCards");
-        const dailyPct = quotas.daily_percent || 0;
-        const monthlyPct = quotas.monthly_percent || 0;
-        el.innerHTML = `
-    <div class="card stat-card blue"><div class="card-title">Total Spend</div><div class="card-value">${fmt$(costs.total_cost)}</div><div class="card-sub">${costs.entries_count || 0} API calls</div></div>
-    <div class="card stat-card ${dailyPct > 80 ? "red" : "green"}"><div class="card-title">Daily</div><div class="card-value">${fmt$(quotas.daily_used)}</div><div class="card-sub">of ${fmt$(quotas.daily_budget)} budget</div>
-      <div class="progress-bar"><div class="progress-fill ${dailyPct > 80 ? "red" : dailyPct > 50 ? "yellow" : "green"}" style="width:${Math.min(dailyPct, 100)}%"></div></div></div>
-    <div class="card stat-card ${monthlyPct > 80 ? "red" : "green"}"><div class="card-title">Monthly</div><div class="card-value">${fmt$(quotas.monthly_used)}</div><div class="card-sub">of ${fmt$(quotas.monthly_budget)} budget</div>
-      <div class="progress-bar"><div class="progress-fill ${monthlyPct > 80 ? "red" : monthlyPct > 50 ? "yellow" : "green"}" style="width:${Math.min(monthlyPct, 100)}%"></div></div></div>
-    <div class="card stat-card green"><div class="card-title">Status</div><div class="card-value" style="font-size:18px">${quotas.status || "--"}</div><div class="card-sub">Quotas ${quotas.quotas_enabled ? "enabled" : "disabled"}</div></div>
-  `;
-
-        // Charts
-        renderBarChart("costModelChartFull", costs.by_model, 160);
-        renderBarChart("costProjectChartFull", costs.by_project, 160);
-
-        // Budget detail
-        const budgetEl = document.getElementById("budgetStatus");
+        const dp = quotas.daily_percent || 0,
+          mp = quotas.monthly_percent || 0;
+        document.getElementById("costStatCards").innerHTML = `
+          <div class="card stat blue"><div class="stat-label">Total Spend</div><div class="stat-value">${fmt$(costs.total_cost)}</div><div class="stat-sub">${costs.entries_count || 0} API calls</div></div>
+          <div class="card stat ${dp > 80 ? "red" : "green"}"><div class="stat-label">Daily</div><div class="stat-value">${fmt$(quotas.daily_used)}</div><div class="stat-sub">of ${fmt$(quotas.daily_budget)}</div><div class="progress"><div class="progress-fill ${dp > 80 ? "red" : dp > 50 ? "yellow" : "green"}" style="width:${Math.min(dp, 100)}%"></div></div></div>
+          <div class="card stat ${mp > 80 ? "red" : "green"}"><div class="stat-label">Monthly</div><div class="stat-value">${fmt$(quotas.monthly_used)}</div><div class="stat-sub">of ${fmt$(quotas.monthly_budget)}</div><div class="progress"><div class="progress-fill ${mp > 80 ? "red" : mp > 50 ? "yellow" : "green"}" style="width:${Math.min(mp, 100)}%"></div></div></div>
+          <div class="card stat green"><div class="stat-label">Status</div><div class="stat-value" style="font-size:20px">${quotas.status || "OK"}</div><div class="stat-sub">Quotas ${quotas.quotas_enabled ? "enabled" : "disabled"}</div></div>
+        `;
+        renderBarChart("costAgentFull", costs.by_agent, 180);
+        renderBarChart("costProjectFull", costs.by_project, 180);
+        const bEl = document.getElementById("budgetStatus");
         if (costs.timestamp_range) {
-          budgetEl.innerHTML = `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px">
-        <div><span style="color:var(--text2)">First entry:</span> ${fmtDate(costs.timestamp_range.first)}</div>
-        <div><span style="color:var(--text2)">Last entry:</span> ${fmtDate(costs.timestamp_range.last)}</div>
-        <div><span style="color:var(--text2)">Daily remaining:</span> <strong style="color:var(--green)">${fmt$(quotas.daily_remaining)}</strong></div>
-        <div><span style="color:var(--text2)">Monthly remaining:</span> <strong style="color:var(--green)">${fmt$(quotas.monthly_remaining)}</strong></div>
-        <div><span style="color:var(--text2)">Warning at:</span> ${quotas.warning_threshold_percent || 80}%</div>
-        <div><span style="color:var(--text2)">Models used:</span> ${Object.keys(costs.by_model || {}).length}</div>
-      </div>
-    `;
+          bEl.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px;font-size:13px">
+            <div><span style="color:var(--text3)">First entry</span><br/>${fmtDate(costs.timestamp_range.first)}</div>
+            <div><span style="color:var(--text3)">Last entry</span><br/>${fmtDate(costs.timestamp_range.last)}</div>
+            <div><span style="color:var(--text3)">Daily remaining</span><br/><strong style="color:var(--green)">${fmt$(quotas.daily_remaining)}</strong></div>
+            <div><span style="color:var(--text3)">Monthly remaining</span><br/><strong style="color:var(--green)">${fmt$(quotas.monthly_remaining)}</strong></div>
+          </div>`;
         } else {
-          budgetEl.innerHTML = '<span style="color:var(--text2)">No cost data yet</span>';
+          bEl.innerHTML = '<div class="empty">No cost data yet</div>';
         }
       }
 
       function renderJobsPanel() {
         const el = document.getElementById("jobsTable");
-        const jobs = STATE.jobs?.jobs;
+        const allJobs = STATE.jobs?.jobs || [];
         const countEl = document.getElementById("jobCount");
-
-        if (!jobs || STATE.jobs?._error === "unauthorized") {
+        if (!allJobs.length && STATE.jobs?._error === "unauthorized") {
           el.innerHTML =
-            '<tr><td colspan="6" style="color:var(--yellow)">Enter auth token above to view jobs</td></tr>';
+            '<tr><td colspan="7" class="empty" style="color:var(--yellow)">Auth required</td></tr>';
           return;
         }
-        countEl.textContent = `${jobs.length} total`;
+        let jobs = allJobs;
+        if (jobFilter !== "all") {
+          if (jobFilter === "running")
+            jobs = allJobs.filter((j) =>
+              [
+                "running",
+                "active",
+                "pending",
+                "queued",
+                "researching",
+                "planning",
+                "executing",
+              ].includes(j.status),
+            );
+          else
+            jobs = allJobs.filter(
+              (j) =>
+                j.status === jobFilter ||
+                (jobFilter === "failed" && j.status?.startsWith("killed")),
+            );
+        }
+        countEl.textContent = `${jobs.length} of ${allJobs.length}`;
         if (!jobs.length) {
-          el.innerHTML = '<tr><td colspan="6" style="color:var(--text2)">No jobs</td></tr>';
+          el.innerHTML = '<tr><td colspan="7" class="empty">No jobs</td></tr>';
           return;
         }
-
         el.innerHTML = jobs
-          .map(
-            (j) => `<tr>
-    <td><code>${shortId(j.id)}</code></td>
-    <td>${j.project || "--"}</td>
-    <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(j.task || "").replace(/"/g, "&quot;")}">${j.task || "--"}</td>
-    <td>${priorityBadge(j.priority)}</td>
-    <td>${statusBadge(j.status)}</td>
-    <td style="white-space:nowrap">${fmtDate(j.created_at)}</td>
-  </tr>`,
-          )
+          .map((j) => {
+            const id = j.job_id || j.id || "";
+            const task = j.description || j.task || "";
+            const project = j.project_name || j.project || "--";
+            const isActive = [
+              "running",
+              "active",
+              "pending",
+              "queued",
+              "researching",
+              "planning",
+              "executing",
+            ].includes(j.status);
+            return `<tr>
+            <td><code>${shortId(id)}</code></td>
+            <td style="font-weight:500">${project}</td>
+            <td class="td-truncate" title="${task.replace(/"/g, "&quot;")}">${task || "--"}</td>
+            <td>${priorityBadge(j.priority)}</td>
+            <td>${statusBadge(j.status)}</td>
+            <td style="white-space:nowrap;color:var(--text3)">${timeAgo(j.created_at)}</td>
+            <td>${isActive ? `<button class="btn btn-danger btn-sm" onclick="killJob('${id}')">Kill</button>` : ""}</td>
+          </tr>`;
+          })
           .join("");
+      }
+
+      async function killJob(jobId) {
+        if (!confirm("Kill job " + shortId(jobId) + "?")) return;
+        const r = await fetch("/api/jobs/" + jobId + "/kill", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Auth-Token": getToken() },
+          body: JSON.stringify({ reason: "Manual kill from dashboard" }),
+        });
+        if (r.ok) {
+          toast("Job killed");
+          refreshAll();
+        } else {
+          toast("Kill failed: " + r.status);
+        }
       }
 
       function renderProposalsPanel() {
         const el = document.getElementById("proposalsTable");
         const proposals = STATE.proposals?.proposals || [];
-        const countEl = document.getElementById("proposalCount");
-        countEl.textContent = `${proposals.length} total`;
-
+        document.getElementById("proposalCount").textContent = `${proposals.length} total`;
         if (!proposals.length) {
-          el.innerHTML = '<tr><td colspan="6" style="color:var(--text2)">No proposals</td></tr>';
+          el.innerHTML = '<tr><td colspan="6" class="empty">No proposals</td></tr>';
           return;
         }
-
         el.innerHTML = proposals
           .map(
             (p) => `<tr>
-    <td><code>${shortId(p.id)}</code></td>
-    <td>${p.title || "--"}</td>
-    <td>${p.agent_pref || "--"}</td>
-    <td>${fmt$(p.cost_est_usd)}</td>
-    <td>${statusBadge(p.status)}</td>
-    <td style="white-space:nowrap">${fmtDate(p.created_at)}</td>
-  </tr>`,
+          <td><code>${shortId(p.id)}</code></td>
+          <td style="font-weight:500">${p.title || "--"}</td>
+          <td>${p.agent_pref || "--"}</td>
+          <td style="font-family:monospace">${fmt$(p.cost_est_usd)}</td>
+          <td>${statusBadge(p.status)}</td>
+          <td style="white-space:nowrap;color:var(--text3)">${timeAgo(p.created_at)}</td>
+        </tr>`,
           )
           .join("");
       }
@@ -1096,32 +1341,25 @@
       function renderEventsPanel() {
         const el = document.getElementById("eventLog");
         const events = STATE.events?.events || [];
-        const countEl = document.getElementById("eventCount");
-        countEl.textContent = `${events.length} total`;
-
+        document.getElementById("eventCount").textContent = `${events.length} total`;
         if (!events.length) {
-          el.innerHTML = '<span style="color:var(--text2)">No events</span>';
+          el.innerHTML = '<div class="empty">No events</div>';
           return;
         }
-
+        const tc = {
+          "proposal.created": "blue",
+          "job.created": "green",
+          "job.completed": "green",
+          "job.failed": "red",
+          "agent.error": "red",
+          "agent.timeout": "yellow",
+          "cost.alert": "orange",
+        };
         el.innerHTML = events
-          .map((e) => {
-            const typeColors = {
-              "proposal.created": "blue",
-              "job.created": "green",
-              "job.completed": "green",
-              "job.failed": "red",
-              "agent.error": "red",
-            };
-            const color = typeColors[e.event_type] || "yellow";
-            return `<div class="event-item">
-      <div class="event-time">${fmtDate(e.timestamp)}</div>
-      <div style="flex:1">
-        <div><span class="badge badge-${color}">${e.event_type}</span></div>
-        <div class="event-detail">${e.data?.title || e.data?.description || e.data?.job_id || JSON.stringify(e.data).slice(0, 120)}</div>
-      </div>
-    </div>`;
-          })
+          .map(
+            (e) =>
+              `<div class="event-item"><div class="event-time">${fmtDate(e.timestamp)}</div><div style="flex:1"><div><span class="badge badge-${tc[e.event_type] || "yellow"}">${e.event_type}</span></div><div class="event-detail">${e.data?.title || e.data?.description || e.data?.reason || e.data?.job_id || JSON.stringify(e.data).slice(0, 120)}</div></div></div>`,
+          )
           .join("");
       }
 
@@ -1131,34 +1369,27 @@
         const hb = STATE.heartbeat;
         if (hb && !hb._error) {
           const m = hb.monitor || {};
-          hbEl.innerHTML = `
-      <div style="margin-bottom:8px">${statusBadge(hb.status)}</div>
-      <table>
-        <tr><td style="color:var(--text2)">Running</td><td>${m.running ? "Yes" : "No"}</td></tr>
-        <tr><td style="color:var(--text2)">Agents Monitored</td><td>${m.agents_monitoring || 0}</td></tr>
-        <tr><td style="color:var(--text2)">Check Interval</td><td>${(m.config?.check_interval_ms || 0) / 1000}s</td></tr>
-        <tr><td style="color:var(--text2)">Stale Threshold</td><td>${(m.config?.stale_threshold_ms || 0) / 1000}s</td></tr>
-        <tr><td style="color:var(--text2)">Timeout</td><td>${(m.config?.timeout_threshold_ms || 0) / 1000}s</td></tr>
-      </table>
-    `;
+          hbEl.innerHTML = `<div style="margin-bottom:10px">${statusBadge(hb.status)}</div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px">
+            <span style="color:var(--text3)">Running</span><span>${m.running ? "Yes" : "No"}</span>
+            <span style="color:var(--text3)">Monitoring</span><span>${m.agents_monitoring || 0} agents</span>
+            <span style="color:var(--text3)">Interval</span><span>${(m.config?.check_interval_ms || 0) / 1000}s</span>
+          </div>`;
         } else {
-          hbEl.innerHTML = '<span style="color:var(--text2)">Unavailable</span>';
+          hbEl.innerHTML = '<div class="empty">Unavailable</div>';
         }
 
         // Router
         const rtEl = document.getElementById("routerInfo");
         const rt = STATE.router;
         if (rt && !rt._error) {
-          rtEl.innerHTML = `
-      <div style="margin-bottom:8px">${statusBadge(rt.status)}</div>
-      <table>
-        <tr><td style="color:var(--text2)">Version</td><td>${rt.router_version || "--"}</td></tr>
-        <tr><td style="color:var(--text2)">Models</td><td>${(rt.models || []).join(", ")}</td></tr>
-        <tr><td style="color:var(--text2)">Count</td><td>${rt.models_available || 0}</td></tr>
-      </table>
-    `;
+          rtEl.innerHTML = `<div style="margin-bottom:10px">${statusBadge(rt.status)}</div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px">
+            <span style="color:var(--text3)">Version</span><span>${rt.router_version || "--"}</span>
+            <span style="color:var(--text3)">Models</span><span>${rt.models_available || 0}</span>
+          </div>`;
         } else {
-          rtEl.innerHTML = '<span style="color:var(--text2)">Unavailable</span>';
+          rtEl.innerHTML = '<div class="empty">Unavailable</div>';
         }
 
         // Policy
@@ -1167,17 +1398,17 @@
         if (rules.length) {
           plEl.innerHTML = rules
             .map(
-              (r) => `
-      <div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
-        <strong>${r.name}</strong>
-        <span class="badge badge-${r.action === "approve" ? "green" : r.action === "require_human" ? "yellow" : "red"}" style="margin-left:8px">${r.action}</span>
-        ${r.max_cost_usd ? `<span style="color:var(--text2);margin-left:8px">max ${fmt$(r.max_cost_usd)}</span>` : ""}
-      </div>
-    `,
+              (
+                r,
+              ) => `<div style="padding:8px 0;border-bottom:1px solid rgba(63,63,70,.3);font-size:13px;display:flex;align-items:center;gap:8px">
+            <span style="font-weight:500">${r.name}</span>
+            <span class="badge badge-${r.action === "approve" ? "green" : r.action === "require_human" ? "yellow" : "red"}">${r.action}</span>
+            ${r.max_cost_usd ? `<span style="color:var(--text3);font-size:12px">max ${fmt$(r.max_cost_usd)}</span>` : ""}
+          </div>`,
             )
             .join("");
         } else {
-          plEl.innerHTML = '<span style="color:var(--text2)">No policies</span>';
+          plEl.innerHTML = '<div class="empty">No policies</div>';
         }
 
         // Cron
@@ -1186,66 +1417,44 @@
         if (cronJobs.length) {
           cronEl.innerHTML = cronJobs
             .map(
-              (c) => `<tr>
-      <td><strong>${c.name}</strong></td>
-      <td><code>${c.cron_expr}</code></td>
-      <td>${c.enabled ? '<span class="badge badge-green">ON</span>' : '<span class="badge badge-red">OFF</span>'}</td>
-      <td>${c.run_count || 0}</td>
-      <td>${fmtDate(c.last_run)}</td>
-    </tr>`,
+              (c) =>
+                `<tr><td style="font-weight:500">${c.name}</td><td><code>${c.cron_expr}</code></td><td>${c.enabled ? '<span class="badge badge-green">ON</span>' : '<span class="badge badge-red">OFF</span>'}</td><td>${c.run_count || 0}</td><td style="color:var(--text3)">${fmtDate(c.last_run)}</td></tr>`,
             )
             .join("");
         } else {
-          cronEl.innerHTML =
-            '<tr><td colspan="5" style="color:var(--text2)">No cron jobs</td></tr>';
+          cronEl.innerHTML = '<tr><td colspan="5" class="empty">No cron jobs</td></tr>';
         }
 
         // Memories
         const memEl = document.getElementById("memoryList");
         const memories = STATE.memories?.memories || [];
-        const memCountEl = document.getElementById("memoryCount");
-        memCountEl.textContent = `${memories.length} stored`;
+        document.getElementById("memoryCount").textContent = `${memories.length}`;
         if (memories.length) {
           memEl.innerHTML = memories
-            .slice(0, 15)
+            .slice(0, 10)
             .map(
-              (m) => `
-      <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <span>${m.content.slice(0, 100)}</span>
-          <span class="badge badge-blue">${m.importance || 0}</span>
-        </div>
-        <div style="color:var(--text2);font-size:11px;margin-top:2px">${(m.tags || []).join(", ")} &middot; ${m.source} &middot; ${fmtDate(m.created_at)}</div>
-      </div>
-    `,
+              (
+                m,
+              ) => `<div style="padding:8px 0;border-bottom:1px solid rgba(63,63,70,.3);font-size:13px">
+            <div style="display:flex;justify-content:space-between;align-items:start;gap:8px"><span style="line-height:1.4">${m.content?.slice(0, 120) || "--"}</span><span class="badge badge-blue" style="flex-shrink:0">${m.importance || 0}</span></div>
+            <div style="color:var(--text3);font-size:11px;margin-top:4px">${(m.tags || []).join(", ")} &middot; ${timeAgo(m.created_at)}</div>
+          </div>`,
             )
             .join("");
         } else {
-          memEl.innerHTML = '<span style="color:var(--text2)">No memories stored</span>';
+          memEl.innerHTML = '<div class="empty">No memories</div>';
         }
 
-        // Quota detail
+        // Quotas
         const qEl = document.getElementById("quotaDetail");
         const q = STATE.quotas?.data || STATE.quotas || {};
-        qEl.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px">
-      <div>
-        <div style="color:var(--text2);font-size:12px;margin-bottom:4px">Daily Budget</div>
-        <div style="font-size:20px;font-weight:700">${fmt$(q.daily_used)} <span style="color:var(--text2);font-size:14px">/ ${fmt$(q.daily_budget)}</span></div>
-        <div class="progress-bar" style="margin-top:8px"><div class="progress-fill ${(q.daily_percent || 0) > 80 ? "red" : "green"}" style="width:${Math.min(q.daily_percent || 0, 100)}%"></div></div>
-      </div>
-      <div>
-        <div style="color:var(--text2);font-size:12px;margin-bottom:4px">Monthly Budget</div>
-        <div style="font-size:20px;font-weight:700">${fmt$(q.monthly_used)} <span style="color:var(--text2);font-size:14px">/ ${fmt$(q.monthly_budget)}</span></div>
-        <div class="progress-bar" style="margin-top:8px"><div class="progress-fill ${(q.monthly_percent || 0) > 80 ? "red" : "green"}" style="width:${Math.min(q.monthly_percent || 0, 100)}%"></div></div>
-      </div>
-    </div>
-  `;
+        qEl.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px">
+          <div><div style="color:var(--text3);font-size:12px;margin-bottom:6px">Daily Budget</div><div style="font-size:24px;font-weight:700">${fmt$(q.daily_used)} <span style="color:var(--text3);font-size:14px">/ ${fmt$(q.daily_budget)}</span></div><div class="progress"><div class="progress-fill ${(q.daily_percent || 0) > 80 ? "red" : "green"}" style="width:${Math.min(q.daily_percent || 0, 100)}%"></div></div></div>
+          <div><div style="color:var(--text3);font-size:12px;margin-bottom:6px">Monthly Budget</div><div style="font-size:24px;font-weight:700">${fmt$(q.monthly_used)} <span style="color:var(--text3);font-size:14px">/ ${fmt$(q.monthly_budget)}</span></div><div class="progress"><div class="progress-fill ${(q.monthly_percent || 0) > 80 ? "red" : "green"}" style="width:${Math.min(q.monthly_percent || 0, 100)}%"></div></div></div>
+        </div>`;
       }
 
-      // ============================================================
-      // Main render
-      // ============================================================
+      // Main
       async function refreshAll() {
         document.getElementById("lastRefresh").innerHTML = '<span class="spinner"></span>';
         try {
@@ -1253,6 +1462,7 @@
           renderSystemStatus();
           renderStatCards();
           renderOverviewCharts();
+          renderRecentJobs();
           renderRecentEvents();
           renderAgentStatusOverview();
           renderAgentsPanel();
@@ -1261,15 +1471,15 @@
           renderProposalsPanel();
           renderEventsPanel();
           renderSystemPanel();
-          document.getElementById("lastRefresh").textContent =
-            "Updated " + new Date().toLocaleTimeString();
-          toast("Dashboard refreshed");
+          document.getElementById("lastRefresh").textContent = new Date().toLocaleTimeString(
+            "en-US",
+            { hour: "2-digit", minute: "2-digit", second: "2-digit" },
+          );
         } catch (e) {
-          document.getElementById("lastRefresh").textContent = "Error: " + e.message;
-          toast("Refresh failed: " + e.message);
+          document.getElementById("lastRefresh").textContent = "Error";
+          toast("Refresh failed");
         }
       }
-
       function toggleAutoRefresh() {
         if (document.getElementById("autoRefresh").checked) {
           refreshTimer = setInterval(refreshAll, 30000);
@@ -1278,8 +1488,6 @@
           refreshTimer = null;
         }
       }
-
-      // Init
       refreshAll();
       refreshTimer = setInterval(refreshAll, 30000);
     </script>
