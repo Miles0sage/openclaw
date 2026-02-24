@@ -593,7 +593,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -3827,6 +3827,120 @@ async def api_cron_jobs():
         return {"jobs": jobs, "total": len(jobs)}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# GOOGLE OAUTH — Gmail + Calendar token flow (runs 24/7 on gateway)
+# ═══════════════════════════════════════════════════════════════════════
+
+GOOGLE_CREDS_FILE = "/root/.config/gmail/credentials.json"
+GOOGLE_TOKEN_DIR = "/root/.config/gmail"
+GOOGLE_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+]
+
+
+@app.get("/oauth/start")
+async def oauth_start():
+    """Start Google OAuth flow — open this URL in your browser."""
+    try:
+        with open(GOOGLE_CREDS_FILE) as f:
+            creds_data = json.load(f)
+        web = creds_data.get("web", creds_data.get("installed", {}))
+        client_id = web["client_id"]
+        redirect_uri = web["redirect_uris"][0]
+
+        import urllib.parse
+        params = urllib.parse.urlencode({
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": " ".join(GOOGLE_SCOPES),
+            "access_type": "offline",
+            "prompt": "consent",
+        })
+        auth_url = f"https://accounts.google.com/o/oauth2/auth?{params}"
+        # Return a nice HTML page with the link
+        html = f"""<!DOCTYPE html>
+<html><head><title>OpenClaw — Google OAuth</title>
+<style>body{{font-family:system-ui;background:#09090b;color:#fafafa;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}}
+.card{{background:#18181b;border:1px solid #3f3f46;border-radius:12px;padding:40px;max-width:500px;text-align:center}}
+a{{color:#3b82f6;font-size:18px}}</style></head>
+<body><div class="card">
+<h1>OpenClaw OAuth</h1>
+<p>Click below to authorize Gmail + Calendar access:</p>
+<p><a href="{auth_url}">Authorize with Google</a></p>
+<p style="color:#71717a;font-size:12px;margin-top:20px">Scopes: Gmail (read/send/modify) + Calendar (read/events)</p>
+</div></body></html>"""
+        return HTMLResponse(html)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/oauth/callback")
+async def oauth_callback(code: str = None, error: str = None):
+    """Google OAuth callback — exchanges code for tokens and saves them."""
+    if error:
+        return HTMLResponse(f"<h1>OAuth Error</h1><p>{error}</p>", status_code=400)
+    if not code:
+        return HTMLResponse("<h1>Missing code</h1><p>No authorization code received.</p>", status_code=400)
+
+    try:
+        with open(GOOGLE_CREDS_FILE) as f:
+            creds_data = json.load(f)
+        web = creds_data.get("web", creds_data.get("installed", {}))
+
+        # Exchange code for tokens
+        import httpx as hx
+        token_resp = hx.post(web["token_uri"], data={
+            "code": code,
+            "client_id": web["client_id"],
+            "client_secret": web["client_secret"],
+            "redirect_uri": web["redirect_uris"][0],
+            "grant_type": "authorization_code",
+        }, timeout=15)
+        token_data = token_resp.json()
+
+        if "error" in token_data:
+            return HTMLResponse(
+                f"<h1>Token Error</h1><p>{token_data['error']}: {token_data.get('error_description','')}</p>",
+                status_code=400
+            )
+
+        # Save token for Gmail MCP
+        os.makedirs(GOOGLE_TOKEN_DIR, exist_ok=True)
+        gmail_token_path = os.path.join(GOOGLE_TOKEN_DIR, "token.json")
+        with open(gmail_token_path, "w") as f:
+            json.dump(token_data, f, indent=2)
+
+        # Save token for Calendar MCP (same token, different file)
+        calendar_token_path = os.path.join(GOOGLE_TOKEN_DIR, "calendar_token.json")
+        with open(calendar_token_path, "w") as f:
+            json.dump(token_data, f, indent=2)
+
+        logger.info("Google OAuth tokens saved successfully")
+
+        scopes = token_data.get("scope", "").split()
+        html = f"""<!DOCTYPE html>
+<html><head><title>OpenClaw — OAuth Success</title>
+<style>body{{font-family:system-ui;background:#09090b;color:#fafafa;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}}
+.card{{background:#18181b;border:1px solid #22c55e;border-radius:12px;padding:40px;max-width:500px;text-align:center}}
+.check{{font-size:48px;margin-bottom:16px}}</style></head>
+<body><div class="card">
+<div class="check">&#9989;</div>
+<h1>Authorized!</h1>
+<p>Gmail + Calendar tokens saved. You can close this tab.</p>
+<p style="color:#71717a;font-size:12px;margin-top:20px">Scopes: {', '.join(scopes)}</p>
+<p style="color:#71717a;font-size:12px">Tokens: {gmail_token_path}, {calendar_token_path}</p>
+</div></body></html>"""
+        return HTMLResponse(html)
+    except Exception as e:
+        logger.error(f"OAuth callback error: {e}")
+        return HTMLResponse(f"<h1>Error</h1><p>{e}</p>", status_code=500)
 
 
 # ═══════════════════════════════════════════════════════════════════════
