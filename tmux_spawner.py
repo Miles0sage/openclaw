@@ -157,16 +157,27 @@ class TmuxSpawner:
         with open(prompt_file, "w") as f:
             f.write(prompt)
 
-        # Build the agent command
-        # Use --print for non-interactive mode, pipe prompt from file
-        agent_cmd = f'cd {work_dir} && {CLAUDE_CMD} --print "$(cat {prompt_file})" {claude_args}'
+        # Build a shell script to avoid quoting nightmares
+        script_file = f"/tmp/openclaw-agent-{job_id}.sh"
+        with open(script_file, "w") as sf:
+            sf.write("#!/usr/bin/env bash\n")
+            sf.write("unset CLAUDECODE\n")
+            sf.write("unset CLAUDE_CODE_SESSION\n")
+            sf.write(f"cd {work_dir}\n")
+            sf.write(f'{CLAUDE_CMD} --print "$(cat {prompt_file})" {claude_args}\n')
+            sf.write('echo ""\n')
+            sf.write('echo "[AGENT_EXIT code=$?]"\n')
+            sf.write(f'echo "[AGENT_DONE] $(date)" >> {LOG_FILE}\n')
+            # Keep pane open for 60s so output can be collected
+            sf.write('echo "Agent finished. Pane closes in 60s..."\n')
+            sf.write('sleep 60\n')
+        os.chmod(script_file, 0o755)
 
         # Wrap with timeout if specified
         if timeout_minutes > 0:
-            agent_cmd = f'timeout {timeout_minutes * 60} bash -c \'{agent_cmd}\''
-
-        # Add cleanup and exit marker
-        full_cmd = f'{agent_cmd}; echo "\\n[AGENT_EXIT code=$?]"'
+            full_cmd = f"timeout {timeout_minutes * 60} bash {script_file}"
+        else:
+            full_cmd = f"bash {script_file}"
 
         # Create a new window in the session for this agent
         window_name = f"agent-{job_id[:20]}"
