@@ -24,7 +24,7 @@ import requests
 import httpx
 from dotenv import load_dotenv
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Import orchestrator
 from orchestrator import Orchestrator, AgentRole, Message as OrchMessage, MessageAudience
@@ -82,14 +82,49 @@ class _MetricsStub:
 
 metrics = _MetricsStub()
 
-# Inline memory manager stub (replaces deleted memory_manager.py)
+# Inline memory manager with JSONL persistence
 class _MemoryManagerStub:
+    def __init__(self):
+        self._file = os.path.join(DATA_DIR, "memories.jsonl")
+        os.makedirs(os.path.dirname(self._file), exist_ok=True)
+
     def count(self) -> int:
-        return 0
+        if not os.path.exists(self._file): return 0
+        with open(self._file) as f:
+            return sum(1 for line in f if line.strip())
+
     def get_context_for_prompt(self, persona: str, max_tokens: int = 500) -> str:
-        return ""
+        memories = self.get_recent(limit=10)
+        return "\n".join(m.get("content", "") for m in memories)[:max_tokens]
+
     def auto_extract_memories(self, messages: list):
         pass
+
+    def get_recent(self, limit: int = 20) -> list:
+        if not os.path.exists(self._file): return []
+        memories = []
+        with open(self._file) as f:
+            for line in f:
+                line = line.strip()
+                if not line: continue
+                try: memories.append(json.loads(line))
+                except: continue
+        return sorted(memories, key=lambda m: m.get("timestamp", ""), reverse=True)[:limit]
+
+    def get_by_tag(self, tag: str) -> list:
+        return [m for m in self.get_recent(limit=100) if tag in m.get("tags", [])]
+
+    def add_memory(self, content: str, tags: list = None, source: str = "manual", importance: int = 5) -> str:
+        import uuid
+        mem_id = str(uuid.uuid4())[:8]
+        record = {
+            "id": mem_id, "content": content, "tags": tags or [],
+            "source": source, "importance": importance,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        with open(self._file, "a") as f:
+            f.write(json.dumps(record) + "\n")
+        return mem_id
 
 _memory_manager_instance = None
 
@@ -558,7 +593,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -698,6 +733,24 @@ async def startup_heartbeat_monitor():
         logger.info(f"✅ Memory manager initialized ({memory.count()} memories)")
     except Exception as err:
         logger.error(f"Failed to initialize memory manager: {err}")
+
+    # Initialize reactions engine
+    try:
+        from reactions import get_reactions_engine, register_with_event_engine
+        reactions_eng = get_reactions_engine()
+        if event_engine:
+            register_with_event_engine(event_engine)
+        logger.info(f"✅ Reactions engine initialized ({len(reactions_eng.get_rules())} rules)")
+    except Exception as err:
+        logger.error(f"Failed to initialize reactions engine: {err}")
+
+    # Initialize self-improvement engine
+    try:
+        from self_improve import get_self_improve_engine
+        si_engine = get_self_improve_engine()
+        logger.info("✅ Self-improvement engine initialized")
+    except Exception as err:
+        logger.error(f"Failed to initialize self-improve engine: {err}")
 
     # Initialize response cache
     try:
@@ -3772,6 +3825,146 @@ async def api_cron_jobs():
             return {"jobs": [], "total": 0}
         jobs = cron.list_jobs()
         return {"jobs": jobs, "total": len(jobs)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# HEALTH SYNC — Receive data from iOS Shortcuts (Apple Health)
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/health/sync")
+async def api_health_sync(request: Request):
+    """Receive health data from iOS Shortcuts (Apple Health export)."""
+    try:
+        data = await request.json()
+        health_dir = os.path.join(DATA_DIR, "health")
+        os.makedirs(health_dir, exist_ok=True)
+        if "timestamp" not in data:
+            data["timestamp"] = datetime.now(timezone.utc).isoformat()
+        if "date" not in data:
+            data["date"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        daily_file = os.path.join(health_dir, "daily.jsonl")
+        with open(daily_file, "a") as f:
+            f.write(json.dumps(data) + "\n")
+        logger.info(f"Health sync received: {list(data.keys())}")
+        return {"status": "ok", "received_keys": list(data.keys())}
+    except Exception as e:
+        logger.error(f"Health sync error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/health/today")
+async def api_health_today():
+    """Get today's health data."""
+    try:
+        health_file = os.path.join(DATA_DIR, "health", "daily.jsonl")
+        if not os.path.exists(health_file):
+            return {"data": [], "date": datetime.now(timezone.utc).strftime("%Y-%m-%d")}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        entries = []
+        with open(health_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line: continue
+                try:
+                    entry = json.loads(line)
+                    if entry.get("date", "") == today:
+                        entries.append(entry)
+                except: continue
+        return {"data": entries, "date": today}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# REACTIONS & SELF-IMPROVE API
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/reactions")
+async def api_list_reactions():
+    """List all reaction rules."""
+    try:
+        from reactions import get_reactions_engine
+        engine = get_reactions_engine()
+        return {"rules": engine.get_rules(), "status": engine.get_status()}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/reactions")
+async def api_manage_reaction(request: Request):
+    """Add/update/delete a reaction rule."""
+    try:
+        from reactions import get_reactions_engine
+        data = await request.json()
+        engine = get_reactions_engine()
+        action = data.get("action", "add")
+        if action == "add":
+            rule_id = engine.add_rule(data.get("rule", data))
+            return {"rule_id": rule_id, "status": "added"}
+        elif action == "update":
+            engine.update_rule(data["rule_id"], data.get("updates", {}))
+            return {"status": "updated"}
+        elif action == "delete":
+            engine.delete_rule(data["rule_id"])
+            return {"status": "deleted"}
+        return JSONResponse({"error": f"Unknown action: {action}"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/reactions/triggers")
+async def api_reaction_triggers(limit: int = 20):
+    """Get recent reaction trigger history."""
+    try:
+        from reactions import get_reactions_engine
+        engine = get_reactions_engine()
+        return {"triggers": engine.get_recent_triggers(limit=limit)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/metrics/summary")
+async def api_metrics_summary(days: int = 7):
+    """Get agent performance summary."""
+    try:
+        from self_improve import get_self_improve_engine
+        engine = get_self_improve_engine()
+        return engine.get_summary(days=days)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/metrics/sparkline")
+async def api_metrics_sparkline(days: int = 7):
+    """Get daily success rate data for sparkline charts."""
+    try:
+        from self_improve import get_self_improve_engine
+        engine = get_self_improve_engine()
+        return {"data": engine.get_daily_sparkline_data(days=days)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/metrics/recommendations")
+async def api_metrics_recommendations():
+    """Get guardrail adjustment recommendations."""
+    try:
+        from self_improve import get_self_improve_engine
+        engine = get_self_improve_engine()
+        return engine.get_guardrail_recommendations()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/metrics/retrospective")
+async def api_generate_retrospective():
+    """Generate and save a weekly retrospective."""
+    try:
+        from self_improve import get_self_improve_engine
+        engine = get_self_improve_engine()
+        return engine.generate_retrospective()
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

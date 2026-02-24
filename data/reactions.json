@@ -1,0 +1,62 @@
+[
+  {
+    "id": "ci_failed",
+    "name": "Auto-fix CI failures",
+    "trigger": "ci.failed",
+    "action": "spawn_agent",
+    "prompt_template": "CI failed on PR #{pr_number} in {project}. Read the failure logs:\n{error_log}\n\nFix the issues and push the fix.",
+    "message_template": "",
+    "enabled": true,
+    "max_retries": 3,
+    "cooldown_seconds": 300,
+    "agent_pref": "coder_agent"
+  },
+  {
+    "id": "changes_requested",
+    "name": "Address review comments",
+    "trigger": "pr.changes_requested",
+    "action": "spawn_agent",
+    "prompt_template": "Review comments posted on PR #{pr_number} in {project}. Address each comment and push fixes.",
+    "message_template": "",
+    "enabled": true,
+    "max_retries": 2,
+    "cooldown_seconds": 600,
+    "agent_pref": "coder_agent"
+  },
+  {
+    "id": "pr_approved",
+    "name": "Notify on PR approval",
+    "trigger": "pr.approved",
+    "action": "notify",
+    "prompt_template": "",
+    "message_template": "PR #{pr_number} in {project} approved and ready to merge.",
+    "enabled": true,
+    "max_retries": 0,
+    "cooldown_seconds": 60,
+    "agent_pref": "coder_agent"
+  },
+  {
+    "id": "job_failed_auto_retry",
+    "name": "Auto-retry failed jobs",
+    "trigger": "job.failed",
+    "action": "spawn_agent",
+    "prompt_template": "Job {job_id} failed with error: {error}\nProject: {project}\nTask: {task}\n\nDiagnose the failure and retry the task.",
+    "message_template": "",
+    "enabled": true,
+    "max_retries": 3,
+    "cooldown_seconds": 300,
+    "agent_pref": "coder_agent"
+  },
+  {
+    "id": "deploy_complete_notify",
+    "name": "Notify on deploy",
+    "trigger": "deploy.complete",
+    "action": "notify",
+    "prompt_template": "",
+    "message_template": "Deployed {project} to {env}. URL: {url}",
+    "enabled": true,
+    "max_retries": 0,
+    "cooldown_seconds": 60,
+    "agent_pref": "coder_agent"
+  }
+]

@@ -1278,6 +1278,175 @@
           width: 30px;
         }
       }
+
+      /* ========== ATTENTION ZONES ========== */
+      .attention-zones {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      .attention-zone {
+        background: var(--glass);
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius);
+        padding: 16px 20px;
+        transition: all 0.25s;
+        position: relative;
+        overflow: hidden;
+      }
+      .attention-zone:hover {
+        border-color: var(--border2);
+      }
+      .attention-zone.zone-red {
+        border-color: rgba(239, 68, 68, 0.4);
+        box-shadow: 0 0 20px rgba(239, 68, 68, 0.08);
+      }
+      .attention-zone.zone-red .zone-header {
+        color: var(--red);
+      }
+      .attention-zone.zone-green {
+        border-color: rgba(34, 197, 94, 0.4);
+        box-shadow: 0 0 20px rgba(34, 197, 94, 0.08);
+      }
+      .attention-zone.zone-green .zone-header {
+        color: var(--green);
+      }
+      .attention-zone.zone-gray {
+        border-color: rgba(113, 113, 122, 0.4);
+      }
+      .attention-zone.zone-gray .zone-header {
+        color: var(--text3);
+      }
+      .zone-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+      .zone-title {
+        font-size: 13px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .zone-count {
+        font-size: 20px;
+        font-weight: 700;
+        min-width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        background: var(--surface2);
+      }
+      .zone-items {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .zone-item {
+        font-size: 12px;
+        color: var(--text2);
+        padding: 6px 10px;
+        background: var(--surface2);
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .zone-item-icon {
+        flex-shrink: 0;
+        font-size: 10px;
+      }
+      .zone-empty {
+        font-size: 12px;
+        color: var(--text3);
+        padding: 8px 0;
+        text-align: center;
+      }
+
+      /* ========== SPARKLINE ========== */
+      .sparkline-card {
+        background: var(--glass);
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius);
+        padding: 16px 20px;
+        margin-bottom: 24px;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+      }
+      .sparkline-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text3);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+      }
+      .sparkline-value {
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--green);
+        white-space: nowrap;
+      }
+      .sparkline-svg {
+        flex: 1;
+        min-width: 120px;
+        max-width: 300px;
+      }
+
+      /* ========== REACTIONS LOG ========== */
+      .reactions-panel {
+        margin-top: 24px;
+      }
+      .reaction-item {
+        display: grid;
+        grid-template-columns: 100px 1fr 1fr auto;
+        gap: 12px;
+        padding: 10px 14px;
+        border-bottom: 1px solid rgba(63, 63, 70, 0.4);
+        font-size: 12px;
+        align-items: center;
+      }
+      .reaction-item:last-child {
+        border-bottom: none;
+      }
+      .reaction-time {
+        color: var(--text3);
+        font-family: monospace;
+        font-size: 11px;
+      }
+      .reaction-rule {
+        font-weight: 500;
+        color: var(--text);
+      }
+      .reaction-action {
+        color: var(--cyan);
+      }
+      .reaction-result {
+        font-size: 11px;
+      }
+
+      @media (max-width: 900px) {
+        .attention-zones {
+          grid-template-columns: 1fr;
+        }
+        .sparkline-card {
+          flex-wrap: wrap;
+        }
+        .reaction-item {
+          grid-template-columns: 1fr 1fr;
+          gap: 6px;
+        }
+      }
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link
@@ -1341,6 +1510,47 @@
     <div class="content">
       <!-- OVERVIEW -->
       <div class="panel active" id="panel-overview">
+        <!-- Performance Sparkline -->
+        <div class="sparkline-card" id="sparklineCard">
+          <div>
+            <div class="sparkline-label">7-Day Success Rate</div>
+            <div class="sparkline-value" id="sparklineValue">--%</div>
+          </div>
+          <svg
+            class="sparkline-svg"
+            id="sparklineSvg"
+            viewBox="0 0 200 50"
+            preserveAspectRatio="none"
+          ></svg>
+        </div>
+
+        <!-- Attention Zones -->
+        <div class="attention-zones" id="attentionZones">
+          <div class="attention-zone zone-red">
+            <div class="zone-header">
+              <span class="zone-title">Needs You</span>
+              <span class="zone-count" id="zoneNeedsCount">0</span>
+            </div>
+            <div class="zone-items" id="zoneNeedsItems"><div class="zone-empty">No data</div></div>
+          </div>
+          <div class="attention-zone zone-green">
+            <div class="zone-header">
+              <span class="zone-title">Working</span>
+              <span class="zone-count" id="zoneWorkingCount">0</span>
+            </div>
+            <div class="zone-items" id="zoneWorkingItems">
+              <div class="zone-empty">No data</div>
+            </div>
+          </div>
+          <div class="attention-zone zone-gray">
+            <div class="zone-header">
+              <span class="zone-title">Done</span>
+              <span class="zone-count" id="zoneDoneCount">0</span>
+            </div>
+            <div class="zone-items" id="zoneDoneItems"><div class="zone-empty">No data</div></div>
+          </div>
+        </div>
+
         <!-- Enhanced Stats Row -->
         <div class="enhanced-stats" id="enhancedStats"></div>
 
@@ -1382,6 +1592,19 @@
           <div class="card">
             <div class="card-header"><span class="card-title">Agent Status</span></div>
             <div id="agentStatusOverview"></div>
+          </div>
+        </div>
+
+        <!-- Reactions Log -->
+        <div class="card section reactions-panel">
+          <div class="card-header">
+            <span class="card-title">Reactions Log</span>
+            <span style="font-size: 11px; color: var(--text3)" id="reactionsRefresh"
+              >Auto-refresh 30s</span
+            >
+          </div>
+          <div id="reactionsLog">
+            <div class="empty">Loading reactions...</div>
           </div>
         </div>
       </div>
@@ -2707,6 +2930,9 @@
           renderRecentJobs();
           renderRecentEvents();
           renderAgentStatusOverview();
+          renderAttentionZones();
+          renderSparkline();
+          renderReactionsLog();
           renderAgentsPanel();
           renderCostsPanel();
           renderJobsPanel();
@@ -2737,6 +2963,143 @@
       document.getElementById("spawnPrompt").addEventListener("keydown", (e) => {
         if (e.key === "Enter") spawnAgent();
       });
+
+      // ==================== ATTENTION ZONES ====================
+      function renderAttentionZones() {
+        const jobs = Array.isArray(STATE.jobs) ? STATE.jobs : STATE.jobs?.jobs || [];
+
+        // Needs You: failed, pr_ready (needs approval), stuck analyzing > 30min
+        const needsYou = [];
+        const now = Date.now();
+        jobs.forEach((j) => {
+          if (j.status === "failed")
+            needsYou.push({ icon: "!", text: `FAILED: ${j.task || j.id}`, id: j.id });
+          else if (j.status === "pr_ready")
+            needsYou.push({ icon: "?", text: `Approve: ${j.task || j.id}`, id: j.id });
+          else if (
+            j.status === "analyzing" &&
+            j.started_at &&
+            now - new Date(j.started_at).getTime() > 30 * 60000
+          )
+            needsYou.push({ icon: "!", text: `Stuck: ${j.task || j.id}`, id: j.id });
+        });
+
+        // Working: running, analyzing, pending
+        const working = [];
+        jobs.forEach((j) => {
+          if (["running", "analyzing", "pending"].includes(j.status))
+            working.push({ icon: ">", text: `${j.status}: ${j.task || j.id}`, id: j.id });
+        });
+
+        // Done: completed/approved recently (last 24h)
+        const done = [];
+        jobs.forEach((j) => {
+          if (["done", "approved"].includes(j.status)) {
+            const ts = j.completed_at || j.updated_at || j.created_at;
+            if (ts && now - new Date(ts).getTime() < 24 * 3600000)
+              done.push({ icon: "#", text: `${j.task || j.id}`, id: j.id });
+          }
+        });
+
+        function renderZone(items, countEl, itemsEl) {
+          document.getElementById(countEl).textContent = items.length;
+          const el = document.getElementById(itemsEl);
+          if (items.length === 0) {
+            el.innerHTML = '<div class="zone-empty">All clear</div>';
+          } else {
+            el.innerHTML = items
+              .slice(0, 5)
+              .map(
+                (i) =>
+                  `<div class="zone-item"><span class="zone-item-icon">${i.icon}</span>${i.text}</div>`,
+              )
+              .join("");
+          }
+        }
+
+        renderZone(needsYou, "zoneNeedsCount", "zoneNeedsItems");
+        renderZone(working, "zoneWorkingCount", "zoneWorkingItems");
+        renderZone(done, "zoneDoneCount", "zoneDoneItems");
+      }
+
+      // ==================== SPARKLINE ====================
+      async function renderSparkline() {
+        try {
+          const data = await api("/api/metrics/sparkline?days=7");
+          const points = data?.data || data?.points || data || [];
+          if (!Array.isArray(points) || points.length === 0) {
+            document.getElementById("sparklineValue").textContent = "No data";
+            return;
+          }
+          const rates = points.map((p) => p.success_rate ?? p.rate ?? p.value ?? 0);
+          const current = rates[rates.length - 1];
+          const valEl = document.getElementById("sparklineValue");
+          valEl.textContent = Math.round(current) + "%";
+          valEl.style.color =
+            current >= 80 ? "var(--green)" : current >= 50 ? "var(--yellow)" : "var(--red)";
+
+          // Draw SVG sparkline
+          const svg = document.getElementById("sparklineSvg");
+          const w = 200,
+            h = 50;
+          const maxR = Math.max(...rates, 100);
+          const minR = Math.min(...rates, 0);
+          const range = maxR - minR || 1;
+          const pts = rates.map((r, i) => {
+            const x = (i / (rates.length - 1 || 1)) * w;
+            const y = h - ((r - minR) / range) * (h - 10) - 5;
+            return { x, y };
+          });
+          const pathD = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+          svg.innerHTML = `
+            <polyline points="${pts.map((p) => p.x + "," + p.y).join(" ")}"
+              fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            ${pts.map((p) => `<circle cx="${p.x}" cy="${p.y}" r="3" fill="var(--green)" stroke="var(--surface)" stroke-width="1.5"/>`).join("")}
+          `;
+        } catch (e) {
+          document.getElementById("sparklineValue").textContent = "N/A";
+        }
+      }
+
+      // ==================== REACTIONS LOG ====================
+      async function renderReactionsLog() {
+        try {
+          const data = await api("/api/reactions/triggers?limit=10");
+          const triggers = data?.triggers || data?.data || data || [];
+          const el = document.getElementById("reactionsLog");
+          if (!Array.isArray(triggers) || triggers.length === 0) {
+            el.innerHTML = '<div class="empty">No reaction triggers recorded</div>';
+            return;
+          }
+          el.innerHTML = triggers
+            .slice(0, 10)
+            .map((t) => {
+              const ts = t.timestamp || t.created_at || "";
+              const time = ts
+                ? new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+                : "--";
+              const rule = t.rule || t.name || "Unknown";
+              const action = t.action || t.action_taken || "--";
+              const result = t.result || t.outcome || "";
+              const resultBadge =
+                result === "success" || result === "ok"
+                  ? '<span class="badge badge-green">OK</span>'
+                  : result === "failed" || result === "error"
+                    ? '<span class="badge badge-red">FAIL</span>'
+                    : `<span class="badge badge-blue">${result || "--"}</span>`;
+              return `<div class="reaction-item">
+              <span class="reaction-time">${time}</span>
+              <span class="reaction-rule">${rule}</span>
+              <span class="reaction-action">${action}</span>
+              ${resultBadge}
+            </div>`;
+            })
+            .join("");
+        } catch (e) {
+          document.getElementById("reactionsLog").innerHTML =
+            '<div class="empty">Failed to load reactions</div>';
+        }
+      }
 
       refreshAll();
       refreshTimer = setInterval(refreshAll, 30000);

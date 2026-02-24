@@ -9,6 +9,8 @@ import subprocess
 import json
 import logging
 import shutil
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 import httpx
 
@@ -257,6 +259,45 @@ AGENT_TOOLS = [
                 "channel": {"type": "string", "description": "Channel ID (default: report channel C0AFE4QHKH7)"}
             },
             "required": ["message"],
+            "additionalProperties": False
+        }
+    },
+    # ═══════════════════════════════════════════════════════════════
+    # AGENCY MANAGEMENT TOOLS
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "kill_job",
+        "description": "Cancel a running or pending job. Sets kill flag and terminates any tmux agent running it.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string", "description": "The job ID to cancel"}
+            },
+            "required": ["job_id"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "agency_status",
+        "description": "Get combined agency overview: active jobs, recent completions, costs, active agents, alerts.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "manage_reactions",
+        "description": "Manage auto-reaction rules (list, add, update, delete, get triggers history).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["list", "add", "update", "delete", "triggers"], "description": "Action to perform"},
+                "rule_id": {"type": "string", "description": "Rule ID (for update/delete)"},
+                "rule_data": {"type": "object", "description": "Rule fields (for add/update)"}
+            },
+            "required": ["action"],
             "additionalProperties": False
         }
     },
@@ -687,6 +728,13 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             return _search_memory(tool_input["query"], tool_input.get("limit", 5))
         elif tool_name == "send_slack_message":
             return _send_slack_message(tool_input["message"], tool_input.get("channel"))
+        # ═ Agency management tools
+        elif tool_name == "kill_job":
+            return _kill_job(tool_input["job_id"])
+        elif tool_name == "agency_status":
+            return _agency_status()
+        elif tool_name == "manage_reactions":
+            return _manage_reactions(tool_input["action"], tool_input.get("rule_id", ""), tool_input.get("rule_data"))
         # ═ Execution tools
         elif tool_name == "shell_execute":
             return _shell_execute(tool_input["command"], tool_input.get("cwd", "/root"), tool_input.get("timeout", 60))
@@ -937,13 +985,140 @@ def _get_events(limit: int = 10, event_type: str = None) -> str:
 
 
 def _save_memory(content: str, tags: list = None, importance: int = 5) -> str:
-    """Save important information to long-term memory (stub — memory_manager removed)."""
-    return f"Memory save acknowledged (persistence disabled): {content[:80]}"
+    """Save to persistent JSONL memory store."""
+    import uuid
+    mem_file = os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "memories.jsonl")
+    os.makedirs(os.path.dirname(mem_file), exist_ok=True)
+    mem_id = str(uuid.uuid4())[:8]
+    record = {"id": mem_id, "content": content, "tags": tags or [], "importance": importance,
+              "timestamp": datetime.now(timezone.utc).isoformat()}
+    with open(mem_file, "a") as f:
+        f.write(json.dumps(record) + "\n")
+    return f"Memory saved (id={mem_id}): {content[:80]}"
 
 
 def _search_memory(query: str, limit: int = 5) -> str:
-    """Search through saved memories (stub — memory_manager removed)."""
-    return "No matching memories found"
+    """Search memories by keyword matching."""
+    mem_file = os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "memories.jsonl")
+    if not os.path.exists(mem_file):
+        return "No memories found"
+    query_lower = query.lower()
+    matches = []
+    with open(mem_file) as f:
+        for line in f:
+            line = line.strip()
+            if not line: continue
+            try:
+                m = json.loads(line)
+                content_str = m.get("content", "").lower()
+                tags_str = " ".join(m.get("tags", [])).lower()
+                if query_lower in content_str or query_lower in tags_str:
+                    matches.append(m)
+            except: continue
+    matches.sort(key=lambda m: m.get("importance", 5), reverse=True)
+    if not matches:
+        return f"No memories matching '{query}'"
+    lines = [f"[{m['id']}] (imp={m.get('importance',5)}) {m['content'][:100]}" for m in matches[:limit]]
+    return f"Found {len(matches)} memories:\n" + "\n".join(lines)
+
+
+def _kill_job(job_id: str) -> str:
+    """Cancel a running or pending job."""
+    kill_flags_file = os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "jobs", "kill_flags.json")
+    os.makedirs(os.path.dirname(kill_flags_file), exist_ok=True)
+    flags = {}
+    if os.path.exists(kill_flags_file):
+        with open(kill_flags_file) as f:
+            flags = json.load(f)
+    flags[job_id] = {"killed_at": datetime.now(timezone.utc).isoformat(), "reason": "manual"}
+    with open(kill_flags_file, "w") as f:
+        json.dump(flags, f)
+    # Try to kill tmux pane
+    subprocess.run(["tmux", "kill-window", "-t", f"job-{job_id}"], capture_output=True)
+    try:
+        from job_manager import update_job_status
+        update_job_status(job_id, "cancelled")
+    except Exception:
+        pass
+    return f"Kill flag set for job {job_id}"
+
+
+def _agency_status() -> str:
+    """Get combined agency overview."""
+    parts = []
+    # Active jobs
+    try:
+        from job_manager import list_jobs as lj
+        jobs = lj(status="all")
+        active = [j for j in jobs if j.get("status") in ("analyzing", "running", "pending")]
+        recent_done = [j for j in jobs if j.get("status") == "done"][-5:]
+        parts.append(f"Active jobs: {len(active)}")
+        for j in active:
+            parts.append(f"  [{j.get('status')}] {j['id'][:8]}: {j.get('task', '')[:60]}")
+        parts.append(f"\nRecent completed: {len(recent_done)}")
+        for j in recent_done:
+            parts.append(f"  {j['id'][:8]}: {j.get('task', '')[:60]}")
+    except Exception as e:
+        parts.append(f"Jobs: error - {e}")
+    # Costs
+    try:
+        from cost_tracker import get_cost_metrics
+        costs = get_cost_metrics()
+        parts.append(f"\nCosts today: ${costs.get('today_usd', 0):.4f}")
+        parts.append(f"Costs this month: ${costs.get('month_usd', 0):.4f}")
+    except Exception:
+        pass
+    # Tmux agents
+    try:
+        result = subprocess.run(["tmux", "list-windows", "-t", "openclaw", "-F", "#{window_name}"],
+                                capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            windows = [w for w in result.stdout.strip().split("\n") if w]
+            parts.append(f"\nActive tmux agents: {len(windows)}")
+            for w in windows[:10]:
+                parts.append(f"  {w}")
+    except Exception:
+        pass
+    # Self-improve metrics
+    try:
+        from self_improve import get_self_improve_engine
+        engine = get_self_improve_engine()
+        summary = engine.get_summary(days=7)
+        parts.append(f"\n7-day performance: {summary.get('success_rate', 0)}% success ({summary.get('total_jobs', 0)} jobs)")
+    except Exception:
+        pass
+    return "\n".join(parts)
+
+
+def _manage_reactions(action: str, rule_id: str = "", rule_data: dict = None) -> str:
+    """Manage auto-reaction rules."""
+    try:
+        from reactions import get_reactions_engine
+        engine = get_reactions_engine()
+        if action == "list":
+            rules = engine.get_rules()
+            return json.dumps(rules, indent=2)
+        elif action == "triggers":
+            triggers = engine.get_recent_triggers()
+            return json.dumps(triggers, indent=2)
+        elif action == "add":
+            if not rule_data:
+                return "Error: rule_data required"
+            new_id = engine.add_rule(rule_data)
+            return f"Rule added: {new_id}"
+        elif action == "update":
+            if not rule_id or not rule_data:
+                return "Error: rule_id and rule_data required"
+            engine.update_rule(rule_id, rule_data)
+            return f"Rule {rule_id} updated"
+        elif action == "delete":
+            if not rule_id:
+                return "Error: rule_id required"
+            engine.delete_rule(rule_id)
+            return f"Rule {rule_id} deleted"
+        return f"Unknown action: {action}"
+    except Exception as e:
+        return f"Error: {e}"
 
 
 def _send_slack_message(message: str, channel: str = None) -> str:

@@ -1047,6 +1047,27 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
         _save_progress(progress)
         return delivery
 
+    # Pre-deploy Slack notification
+    try:
+        from gateway import send_slack_message
+        staging_projects = {"barber-crm", "delhi-palace"}
+        deploy_mode = "preview" if project in staging_projects else "production"
+        await send_slack_message("", (
+            f"🚀 *Deploying {project}* ({deploy_mode})\n"
+            f"*Task:* {job['task'][:100]}\n"
+            f"*Cost so far:* ${progress.cost_usd:.4f}"
+        ))
+    except Exception:
+        pass
+
+    # Staging-first: client projects deploy to preview first
+    staging_projects = {"barber-crm", "delhi-palace"}
+    deploy_instruction = (
+        f"5. Deploy to Vercel PREVIEW (not production) using vercel_deploy with production=false\n"
+        if project in staging_projects else
+        f"5. If the project uses Vercel, use vercel_deploy to trigger a deployment\n"
+    )
+
     prompt = (
         f"The task is complete and verified. Now deliver the results.\n\n"
         f"PROJECT: {project}\n"
@@ -1060,7 +1081,7 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
         f"2. Use git_operations with action='add' to stage the changes (repo_path='{repo_path}')\n"
         f"3. Use git_operations with action='commit' with a clear commit message (repo_path='{repo_path}')\n"
         f"4. Use git_operations with action='push' to push to remote (repo_path='{repo_path}')\n"
-        f"5. If the project uses Vercel, use vercel_deploy to trigger a deployment\n"
+        f"{deploy_instruction}"
         f"6. Send a slack message summarizing what was done\n\n"
         f"Respond with a JSON object when done:\n"
         f'{{"delivered": true, "commit_hash": "...", "pushed": true, "deployed": true/false, "summary": "..."}}\n'
@@ -1938,6 +1959,38 @@ class AutonomousRunner:
         result["completed_at"] = _now_iso()
         with open(run_dir / "result.json", "w") as f:
             json.dump(result, f, indent=2, default=str)
+
+        # Log metrics to self-improvement engine
+        try:
+            from self_improve import get_self_improve_engine
+            si = get_self_improve_engine()
+            elapsed = time.time() - (getattr(progress, '_start_time', None) or time.time())
+            error_str = result.get("error", "")
+            error_type = ""
+            if error_str:
+                error_lower = str(error_str).lower()
+                if "budget" in error_lower:
+                    error_type = "budget"
+                elif "guardrail" in error_lower:
+                    error_type = "guardrail"
+                elif "timeout" in error_lower or "timed out" in error_lower:
+                    error_type = "timeout"
+                else:
+                    error_type = "code_error"
+            si.log_job_outcome(
+                job_id=job_id,
+                project=job.get("project", "unknown"),
+                task=job.get("task", ""),
+                agent=result.get("agent", "unknown"),
+                success=result.get("success", False),
+                iterations=guardrails.iterations if guardrails else 0,
+                cost_usd=progress.cost_usd,
+                time_seconds=abs(elapsed),
+                phases_completed=sum(1 for p in result.get("phases", {}).values() if p),
+                error_type=error_type,
+            )
+        except Exception as si_err:
+            logger.warning(f"Failed to log self-improve metric: {si_err}")
 
         return result
 
