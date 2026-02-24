@@ -608,6 +608,34 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    {
+        "name": "tmux_agents",
+        "description": "Manage parallel Claude Code agents in tmux panes. Spawn agents with optional git worktree isolation, monitor status, collect output, kill agents. Elvis-pattern multi-agent orchestration.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["spawn", "spawn_parallel", "list", "output", "kill", "kill_all", "cleanup"],
+                    "description": "Action: spawn a single agent, spawn multiple in parallel, list running agents, get output, kill one/all, or cleanup worktree"
+                },
+                "job_id": {"type": "string", "description": "Job identifier (for spawn, output, kill, cleanup)"},
+                "prompt": {"type": "string", "description": "Agent prompt/instruction (for spawn)"},
+                "pane_id": {"type": "string", "description": "Tmux pane ID (for output, kill)"},
+                "jobs": {
+                    "type": "array",
+                    "description": "List of job dicts for spawn_parallel. Each needs: job_id, prompt. Optional: worktree_repo, cwd",
+                    "items": {"type": "object"}
+                },
+                "worktree_repo": {"type": "string", "description": "Git repo path to create worktree from (for spawn)"},
+                "use_worktree": {"type": "boolean", "description": "Create isolated git worktree (default: false)"},
+                "cwd": {"type": "string", "description": "Working directory override (for spawn)"},
+                "timeout_minutes": {"type": "integer", "description": "Kill agent after N minutes (default: 30, 0=no limit)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -718,6 +746,8 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                                 tool_input.get("file_path"))
         elif tool_name == "compute_convert":
             return _compute_convert(tool_input["value"], tool_input["from_unit"], tool_input["to_unit"])
+        elif tool_name == "tmux_agents":
+            return _tmux_agents(tool_input)
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:
@@ -2071,3 +2101,78 @@ def _compute_convert(value, from_unit: str, to_unit: str) -> str:
         return f"Unknown conversion: {from_unit} → {to_unit}"
     except Exception as e:
         return f"Convert error: {e}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# Tmux Agent Spawning (Elvis pattern)
+# ═══════════════════════════════════════════════════════════════
+
+def _tmux_agents(tool_input: dict) -> str:
+    """Manage parallel Claude Code agents in tmux panes."""
+    try:
+        from tmux_spawner import get_spawner
+        spawner = get_spawner()
+        action = tool_input["action"]
+
+        if action == "spawn":
+            job_id = tool_input.get("job_id")
+            prompt = tool_input.get("prompt")
+            if not job_id or not prompt:
+                return "Error: spawn requires job_id and prompt"
+            pane_id = spawner.spawn_agent(
+                job_id=job_id,
+                prompt=prompt,
+                worktree_repo=tool_input.get("worktree_repo"),
+                use_worktree=tool_input.get("use_worktree", False),
+                cwd=tool_input.get("cwd"),
+                timeout_minutes=tool_input.get("timeout_minutes", 30),
+            )
+            return json.dumps({"status": "spawned", "pane_id": pane_id, "job_id": job_id})
+
+        elif action == "spawn_parallel":
+            jobs = tool_input.get("jobs", [])
+            if not jobs:
+                return "Error: spawn_parallel requires jobs list"
+            results = spawner.spawn_parallel(jobs)
+            spawned = sum(1 for r in results if r["status"] == "spawned")
+            return json.dumps({"spawned": spawned, "total": len(jobs), "results": results})
+
+        elif action == "list":
+            agents = spawner.list_agents()
+            return json.dumps({"count": len(agents), "agents": agents})
+
+        elif action == "output":
+            pane_id = tool_input.get("pane_id")
+            if not pane_id:
+                return "Error: output requires pane_id"
+            output = spawner.collect_output(pane_id)
+            status = spawner.get_agent_status(pane_id)
+            return json.dumps({
+                "pane_id": pane_id,
+                "output": output[:10000],  # Cap output size
+                "status": status,
+            })
+
+        elif action == "kill":
+            pane_id = tool_input.get("pane_id")
+            if not pane_id:
+                return "Error: kill requires pane_id"
+            killed = spawner.kill_agent(pane_id)
+            return json.dumps({"killed": killed, "pane_id": pane_id})
+
+        elif action == "kill_all":
+            count = spawner.kill_all()
+            return json.dumps({"killed": count})
+
+        elif action == "cleanup":
+            job_id = tool_input.get("job_id")
+            if not job_id:
+                return "Error: cleanup requires job_id"
+            spawner.cleanup(job_id)
+            return json.dumps({"cleaned": True, "job_id": job_id})
+
+        else:
+            return f"Unknown tmux_agents action: {action}"
+
+    except Exception as e:
+        return f"Error: {e}"

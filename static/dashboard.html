@@ -32,8 +32,11 @@
         --orange: #f97316;
         --orange-bg: rgba(249, 115, 22, 0.12);
         --cyan: #06b6d4;
+        --cyan-bg: rgba(6, 182, 212, 0.12);
         --accent: #3b82f6;
         --radius: 10px;
+        --glass: rgba(24, 24, 27, 0.65);
+        --glass-border: rgba(63, 63, 70, 0.5);
       }
       body {
         font-family:
@@ -199,6 +202,11 @@
         padding: 0 32px;
         overflow-x: auto;
         scrollbar-width: none;
+        position: sticky;
+        top: 56px;
+        z-index: 99;
+        backdrop-filter: blur(12px);
+        background: rgba(24, 24, 27, 0.85);
       }
       .tabs::-webkit-scrollbar {
         display: none;
@@ -276,6 +284,20 @@
         color: var(--text3);
         text-transform: uppercase;
         letter-spacing: 0.6px;
+      }
+
+      /* Glass card */
+      .glass-card {
+        background: var(--glass);
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius);
+        padding: 20px;
+        transition: all 0.25s;
+      }
+      .glass-card:hover {
+        border-color: var(--border2);
+        background: rgba(24, 24, 27, 0.75);
       }
 
       /* Stat cards */
@@ -359,6 +381,10 @@
       .badge-orange {
         background: var(--orange-bg);
         color: var(--orange);
+      }
+      .badge-cyan {
+        background: var(--cyan-bg);
+        color: var(--cyan);
       }
 
       /* Table */
@@ -609,12 +635,610 @@
         font-size: 13px;
       }
 
+      /* View Toggle (List/Kanban/Flow) */
+      .view-toggle {
+        display: inline-flex;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .view-toggle-btn {
+        padding: 6px 16px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        background: transparent;
+        color: var(--text3);
+        transition: all 0.15s;
+        border-right: 1px solid var(--border);
+      }
+      .view-toggle-btn:last-child {
+        border-right: none;
+      }
+      .view-toggle-btn:hover {
+        color: var(--text);
+        background: var(--surface2);
+      }
+      .view-toggle-btn.active {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      /* ========== KANBAN BOARD ========== */
+      .kanban-board {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 12px;
+        min-height: 400px;
+        overflow-x: auto;
+      }
+      .kanban-column {
+        background: var(--glass);
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius);
+        padding: 14px;
+        min-width: 180px;
+        display: flex;
+        flex-direction: column;
+      }
+      .kanban-col-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      .kanban-col-title {
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .kanban-col-count {
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 10px;
+        background: var(--surface2);
+        color: var(--text2);
+      }
+      .kanban-cards {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-height: 60px;
+      }
+      .kanban-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px;
+        cursor: grab;
+        transition: all 0.2s;
+        animation: kanbanCardIn 0.3s ease-out;
+      }
+      .kanban-card:hover {
+        border-color: var(--accent);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      }
+      .kanban-card:active {
+        cursor: grabbing;
+      }
+      @keyframes kanbanCardIn {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .kanban-card-id {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        color: var(--text3);
+        margin-bottom: 6px;
+      }
+      .kanban-card-task {
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 1.4;
+        margin-bottom: 8px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .kanban-card-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11px;
+        color: var(--text3);
+      }
+      .kanban-card-project {
+        font-weight: 500;
+        color: var(--text2);
+      }
+      .kanban-card-cost {
+        font-family: monospace;
+      }
+      .kanban-card-elapsed {
+        font-size: 10px;
+        color: var(--text3);
+        margin-top: 4px;
+      }
+
+      /* Kanban column accent lines */
+      .kanban-column[data-status="pending"] .kanban-col-title {
+        color: var(--yellow);
+      }
+      .kanban-column[data-status="analyzing"] .kanban-col-title {
+        color: var(--cyan);
+      }
+      .kanban-column[data-status="running"] .kanban-col-title {
+        color: var(--blue);
+      }
+      .kanban-column[data-status="pr_ready"] .kanban-col-title {
+        color: var(--purple);
+      }
+      .kanban-column[data-status="done"] .kanban-col-title {
+        color: var(--green);
+      }
+      .kanban-column[data-status="failed"] .kanban-col-title {
+        color: var(--red);
+      }
+
+      .kanban-column[data-status="pending"] {
+        border-top: 2px solid var(--yellow);
+      }
+      .kanban-column[data-status="analyzing"] {
+        border-top: 2px solid var(--cyan);
+      }
+      .kanban-column[data-status="running"] {
+        border-top: 2px solid var(--blue);
+      }
+      .kanban-column[data-status="pr_ready"] {
+        border-top: 2px solid var(--purple);
+      }
+      .kanban-column[data-status="done"] {
+        border-top: 2px solid var(--green);
+      }
+      .kanban-column[data-status="failed"] {
+        border-top: 2px solid var(--red);
+      }
+
+      /* ========== ACTIVITY HEATMAP ========== */
+      .heatmap-container {
+        overflow-x: auto;
+      }
+      .heatmap-grid {
+        display: grid;
+        grid-template-columns: 40px repeat(24, 1fr);
+        gap: 2px;
+        min-width: 600px;
+      }
+      .heatmap-cell {
+        aspect-ratio: 1;
+        border-radius: 3px;
+        background: var(--surface2);
+        transition: all 0.15s;
+        cursor: pointer;
+        position: relative;
+        min-width: 14px;
+        min-height: 14px;
+      }
+      .heatmap-cell:hover {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+        z-index: 2;
+      }
+      .heatmap-cell.h1 {
+        background: rgba(59, 130, 246, 0.2);
+      }
+      .heatmap-cell.h2 {
+        background: rgba(59, 130, 246, 0.35);
+      }
+      .heatmap-cell.h3 {
+        background: rgba(59, 130, 246, 0.55);
+      }
+      .heatmap-cell.h4 {
+        background: rgba(59, 130, 246, 0.75);
+      }
+      .heatmap-cell.h5 {
+        background: rgba(59, 130, 246, 0.95);
+      }
+      .heatmap-day-label {
+        font-size: 10px;
+        color: var(--text3);
+        display: flex;
+        align-items: center;
+        padding-right: 4px;
+      }
+      .heatmap-hour-labels {
+        display: grid;
+        grid-template-columns: 40px repeat(24, 1fr);
+        gap: 2px;
+        margin-bottom: 4px;
+        min-width: 600px;
+      }
+      .heatmap-hour-label {
+        font-size: 9px;
+        color: var(--text3);
+        text-align: center;
+      }
+      .heatmap-tooltip {
+        position: fixed;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 12px;
+        font-size: 12px;
+        z-index: 300;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.15s;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      }
+      .heatmap-tooltip.visible {
+        opacity: 1;
+      }
+      .heatmap-legend {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-top: 10px;
+        font-size: 11px;
+        color: var(--text3);
+      }
+      .heatmap-legend-cell {
+        width: 14px;
+        height: 14px;
+        border-radius: 3px;
+      }
+
+      /* ========== AGENT PANES ========== */
+      .panes-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 12px;
+      }
+      .pane-card {
+        background: var(--glass);
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius);
+        padding: 16px;
+        transition: all 0.2s;
+      }
+      .pane-card:hover {
+        border-color: var(--border2);
+      }
+      .pane-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+      .pane-id {
+        font-family: monospace;
+        font-size: 12px;
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .pane-runtime {
+        font-size: 11px;
+        color: var(--text3);
+        font-family: monospace;
+      }
+      .pane-output {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text2);
+        line-height: 1.5;
+        max-height: 60px;
+        overflow: hidden;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .pane-actions {
+        display: flex;
+        gap: 6px;
+        margin-top: 10px;
+      }
+      .pane-placeholder {
+        text-align: center;
+        padding: 48px 20px;
+        color: var(--text3);
+      }
+      .pane-placeholder-icon {
+        font-size: 40px;
+        opacity: 0.3;
+        margin-bottom: 12px;
+      }
+      .spawn-bar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+      .spawn-input {
+        flex: 1;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 14px;
+        color: var(--text);
+        font-size: 13px;
+        transition: border-color 0.2s;
+      }
+      .spawn-input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+
+      /* ========== FLOW VISUALIZATION ========== */
+      .flow-container {
+        position: relative;
+        padding: 40px 0;
+        overflow-x: auto;
+      }
+      .flow-pipeline {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0;
+        min-width: 700px;
+        padding: 0 20px;
+      }
+      .flow-stage {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        position: relative;
+        z-index: 2;
+      }
+      .flow-stage:hover {
+        transform: scale(1.05);
+      }
+      .flow-stage:hover .flow-stage-box {
+        border-color: var(--accent);
+        box-shadow: 0 0 20px rgba(59, 130, 246, 0.2);
+      }
+      .flow-stage-box {
+        width: 110px;
+        height: 70px;
+        background: var(--glass);
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.25s;
+      }
+      .flow-stage-box.active {
+        border-color: var(--accent);
+        box-shadow: 0 0 20px rgba(59, 130, 246, 0.15);
+      }
+      .flow-stage-name {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+      }
+      .flow-stage-count {
+        font-size: 22px;
+        font-weight: 700;
+        line-height: 1;
+      }
+      .flow-stage-label {
+        font-size: 10px;
+        color: var(--text3);
+        margin-top: 8px;
+      }
+      .flow-connector {
+        width: 60px;
+        height: 2px;
+        background: var(--border);
+        position: relative;
+        flex-shrink: 0;
+      }
+      .flow-connector::after {
+        content: "";
+        position: absolute;
+        right: -4px;
+        top: -3px;
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--border2);
+        border-top: 2px solid var(--border2);
+        transform: rotate(45deg);
+      }
+      .flow-dot {
+        position: absolute;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+        top: -2px;
+        animation: flowDotMove 2s linear infinite;
+        box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
+      }
+      @keyframes flowDotMove {
+        0% {
+          left: 0;
+          opacity: 0;
+        }
+        10% {
+          opacity: 1;
+        }
+        90% {
+          opacity: 1;
+        }
+        100% {
+          left: calc(100% - 6px);
+          opacity: 0;
+        }
+      }
+
+      /* Stage colors */
+      .flow-stage[data-stage="intake"] .flow-stage-name {
+        color: var(--yellow);
+      }
+      .flow-stage[data-stage="analysis"] .flow-stage-name {
+        color: var(--cyan);
+      }
+      .flow-stage[data-stage="coding"] .flow-stage-name {
+        color: var(--blue);
+      }
+      .flow-stage[data-stage="review"] .flow-stage-name {
+        color: var(--orange);
+      }
+      .flow-stage[data-stage="pr"] .flow-stage-name {
+        color: var(--purple);
+      }
+      .flow-stage[data-stage="done"] .flow-stage-name {
+        color: var(--green);
+      }
+
+      .flow-stage[data-stage="intake"] .flow-stage-count {
+        color: var(--yellow);
+      }
+      .flow-stage[data-stage="analysis"] .flow-stage-count {
+        color: var(--cyan);
+      }
+      .flow-stage[data-stage="coding"] .flow-stage-count {
+        color: var(--blue);
+      }
+      .flow-stage[data-stage="review"] .flow-stage-count {
+        color: var(--orange);
+      }
+      .flow-stage[data-stage="pr"] .flow-stage-count {
+        color: var(--purple);
+      }
+      .flow-stage[data-stage="done"] .flow-stage-count {
+        color: var(--green);
+      }
+
+      /* ========== SPARKLINE & CIRCULAR PROGRESS ========== */
+      .sparkline-container {
+        display: flex;
+        align-items: flex-end;
+        gap: 2px;
+        height: 32px;
+        margin-top: 6px;
+      }
+      .sparkline-bar {
+        flex: 1;
+        background: var(--accent);
+        border-radius: 2px 2px 0 0;
+        min-width: 4px;
+        transition: height 0.3s ease;
+        opacity: 0.6;
+      }
+      .sparkline-bar:last-child {
+        opacity: 1;
+      }
+      .circular-progress {
+        position: relative;
+        width: 56px;
+        height: 56px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .circular-progress svg {
+        position: absolute;
+        top: 0;
+        left: 0;
+        transform: rotate(-90deg);
+      }
+      .circular-progress-value {
+        font-size: 14px;
+        font-weight: 700;
+        z-index: 1;
+      }
+
+      /* ========== ENHANCED STATS ROW ========== */
+      .enhanced-stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      .enhanced-stat-card {
+        background: var(--glass);
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius);
+        padding: 16px 20px;
+        transition: all 0.2s;
+      }
+      .enhanced-stat-card:hover {
+        border-color: var(--border2);
+      }
+      .enhanced-stat-label {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--text3);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 6px;
+      }
+      .enhanced-stat-main {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .enhanced-stat-value {
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+        line-height: 1;
+      }
+
+      /* ========== JOB VIEW CONTAINER ========== */
+      .job-view-list,
+      .job-view-kanban,
+      .job-view-flow {
+        display: none;
+      }
+      .job-view-list.active,
+      .job-view-kanban.active,
+      .job-view-flow.active {
+        display: block;
+      }
+
       /* Responsive */
+      @media (max-width: 1200px) {
+        .kanban-board {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
       @media (max-width: 1024px) {
-        .grid-4 {
+        .grid-4,
+        .enhanced-stats {
           grid-template-columns: repeat(2, 1fr);
         }
         .grid-3 {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .kanban-board {
           grid-template-columns: repeat(2, 1fr);
         }
       }
@@ -630,7 +1254,8 @@
         }
         .grid-4,
         .grid-3,
-        .grid-2 {
+        .grid-2,
+        .enhanced-stats {
           grid-template-columns: 1fr;
         }
         .auth-input {
@@ -638,6 +1263,19 @@
         }
         .stat-value {
           font-size: 24px;
+        }
+        .kanban-board {
+          grid-template-columns: 1fr;
+        }
+        .flow-pipeline {
+          min-width: 500px;
+        }
+        .flow-stage-box {
+          width: 80px;
+          height: 55px;
+        }
+        .flow-connector {
+          width: 30px;
         }
       }
     </style>
@@ -695,6 +1333,7 @@
       <div class="tab" data-panel="jobs">Jobs</div>
       <div class="tab" data-panel="proposals">Proposals</div>
       <div class="tab" data-panel="events">Events</div>
+      <div class="tab" data-panel="panes">Agent Panes</div>
       <div class="tab" data-panel="system">System</div>
     </div>
 
@@ -702,7 +1341,29 @@
     <div class="content">
       <!-- OVERVIEW -->
       <div class="panel active" id="panel-overview">
+        <!-- Enhanced Stats Row -->
+        <div class="enhanced-stats" id="enhancedStats"></div>
+
+        <!-- Original stat cards -->
         <div class="grid grid-4 section" id="statCards"></div>
+
+        <!-- Flow Visualization -->
+        <div class="glass-card section">
+          <div class="card-header">
+            <span class="card-title">Job Pipeline Flow</span>
+            <span style="font-size: 11px; color: var(--text3)">Click a stage to filter</span>
+          </div>
+          <div class="flow-container" id="flowViz"></div>
+        </div>
+
+        <!-- Activity Heatmap -->
+        <div class="glass-card section">
+          <div class="card-header">
+            <span class="card-title">Activity Heatmap (7 days)</span>
+          </div>
+          <div class="heatmap-container" id="heatmapContainer"></div>
+        </div>
+
         <div class="grid grid-2 section">
           <div class="card">
             <div class="card-header"><span class="card-title">Cost by Agent</span></div>
@@ -749,7 +1410,7 @@
         </div>
       </div>
 
-      <!-- JOBS -->
+      <!-- JOBS (with view toggle) -->
       <div class="panel" id="panel-jobs">
         <div class="card">
           <div class="card-header">
@@ -757,33 +1418,76 @@
               <span class="card-title">Jobs</span>
               <span style="font-size: 12px; color: var(--text3)" id="jobCount"></span>
             </div>
-            <div class="filter-bar" id="jobFilters">
-              <button class="filter-btn active" data-filter="all">All</button>
-              <button class="filter-btn" data-filter="done">Done</button>
-              <button class="filter-btn" data-filter="pending">Pending</button>
-              <button class="filter-btn" data-filter="failed">Failed</button>
-              <button class="filter-btn" data-filter="running">Running</button>
+            <div style="display: flex; align-items: center; gap: 12px">
+              <div class="view-toggle" id="jobViewToggle">
+                <button class="view-toggle-btn active" data-view="list">List</button>
+                <button class="view-toggle-btn" data-view="kanban">Kanban</button>
+                <button class="view-toggle-btn" data-view="flow">Flow</button>
+              </div>
+              <div class="filter-bar" id="jobFilters">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="done">Done</button>
+                <button class="filter-btn" data-filter="pending">Pending</button>
+                <button class="filter-btn" data-filter="failed">Failed</button>
+                <button class="filter-btn" data-filter="running">Running</button>
+              </div>
             </div>
           </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Project</th>
-                  <th>Task</th>
-                  <th>Priority</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="jobsTable">
-                <tr>
-                  <td colspan="7" class="empty">Loading...</td>
-                </tr>
-              </tbody>
-            </table>
+
+          <!-- List View -->
+          <div class="job-view-list active" id="jobViewList">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Project</th>
+                    <th>Task</th>
+                    <th>Priority</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="jobsTable">
+                  <tr>
+                    <td colspan="7" class="empty">Loading...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Kanban View -->
+          <div class="job-view-kanban" id="jobViewKanban">
+            <div class="kanban-board" id="kanbanBoard"></div>
+          </div>
+
+          <!-- Flow View -->
+          <div class="job-view-flow" id="jobViewFlow">
+            <div class="flow-container" id="jobFlowViz"></div>
+            <div style="margin-top: 20px">
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Project</th>
+                      <th>Task</th>
+                      <th>Priority</th>
+                      <th>Status</th>
+                      <th>Created</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="flowJobsTable">
+                    <tr>
+                      <td colspan="7" class="empty">Click a stage above to filter</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -830,6 +1534,20 @@
           </div>
           <div id="eventLog"></div>
         </div>
+      </div>
+
+      <!-- AGENT PANES -->
+      <div class="panel" id="panel-panes">
+        <div class="spawn-bar">
+          <input
+            type="text"
+            class="spawn-input"
+            id="spawnPrompt"
+            placeholder="Enter prompt to spawn new agent..."
+          />
+          <button class="btn btn-primary" onclick="spawnAgent()">Spawn New</button>
+        </div>
+        <div id="panesContent"></div>
       </div>
 
       <!-- SYSTEM -->
@@ -885,11 +1603,18 @@
       </div>
     </div>
 
+    <!-- Heatmap tooltip -->
+    <div class="heatmap-tooltip" id="heatmapTooltip"></div>
+
     <div class="toast" id="toast"></div>
 
     <script>
       let refreshTimer = null,
-        jobFilter = "all";
+        jobFilter = "all",
+        jobView = "list",
+        flowStageFilter = null,
+        panesRefreshTimer = null;
+
       const STATE = {
         health: null,
         agents: null,
@@ -903,9 +1628,10 @@
         quotas: null,
         router: null,
         policy: null,
+        panes: null,
       };
 
-      // Helpers
+      // ==================== HELPERS ====================
       function getToken() {
         return document.getElementById("authToken").value.trim();
       }
@@ -943,6 +1669,15 @@
         if (h < 24) return h + "h ago";
         return Math.floor(h / 24) + "d ago";
       }
+      function elapsed(start, end) {
+        if (!start) return "--";
+        const ms = (end ? new Date(end) : new Date()) - new Date(start);
+        const m = Math.floor(ms / 60000);
+        if (m < 1) return "<1m";
+        if (m < 60) return m + "m";
+        const h = Math.floor(m / 60);
+        return h + "h " + (m % 60) + "m";
+      }
       function shortId(s) {
         return s ? s.slice(-8) : "--";
       }
@@ -954,6 +1689,7 @@
           idle: "green",
           running: "blue",
           active: "blue",
+          analyzing: "cyan",
           pending: "yellow",
           queued: "yellow",
           pr_ready: "purple",
@@ -1011,17 +1747,43 @@
           .join("");
       }
 
-      // Tabs
+      // ==================== TABS ====================
       document.querySelectorAll(".tab").forEach((tab) => {
         tab.addEventListener("click", () => {
           document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
           document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
           tab.classList.add("active");
           document.getElementById("panel-" + tab.dataset.panel).classList.add("active");
+          // Start/stop panes refresh
+          if (tab.dataset.panel === "panes") {
+            fetchPanes();
+            panesRefreshTimer = setInterval(fetchPanes, 5000);
+          } else {
+            clearInterval(panesRefreshTimer);
+            panesRefreshTimer = null;
+          }
         });
       });
 
-      // Job filters
+      // ==================== JOB VIEW TOGGLE ====================
+      document.getElementById("jobViewToggle").addEventListener("click", (e) => {
+        if (!e.target.classList.contains("view-toggle-btn")) return;
+        document
+          .querySelectorAll("#jobViewToggle .view-toggle-btn")
+          .forEach((b) => b.classList.remove("active"));
+        e.target.classList.add("active");
+        jobView = e.target.dataset.view;
+        document
+          .querySelectorAll("[class^='job-view-']")
+          .forEach((v) => v.classList.remove("active"));
+        document
+          .getElementById("jobView" + jobView.charAt(0).toUpperCase() + jobView.slice(1))
+          .classList.add("active");
+        if (jobView === "kanban") renderKanbanBoard();
+        if (jobView === "flow") renderJobFlowView();
+      });
+
+      // ==================== JOB FILTERS ====================
       document.getElementById("jobFilters").addEventListener("click", (e) => {
         if (!e.target.classList.contains("filter-btn")) return;
         document
@@ -1030,9 +1792,10 @@
         e.target.classList.add("active");
         jobFilter = e.target.dataset.filter;
         renderJobsPanel();
+        if (jobView === "kanban") renderKanbanBoard();
       });
 
-      // Data fetch
+      // ==================== DATA FETCH ====================
       async function fetchAll() {
         const [
           health,
@@ -1077,7 +1840,17 @@
         });
       }
 
-      // Renderers
+      async function fetchPanes() {
+        try {
+          const r = await api("/api/agents/panes");
+          STATE.panes = r;
+        } catch (e) {
+          STATE.panes = { _error: "unavailable" };
+        }
+        renderPanesPanel();
+      }
+
+      // ==================== RENDERERS ====================
       function renderSystemStatus() {
         const el = document.getElementById("systemStatus");
         const h = STATE.health;
@@ -1088,6 +1861,118 @@
         }
         el.className = "status-pill";
         el.innerHTML = `<span class="status-dot"></span>${h.status || "Operational"} &middot; v${h.version || "?"} &middot; ${h.agents_active || 0} agents`;
+      }
+
+      // ==================== ENHANCED STATS ====================
+      function renderEnhancedStats() {
+        const el = document.getElementById("enhancedStats");
+        const jobs = STATE.jobs?.jobs || [];
+        const events = STATE.events?.events || [];
+        const costs = STATE.costs?.data || STATE.costs || {};
+
+        // Jobs per day (last 7 days)
+        const now = new Date();
+        const dayBuckets = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(now);
+          d.setDate(d.getDate() - i);
+          const dayStr = d.toISOString().slice(0, 10);
+          const count = jobs.filter(
+            (j) => j.created_at && j.created_at.slice(0, 10) === dayStr,
+          ).length;
+          dayBuckets.push(count);
+        }
+        const maxDay = Math.max(...dayBuckets, 1);
+
+        // Cost per day (last 7 days) - estimate from jobs
+        const costBuckets = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(now);
+          d.setDate(d.getDate() - i);
+          const dayStr = d.toISOString().slice(0, 10);
+          const dayJobs = jobs.filter((j) => j.created_at && j.created_at.slice(0, 10) === dayStr);
+          const total = dayJobs.reduce((s, j) => s + (j.cost_usd || 0), 0);
+          costBuckets.push(total);
+        }
+        const maxCost = Math.max(...costBuckets, 0.01);
+
+        // Success rate
+        const doneJobs = jobs.filter((j) => j.status === "done" || j.status === "completed").length;
+        const failedJobs = jobs.filter(
+          (j) => j.status === "failed" || (j.status && j.status.startsWith("killed")),
+        ).length;
+        const total = doneJobs + failedJobs;
+        const successRate = total > 0 ? Math.round((doneJobs / total) * 100) : 100;
+
+        // Average job duration
+        const durations = jobs
+          .filter((j) => j.created_at && j.completed_at)
+          .map((j) => new Date(j.completed_at) - new Date(j.created_at));
+        const avgMs =
+          durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
+        const avgMin = Math.round(avgMs / 60000);
+        const avgStr =
+          avgMin < 60 ? avgMin + "m" : Math.floor(avgMin / 60) + "h " + (avgMin % 60) + "m";
+
+        // Render sparklines
+        const jobsSparkline = dayBuckets
+          .map(
+            (v) =>
+              `<div class="sparkline-bar" style="height:${Math.max((v / maxDay) * 100, 4)}%;background:var(--blue)"></div>`,
+          )
+          .join("");
+
+        const costSparkline = costBuckets
+          .map(
+            (v) =>
+              `<div class="sparkline-bar" style="height:${Math.max((v / maxCost) * 100, 4)}%;background:var(--green)"></div>`,
+          )
+          .join("");
+
+        // Circular progress SVG
+        const circumference = 2 * Math.PI * 22;
+        const offset = circumference - (successRate / 100) * circumference;
+        const progressColor =
+          successRate >= 80 ? "var(--green)" : successRate >= 50 ? "var(--yellow)" : "var(--red)";
+
+        el.innerHTML = `
+          <div class="enhanced-stat-card">
+            <div class="enhanced-stat-label">Jobs / Day (7d)</div>
+            <div class="enhanced-stat-main">
+              <div class="enhanced-stat-value" style="color:var(--blue)">${dayBuckets[6]}</div>
+            </div>
+            <div class="sparkline-container">${jobsSparkline}</div>
+          </div>
+          <div class="enhanced-stat-card">
+            <div class="enhanced-stat-label">Cost Trend (7d)</div>
+            <div class="enhanced-stat-main">
+              <div class="enhanced-stat-value" style="color:var(--green)">${fmt$(costBuckets[6])}</div>
+            </div>
+            <div class="sparkline-container">${costSparkline}</div>
+          </div>
+          <div class="enhanced-stat-card">
+            <div class="enhanced-stat-label">Success Rate</div>
+            <div class="enhanced-stat-main">
+              <div class="enhanced-stat-value" style="color:${progressColor}">${successRate}%</div>
+              <div class="circular-progress">
+                <svg width="56" height="56" viewBox="0 0 56 56">
+                  <circle cx="28" cy="28" r="22" fill="none" stroke="var(--surface2)" stroke-width="4"/>
+                  <circle cx="28" cy="28" r="22" fill="none" stroke="${progressColor}" stroke-width="4"
+                    stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"
+                    stroke-linecap="round" style="transition:stroke-dashoffset 0.6s ease"/>
+                </svg>
+                <span class="circular-progress-value" style="color:${progressColor};font-size:11px">${doneJobs}/${total}</span>
+              </div>
+            </div>
+          </div>
+          <div class="enhanced-stat-card">
+            <div class="enhanced-stat-label">Avg Duration</div>
+            <div class="enhanced-stat-main">
+              <div class="enhanced-stat-value" style="color:var(--purple)">${avgStr || "--"}</div>
+            </div>
+            <div style="font-size:12px;color:var(--text3);margin-top:8px">${durations.length} completed jobs</div>
+          </div>
+        `;
       }
 
       function renderStatCards() {
@@ -1248,27 +2133,7 @@
             '<tr><td colspan="7" class="empty" style="color:var(--yellow)">Auth required</td></tr>';
           return;
         }
-        let jobs = allJobs;
-        if (jobFilter !== "all") {
-          if (jobFilter === "running")
-            jobs = allJobs.filter((j) =>
-              [
-                "running",
-                "active",
-                "pending",
-                "queued",
-                "researching",
-                "planning",
-                "executing",
-              ].includes(j.status),
-            );
-          else
-            jobs = allJobs.filter(
-              (j) =>
-                j.status === jobFilter ||
-                (jobFilter === "failed" && j.status?.startsWith("killed")),
-            );
-        }
+        let jobs = filterJobs(allJobs);
         countEl.textContent = `${jobs.length} of ${allJobs.length}`;
         if (!jobs.length) {
           el.innerHTML = '<tr><td colspan="7" class="empty">No jobs</td></tr>';
@@ -1287,6 +2152,7 @@
               "researching",
               "planning",
               "executing",
+              "analyzing",
             ].includes(j.status);
             return `<tr>
             <td><code>${shortId(id)}</code></td>
@@ -1299,6 +2165,27 @@
           </tr>`;
           })
           .join("");
+      }
+
+      function filterJobs(allJobs) {
+        if (jobFilter === "all") return allJobs;
+        if (jobFilter === "running")
+          return allJobs.filter((j) =>
+            [
+              "running",
+              "active",
+              "pending",
+              "queued",
+              "researching",
+              "planning",
+              "executing",
+              "analyzing",
+            ].includes(j.status),
+          );
+        return allJobs.filter(
+          (j) =>
+            j.status === jobFilter || (jobFilter === "failed" && j.status?.startsWith("killed")),
+        );
       }
 
       async function killJob(jobId) {
@@ -1316,6 +2203,358 @@
         }
       }
 
+      // ==================== KANBAN BOARD ====================
+      function renderKanbanBoard() {
+        const el = document.getElementById("kanbanBoard");
+        const allJobs = STATE.jobs?.jobs || [];
+
+        const columns = [
+          { status: "pending", label: "Pending", statuses: ["pending", "queued"] },
+          {
+            status: "analyzing",
+            label: "Analyzing",
+            statuses: ["analyzing", "researching", "planning"],
+          },
+          { status: "running", label: "Running", statuses: ["running", "active", "executing"] },
+          { status: "pr_ready", label: "PR Ready", statuses: ["pr_ready"] },
+          { status: "done", label: "Done", statuses: ["done", "completed"] },
+          {
+            status: "failed",
+            label: "Failed",
+            statuses: [
+              "failed",
+              "killed_cost_limit",
+              "killed_timeout",
+              "killed_circuit_breaker",
+              "killed_manual",
+              "killed_iteration_limit",
+              "error",
+            ],
+          },
+        ];
+
+        el.innerHTML = columns
+          .map((col) => {
+            const colJobs = allJobs.filter((j) => col.statuses.includes(j.status));
+            const cards = colJobs
+              .map((j) => {
+                const id = j.job_id || j.id || "";
+                const task = j.description || j.task || "";
+                const project = j.project_name || j.project || "--";
+                const cost = j.cost_usd || 0;
+                return `<div class="kanban-card" draggable="true">
+              <div class="kanban-card-id">${shortId(id)}</div>
+              <div class="kanban-card-task">${task || "No description"}</div>
+              <div class="kanban-card-meta">
+                <span class="kanban-card-project">${project}</span>
+                <span class="kanban-card-cost">${fmt$(cost)}</span>
+              </div>
+              <div class="kanban-card-elapsed">${elapsed(j.created_at, j.completed_at)}</div>
+            </div>`;
+              })
+              .join("");
+
+            return `<div class="kanban-column" data-status="${col.status}">
+            <div class="kanban-col-header">
+              <span class="kanban-col-title">${col.label}</span>
+              <span class="kanban-col-count">${colJobs.length}</span>
+            </div>
+            <div class="kanban-cards">${cards || '<div style="text-align:center;padding:16px;color:var(--text3);font-size:12px">No jobs</div>'}</div>
+          </div>`;
+          })
+          .join("");
+      }
+
+      // ==================== FLOW VISUALIZATION ====================
+      function getJobStageCounts() {
+        const jobs = STATE.jobs?.jobs || [];
+        const stages = {
+          intake: jobs.filter((j) => ["pending", "queued"].includes(j.status)).length,
+          analysis: jobs.filter((j) => ["analyzing", "researching", "planning"].includes(j.status))
+            .length,
+          coding: jobs.filter((j) => ["running", "active", "executing"].includes(j.status)).length,
+          review: jobs.filter((j) => j.status === "pr_ready").length,
+          pr: jobs.filter((j) => j.status === "approved").length,
+          done: jobs.filter((j) => ["done", "completed"].includes(j.status)).length,
+        };
+        return stages;
+      }
+
+      function renderFlowVisualization(containerId, clickable) {
+        const el = document.getElementById(containerId);
+        const counts = getJobStageCounts();
+        const stageData = [
+          { key: "intake", label: "Intake", filter: ["pending", "queued"] },
+          { key: "analysis", label: "Analysis", filter: ["analyzing", "researching", "planning"] },
+          { key: "coding", label: "Coding", filter: ["running", "active", "executing"] },
+          { key: "review", label: "Review", filter: ["pr_ready"] },
+          { key: "pr", label: "PR", filter: ["approved"] },
+          { key: "done", label: "Done", filter: ["done", "completed"] },
+        ];
+
+        let html = '<div class="flow-pipeline">';
+        stageData.forEach((stage, i) => {
+          const count = counts[stage.key];
+          const hasJobs = count > 0;
+          const isActive = flowStageFilter && flowStageFilter === stage.key;
+          html += `<div class="flow-stage" data-stage="${stage.key}" onclick="${clickable ? `filterByStage('${stage.key}')` : ""}">
+            <div class="flow-stage-box ${isActive ? "active" : ""}">
+              <div class="flow-stage-name">${stage.label}</div>
+              <div class="flow-stage-count">${count}</div>
+            </div>
+            <div class="flow-stage-label">${stage.label}</div>
+          </div>`;
+          if (i < stageData.length - 1) {
+            html += `<div class="flow-connector">${hasJobs ? '<div class="flow-dot"></div>' : ""}</div>`;
+          }
+        });
+        html += "</div>";
+        el.innerHTML = html;
+      }
+
+      function renderFlowViz() {
+        renderFlowVisualization("flowViz", false);
+      }
+
+      function renderJobFlowView() {
+        renderFlowVisualization("jobFlowViz", true);
+        renderFlowFilteredTable();
+      }
+
+      function filterByStage(stageKey) {
+        flowStageFilter = flowStageFilter === stageKey ? null : stageKey;
+        renderJobFlowView();
+      }
+
+      function renderFlowFilteredTable() {
+        const el = document.getElementById("flowJobsTable");
+        const allJobs = STATE.jobs?.jobs || [];
+        const stageMap = {
+          intake: ["pending", "queued"],
+          analysis: ["analyzing", "researching", "planning"],
+          coding: ["running", "active", "executing"],
+          review: ["pr_ready"],
+          pr: ["approved"],
+          done: ["done", "completed"],
+        };
+
+        let jobs = allJobs;
+        if (flowStageFilter && stageMap[flowStageFilter]) {
+          jobs = allJobs.filter((j) => stageMap[flowStageFilter].includes(j.status));
+        }
+
+        if (!jobs.length) {
+          el.innerHTML = `<tr><td colspan="7" class="empty">${flowStageFilter ? "No jobs in " + flowStageFilter : "Click a stage above to filter"}</td></tr>`;
+          return;
+        }
+        el.innerHTML = jobs
+          .map((j) => {
+            const id = j.job_id || j.id || "";
+            const task = j.description || j.task || "";
+            const project = j.project_name || j.project || "--";
+            const isActive = [
+              "running",
+              "active",
+              "pending",
+              "queued",
+              "researching",
+              "planning",
+              "executing",
+              "analyzing",
+            ].includes(j.status);
+            return `<tr>
+            <td><code>${shortId(id)}</code></td>
+            <td style="font-weight:500">${project}</td>
+            <td class="td-truncate" title="${task.replace(/"/g, "&quot;")}">${task || "--"}</td>
+            <td>${priorityBadge(j.priority)}</td>
+            <td>${statusBadge(j.status)}</td>
+            <td style="white-space:nowrap;color:var(--text3)">${timeAgo(j.created_at)}</td>
+            <td>${isActive ? `<button class="btn btn-danger btn-sm" onclick="killJob('${id}')">Kill</button>` : ""}</td>
+          </tr>`;
+          })
+          .join("");
+      }
+
+      // ==================== ACTIVITY HEATMAP ====================
+      function renderHeatmap() {
+        const container = document.getElementById("heatmapContainer");
+        const events = STATE.events?.events || [];
+        const jobs = STATE.jobs?.jobs || [];
+
+        // Build hour buckets for last 7 days
+        const now = new Date();
+        const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        const buckets = {}; // "YYYY-MM-DD-HH" -> count
+
+        // Count events by hour
+        events.forEach((e) => {
+          if (!e.timestamp) return;
+          const d = new Date(e.timestamp);
+          const key = d.toISOString().slice(0, 13);
+          buckets[key] = (buckets[key] || 0) + 1;
+        });
+
+        // Also count job creation
+        jobs.forEach((j) => {
+          if (!j.created_at) return;
+          const d = new Date(j.created_at);
+          const key = d.toISOString().slice(0, 13);
+          buckets[key] = (buckets[key] || 0) + 1;
+        });
+
+        // Find max for color scaling
+        const vals = Object.values(buckets);
+        const maxVal = Math.max(...vals, 1);
+
+        // Build 7 days x 24 hours grid
+        let hourLabelsHtml = "<div></div>"; // empty cell for day label column
+        for (let h = 0; h < 24; h++) {
+          hourLabelsHtml += `<div class="heatmap-hour-label">${h.toString().padStart(2, "0")}</div>`;
+        }
+
+        let gridHtml = "";
+        for (let d = 6; d >= 0; d--) {
+          const day = new Date(now);
+          day.setDate(day.getDate() - d);
+          const dayStr = dayNames[day.getDay()];
+          const dateStr = day.toISOString().slice(0, 10);
+
+          gridHtml += `<div class="heatmap-day-label">${dayStr}</div>`;
+
+          for (let h = 0; h < 24; h++) {
+            const key = dateStr + "T" + h.toString().padStart(2, "0");
+            const count = buckets[key] || 0;
+            let level = 0;
+            if (count > 0) level = 1;
+            if (count >= maxVal * 0.25) level = 2;
+            if (count >= maxVal * 0.5) level = 3;
+            if (count >= maxVal * 0.75) level = 4;
+            if (count >= maxVal * 0.95) level = 5;
+
+            gridHtml += `<div class="heatmap-cell h${level}" data-date="${dateStr}" data-hour="${h}" data-count="${count}"
+              onmouseenter="showHeatmapTooltip(event, '${dateStr}', ${h}, ${count})"
+              onmouseleave="hideHeatmapTooltip()"></div>`;
+          }
+        }
+
+        container.innerHTML = `
+          <div class="heatmap-hour-labels">${hourLabelsHtml}</div>
+          <div class="heatmap-grid">${gridHtml}</div>
+          <div class="heatmap-legend">
+            <span>Less</span>
+            <div class="heatmap-legend-cell" style="background:var(--surface2)"></div>
+            <div class="heatmap-legend-cell h1" style="background:rgba(59,130,246,0.2)"></div>
+            <div class="heatmap-legend-cell h2" style="background:rgba(59,130,246,0.35)"></div>
+            <div class="heatmap-legend-cell h3" style="background:rgba(59,130,246,0.55)"></div>
+            <div class="heatmap-legend-cell h4" style="background:rgba(59,130,246,0.75)"></div>
+            <div class="heatmap-legend-cell h5" style="background:rgba(59,130,246,0.95)"></div>
+            <span>More</span>
+          </div>
+        `;
+      }
+
+      function showHeatmapTooltip(event, date, hour, count) {
+        const tip = document.getElementById("heatmapTooltip");
+        const hourStr =
+          hour.toString().padStart(2, "0") + ":00-" + hour.toString().padStart(2, "0") + ":59";
+        tip.innerHTML = `<div style="font-weight:600">${date}</div><div style="color:var(--text3)">${hourStr}</div><div style="margin-top:4px"><strong style="color:var(--accent)">${count}</strong> events</div>`;
+        tip.style.left = event.clientX + 12 + "px";
+        tip.style.top = event.clientY - 10 + "px";
+        tip.classList.add("visible");
+      }
+
+      function hideHeatmapTooltip() {
+        document.getElementById("heatmapTooltip").classList.remove("visible");
+      }
+
+      // ==================== AGENT PANES ====================
+      function renderPanesPanel() {
+        const el = document.getElementById("panesContent");
+        const panes = STATE.panes;
+
+        if (!panes || panes._error) {
+          el.innerHTML = `<div class="pane-placeholder">
+            <div class="pane-placeholder-icon">&#x2699;</div>
+            <div style="font-size:15px;font-weight:600;margin-bottom:6px">Agents API not available</div>
+            <div style="font-size:13px">The <code>/api/agents/panes</code> endpoint is not responding.<br/>Start the agent manager to enable live pane monitoring.</div>
+          </div>`;
+          return;
+        }
+
+        const panesList = panes.panes || panes.data || [];
+        if (!panesList.length) {
+          el.innerHTML = `<div class="pane-placeholder">
+            <div class="pane-placeholder-icon">&#x25A3;</div>
+            <div style="font-size:15px;font-weight:600;margin-bottom:6px">No active agent panes</div>
+            <div style="font-size:13px">Use "Spawn New" above to start an agent.</div>
+          </div>`;
+          return;
+        }
+
+        el.innerHTML = `<div class="panes-grid">${panesList
+          .map(
+            (p) => `
+          <div class="pane-card">
+            <div class="pane-header">
+              <div>
+                <span class="pane-id">${p.pane_id || p.id || "--"}</span>
+                ${p.job_id ? `<span style="margin-left:8px;font-size:11px;color:var(--text3)">Job: <code>${shortId(p.job_id)}</code></span>` : ""}
+              </div>
+              <span class="pane-runtime">${elapsed(p.started_at, null)}</span>
+            </div>
+            <div class="pane-output">${(p.last_output || p.output || "No output").replace(/</g, "&lt;")}</div>
+            <div class="pane-actions">
+              <button class="btn btn-danger btn-sm" onclick="killPane('${p.pane_id || p.id}')">Kill</button>
+            </div>
+          </div>
+        `,
+          )
+          .join("")}</div>`;
+      }
+
+      async function killPane(paneId) {
+        if (!confirm("Kill agent pane " + paneId + "?")) return;
+        try {
+          const r = await fetch("/api/agents/panes/" + paneId + "/kill", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Auth-Token": getToken() },
+          });
+          if (r.ok) {
+            toast("Pane killed");
+            fetchPanes();
+          } else {
+            toast("Kill failed: " + r.status);
+          }
+        } catch (e) {
+          toast("Kill failed: " + e.message);
+        }
+      }
+
+      async function spawnAgent() {
+        const prompt = document.getElementById("spawnPrompt").value.trim();
+        if (!prompt) {
+          toast("Enter a prompt first");
+          return;
+        }
+        try {
+          const r = await fetch("/api/agents/spawn", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Auth-Token": getToken() },
+            body: JSON.stringify({ prompt }),
+          });
+          if (r.ok) {
+            toast("Agent spawned");
+            document.getElementById("spawnPrompt").value = "";
+            fetchPanes();
+          } else {
+            toast("Spawn failed: " + r.status);
+          }
+        } catch (e) {
+          toast("Spawn failed: " + e.message);
+        }
+      }
+
+      // ==================== PROPOSALS, EVENTS, SYSTEM ====================
       function renderProposalsPanel() {
         const el = document.getElementById("proposalsTable");
         const proposals = STATE.proposals?.proposals || [];
@@ -1454,13 +2693,16 @@
         </div>`;
       }
 
-      // Main
+      // ==================== MAIN ====================
       async function refreshAll() {
         document.getElementById("lastRefresh").innerHTML = '<span class="spinner"></span>';
         try {
           await fetchAll();
           renderSystemStatus();
+          renderEnhancedStats();
           renderStatCards();
+          renderFlowViz();
+          renderHeatmap();
           renderOverviewCharts();
           renderRecentJobs();
           renderRecentEvents();
@@ -1468,6 +2710,8 @@
           renderAgentsPanel();
           renderCostsPanel();
           renderJobsPanel();
+          if (jobView === "kanban") renderKanbanBoard();
+          if (jobView === "flow") renderJobFlowView();
           renderProposalsPanel();
           renderEventsPanel();
           renderSystemPanel();
@@ -1488,6 +2732,12 @@
           refreshTimer = null;
         }
       }
+
+      // Spawn input enter key
+      document.getElementById("spawnPrompt").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") spawnAgent();
+      });
+
       refreshAll();
       refreshTimer = setInterval(refreshAll, 30000);
     </script>

@@ -554,7 +554,7 @@ AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard.html", "/monitoring", "/terms", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/api/health/detailed", "/api/health/circuit-breakers", "/api/health/alerts"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/api/health/detailed", "/api/health/circuit-breakers", "/api/health/alerts"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
@@ -562,7 +562,7 @@ async def auth_middleware(request: Request, call_next):
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
-                 path.startswith(("/telegram/", "/slack/", "/api/audit")) or
+                 path.startswith(("/telegram/", "/slack/", "/api/audit", "/static/")) or
                  any(path.startswith(prefix) for prefix in dashboard_exempt_prefixes))
     logger.debug(f"AUTH_CHECK: path={path}, is_exempt={is_exempt}")
 
@@ -1540,6 +1540,100 @@ async def list_agents():
             "status": "idle"
         })
     return {"agents": agents}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# TMUX AGENT PANES — Elvis-pattern parallel agent spawning
+# ═══════════════════════════════════════════════════════════════════════
+
+from tmux_spawner import get_spawner
+
+class SpawnRequest(BaseModel):
+    job_id: str
+    prompt: str
+    worktree_repo: Optional[str] = None
+    use_worktree: bool = False
+    cwd: Optional[str] = None
+    timeout_minutes: int = 30
+    claude_args: str = ""
+
+class SpawnParallelRequest(BaseModel):
+    jobs: list[dict]  # Each dict has: job_id, prompt, and optional fields
+
+@app.get("/api/agents/panes")
+async def list_agent_panes():
+    """List all tmux agent panes with status."""
+    try:
+        spawner = get_spawner()
+        agents = spawner.list_agents()
+        return {"success": True, "agents": agents, "count": len(agents)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/agents/spawn")
+async def spawn_agent(req: SpawnRequest):
+    """Spawn a single Claude Code agent in a tmux pane."""
+    try:
+        spawner = get_spawner()
+        pane_id = spawner.spawn_agent(
+            job_id=req.job_id,
+            prompt=req.prompt,
+            worktree_repo=req.worktree_repo,
+            use_worktree=req.use_worktree,
+            cwd=req.cwd,
+            timeout_minutes=req.timeout_minutes,
+            claude_args=req.claude_args,
+        )
+        return {"success": True, "pane_id": pane_id, "job_id": req.job_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/agents/spawn-parallel")
+async def spawn_parallel_agents(req: SpawnParallelRequest):
+    """Spawn multiple agents in parallel tmux panes."""
+    try:
+        spawner = get_spawner()
+        results = spawner.spawn_parallel(req.jobs)
+        spawned = sum(1 for r in results if r["status"] == "spawned")
+        return {"success": True, "results": results, "spawned": spawned, "total": len(req.jobs)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/agents/panes/{pane_id:path}/output")
+async def get_agent_output(pane_id: str):
+    """Get the output buffer from a tmux agent pane."""
+    try:
+        spawner = get_spawner()
+        output = spawner.collect_output(pane_id)
+        status = spawner.get_agent_status(pane_id)
+        return {
+            "success": True,
+            "pane_id": pane_id,
+            "output": output,
+            "status": status,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/agents/panes/{pane_id:path}")
+async def kill_agent_pane(pane_id: str):
+    """Kill a specific tmux agent pane."""
+    try:
+        spawner = get_spawner()
+        killed = spawner.kill_agent(pane_id)
+        return {"success": killed, "pane_id": pane_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/agents/panes/all")
+async def kill_all_agent_panes():
+    """Kill all tmux agent panes."""
+    try:
+        spawner = get_spawner()
+        count = spawner.kill_all()
+        return {"success": True, "killed": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/heartbeat/status")
