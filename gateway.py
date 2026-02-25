@@ -4171,7 +4171,7 @@ async def api_gmail_inbox(limit: int = 10, unread_only: bool = True):
 
 @app.get("/api/calendar/today")
 async def api_calendar_today():
-    """Get today's calendar events."""
+    """Get today's calendar events from ALL calendars."""
     try:
         from googleapiclient.discovery import build
         creds = _get_google_creds()
@@ -4181,27 +4181,36 @@ async def api_calendar_today():
         start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
         end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0).isoformat()
 
-        results = service.events().list(
-            calendarId="primary",
-            timeMin=start_of_day,
-            timeMax=end_of_day,
-            singleEvents=True,
-            orderBy="startTime",
-            maxResults=20,
-        ).execute()
-
+        # Query ALL calendars, not just primary
+        cal_list = service.calendarList().list().execute()
         events = []
-        for item in results.get("items", []):
-            start = item.get("start", {})
-            end = item.get("end", {})
-            events.append({
-                "id": item.get("id", ""),
-                "summary": item.get("summary", "(no title)"),
-                "start": start.get("dateTime", start.get("date", "")),
-                "end": end.get("dateTime", end.get("date", "")),
-                "location": item.get("location", ""),
-            })
+        for cal in cal_list.get("items", []):
+            cal_id = cal["id"]
+            cal_name = cal.get("summary", cal_id)
+            try:
+                results = service.events().list(
+                    calendarId=cal_id,
+                    timeMin=start_of_day,
+                    timeMax=end_of_day,
+                    singleEvents=True,
+                    orderBy="startTime",
+                    maxResults=20,
+                ).execute()
+                for item in results.get("items", []):
+                    start = item.get("start", {})
+                    end = item.get("end", {})
+                    events.append({
+                        "id": item.get("id", ""),
+                        "summary": item.get("summary", "(no title)"),
+                        "start": start.get("dateTime", start.get("date", "")),
+                        "end": end.get("dateTime", end.get("date", "")),
+                        "location": item.get("location", ""),
+                        "calendar": cal_name,
+                    })
+            except Exception:
+                pass  # Skip calendars we can't read
 
+        events.sort(key=lambda e: e.get("start", ""))
         return {"events": events, "total": len(events)}
     except HTTPException:
         raise
@@ -4222,27 +4231,36 @@ async def api_calendar_upcoming(days: int = 7):
         from datetime import timedelta
         end = now + timedelta(days=days)
 
-        results = service.events().list(
-            calendarId="primary",
-            timeMin=now.isoformat(),
-            timeMax=end.isoformat(),
-            singleEvents=True,
-            orderBy="startTime",
-            maxResults=50,
-        ).execute()
-
+        # Query ALL calendars
+        cal_list = service.calendarList().list().execute()
         events = []
-        for item in results.get("items", []):
-            start = item.get("start", {})
-            end_t = item.get("end", {})
-            events.append({
-                "id": item.get("id", ""),
-                "summary": item.get("summary", "(no title)"),
-                "start": start.get("dateTime", start.get("date", "")),
-                "end": end_t.get("dateTime", end_t.get("date", "")),
-                "location": item.get("location", ""),
-            })
+        for cal in cal_list.get("items", []):
+            cal_id = cal["id"]
+            cal_name = cal.get("summary", cal_id)
+            try:
+                results = service.events().list(
+                    calendarId=cal_id,
+                    timeMin=now.isoformat(),
+                    timeMax=end.isoformat(),
+                    singleEvents=True,
+                    orderBy="startTime",
+                    maxResults=50,
+                ).execute()
+                for item in results.get("items", []):
+                    start = item.get("start", {})
+                    end_t = item.get("end", {})
+                    events.append({
+                        "id": item.get("id", ""),
+                        "summary": item.get("summary", "(no title)"),
+                        "start": start.get("dateTime", start.get("date", "")),
+                        "end": end_t.get("dateTime", end_t.get("date", "")),
+                        "location": item.get("location", ""),
+                        "calendar": cal_name,
+                    })
+            except Exception:
+                pass
 
+        events.sort(key=lambda e: e.get("start", ""))
         return {"events": events, "total": len(events)}
     except HTTPException:
         raise
