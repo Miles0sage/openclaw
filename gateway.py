@@ -1505,23 +1505,19 @@ async def dashboard(request: Request):
 
 @app.get("/monitoring")
 async def monitoring_dashboard(request: Request):
-    """Serve the monitoring dashboard from static/dashboard.html (no auth required)"""
+    """Serve the main dashboard (consolidated from static/dashboard.html)"""
     try:
-        dashboard_path = os.path.join(os.path.dirname(__file__), "static", "dashboard.html")
+        dashboard_path = os.path.join(os.path.dirname(__file__), "dashboard.html")
         with open(dashboard_path, 'r') as f:
             html_content = f.read()
-        from fastapi.responses import HTMLResponse
         return HTMLResponse(content=html_content)
     except FileNotFoundError:
         return HTMLResponse(
-            content="<h1>Monitoring dashboard not found</h1><p>static/dashboard.html is missing</p>",
+            content="<h1>Dashboard not found</h1><p>dashboard.html is missing</p>",
             status_code=404
         )
     except Exception as e:
-        return HTMLResponse(
-            content=f"<h1>Error loading monitoring dashboard</h1><p>{str(e)}</p>",
-            status_code=500
-        )
+        return HTMLResponse(content=f"<h1>Error loading dashboard</h1><p>{e}</p>", status_code=500)
 
 
 # ---------------------------------------------------------------------------
@@ -4993,12 +4989,9 @@ async def recent_events():
 @app.get("/mission-control")
 @app.get("/mission-control.html")
 async def mission_control_page():
-    """Serve Mission Control dashboard"""
-    html_path = os.path.join(os.path.dirname(__file__), "mission_control.html")
-    if os.path.exists(html_path):
-        with open(html_path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Mission Control not found</h1>", status_code=404)
+    """Redirect to main dashboard (mission control consolidated)"""
+    from starlette.responses import RedirectResponse
+    return RedirectResponse(url="/dashboard.html", status_code=301)
 
 
 # ═══════════════════════════════════════════════════════════════════════

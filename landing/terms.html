@@ -4,104 +4,396 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Terms of Service — Overseer AI Agency</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              "deep-blue": "#1a1a2e",
-              "mid-blue": "#16213e",
-              "card-blue": "#0f3460",
-              electric: "#4361ee",
-              "electric-light": "#6c8eff",
-            },
-            fontFamily: {
-              sans: ["Inter", "system-ui", "sans-serif"],
-            },
-          },
-        },
-      };
-    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
     <style>
+      @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap");
+
+      :root {
+        --bg: #08090c;
+        --surface: #0f1116;
+        --surface-2: #151820;
+        --surface-3: #1a1e28;
+        --border: #1e2230;
+        --text: #d4d8e8;
+        --text-bright: #eef0f8;
+        --text-muted: #6a7094;
+        --amber: #e8a832;
+        --green: #45c882;
+        --red: #e84545;
+        --blue: #4588e8;
+        --purple: #8b5cf6;
+        --cyan: #22d3ee;
+      }
+
+      *,
+      *::before,
+      *::after {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
       body {
-        background-color: #1a1a2e;
+        font-family: "Outfit", system-ui, sans-serif;
+        background-color: var(--bg);
+        color: var(--text);
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        position: relative;
       }
-      .prose-custom h2 {
-        font-size: 1.25rem;
+
+      /* Noise texture overlay */
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        opacity: 0.025;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+        background-repeat: repeat;
+        background-size: 256px 256px;
+        pointer-events: none;
+        z-index: 9999;
+      }
+
+      /* Navigation */
+      nav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 100;
+        background: rgba(8, 9, 12, 0.85);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .nav-inner {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 1rem 1.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .nav-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        text-decoration: none;
+      }
+
+      .nav-logo {
+        width: 2rem;
+        height: 2rem;
+        border-radius: 0.5rem;
+        background: var(--amber);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: "JetBrains Mono", monospace;
         font-weight: 700;
-        color: white;
-        margin-top: 2.5rem;
-        margin-bottom: 0.75rem;
-        padding-bottom: 0.5rem;
-        border-bottom: 1px solid rgba(67, 97, 238, 0.2);
+        font-size: 0.875rem;
+        color: var(--bg);
       }
-      .prose-custom p,
-      .prose-custom li {
-        color: rgba(255, 255, 255, 0.6);
-        line-height: 1.75;
-        margin-bottom: 0.75rem;
+
+      .nav-brand span {
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 600;
+        font-size: 0.9375rem;
+        color: var(--text-bright);
       }
-      .prose-custom ul {
-        list-style: disc;
-        padding-left: 1.5rem;
+
+      .nav-cta {
+        display: inline-block;
+        background: var(--amber);
+        color: var(--bg);
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 600;
+        font-size: 0.8125rem;
+        padding: 0.5rem 1.25rem;
+        border-radius: 0.5rem;
+        text-decoration: none;
+        transition: opacity 0.2s ease;
+      }
+
+      .nav-cta:hover {
+        opacity: 0.85;
+      }
+
+      /* Main content */
+      main {
+        flex: 1;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 7rem 1.5rem 4rem;
+        width: 100%;
+      }
+
+      /* Header */
+      .page-header {
+        margin-bottom: 3rem;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--amber);
+        background: rgba(232, 168, 50, 0.08);
+        border: 1px solid rgba(232, 168, 50, 0.15);
+        padding: 0.375rem 1rem;
+        border-radius: 100px;
+        margin-bottom: 1.5rem;
+      }
+
+      h1 {
+        font-family: "JetBrains Mono", monospace;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        color: var(--text-bright);
+        margin-bottom: 1rem;
+        line-height: 1.2;
+      }
+
+      .last-updated {
+        font-size: 0.875rem;
+        color: var(--text-muted);
         margin-bottom: 1rem;
       }
-      .prose-custom strong {
-        color: rgba(255, 255, 255, 0.85);
+
+      .header-intro {
+        font-size: 1.0625rem;
+        color: var(--text-muted);
+        line-height: 1.75;
+      }
+
+      /* Content card */
+      .content-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        padding: 2.5rem;
+      }
+
+      .content-card h2 {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 1.125rem;
         font-weight: 600;
+        color: var(--text-bright);
+        margin-top: 2.5rem;
+        margin-bottom: 0.875rem;
+        padding-bottom: 0.625rem;
+        border-bottom: 1px solid rgba(232, 168, 50, 0.15);
+      }
+
+      .content-card h2::before {
+        content: "";
+        display: inline-block;
+        width: 3px;
+        height: 1em;
+        background: var(--amber);
+        border-radius: 2px;
+        margin-right: 0.625rem;
+        vertical-align: -1px;
+      }
+
+      .content-card h2:first-child {
+        margin-top: 0;
+      }
+
+      .content-card p {
+        font-size: 1rem;
+        line-height: 1.8;
+        color: var(--text);
+        margin-bottom: 0.875rem;
+      }
+
+      .content-card ul {
+        list-style: none;
+        padding-left: 0;
+        margin-bottom: 1rem;
+      }
+
+      .content-card li {
+        font-size: 1rem;
+        line-height: 1.8;
+        color: var(--text);
+        margin-bottom: 0.625rem;
+        padding-left: 1.375rem;
+        position: relative;
+      }
+
+      .content-card li::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0.75em;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--amber);
+        opacity: 0.6;
+      }
+
+      .content-card strong {
+        color: var(--text-bright);
+        font-weight: 600;
+      }
+
+      /* Back links */
+      .back-links {
+        margin-top: 2.5rem;
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+      }
+
+      .back-links a {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.8125rem;
+        text-decoration: none;
+        transition: color 0.2s ease;
+      }
+
+      .back-link-home {
+        color: var(--text-muted);
+      }
+
+      .back-link-home:hover {
+        color: var(--amber);
+      }
+
+      .back-link-portal {
+        color: var(--amber);
+        opacity: 0.7;
+      }
+
+      .back-link-portal:hover {
+        opacity: 1;
+      }
+
+      /* Footer */
+      footer {
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+        padding: 2.5rem 1.5rem;
+        margin-top: 3rem;
+      }
+
+      .footer-inner {
+        max-width: 1200px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 1rem;
+      }
+
+      .footer-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .footer-logo {
+        width: 1.75rem;
+        height: 1.75rem;
+        border-radius: 0.5rem;
+        background: var(--amber);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 700;
+        font-size: 0.75rem;
+        color: var(--bg);
+      }
+
+      .footer-brand span {
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 600;
+        font-size: 0.875rem;
+        color: var(--text-bright);
+      }
+
+      .footer-links {
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+
+      .footer-links a {
+        font-size: 0.8125rem;
+        color: var(--text-muted);
+        text-decoration: none;
+        transition: color 0.2s ease;
+      }
+
+      .footer-links a:hover {
+        color: var(--text-bright);
+      }
+
+      .footer-links a.active {
+        color: var(--text);
+      }
+
+      .footer-copy {
+        font-size: 0.8125rem;
+        color: rgba(106, 112, 148, 0.5);
+      }
+
+      /* Responsive */
+      @media (max-width: 640px) {
+        .content-card {
+          padding: 1.5rem;
+        }
+
+        .footer-inner {
+          flex-direction: column;
+          text-align: center;
+        }
       }
     </style>
   </head>
-  <body class="font-sans text-white antialiased">
+  <body>
     <!-- Navigation -->
-    <nav
-      class="sticky top-0 z-50 border-b border-white/5"
-      style="background: rgba(26, 26, 46, 0.9); backdrop-filter: blur(12px)"
-    >
-      <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-        <a href="/" class="flex items-center gap-2">
-          <div
-            class="w-8 h-8 rounded-lg bg-electric flex items-center justify-center text-sm font-bold"
-          >
-            O
-          </div>
-          <span class="font-semibold text-white">Overseer</span>
+    <nav>
+      <div class="nav-inner">
+        <a href="/" class="nav-brand">
+          <div class="nav-logo">O</div>
+          <span>Overseer</span>
         </a>
-        <a
-          href="/client_portal.html"
-          class="bg-electric hover:bg-electric-light text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
-        >
-          Client Portal
-        </a>
+        <a href="/client_portal.html" class="nav-cta">Client Portal</a>
       </div>
     </nav>
 
     <!-- Content -->
-    <main class="max-w-3xl mx-auto px-6 py-20">
+    <main>
       <!-- Header -->
-      <div class="mb-12">
-        <div
-          class="inline-flex items-center gap-2 text-xs font-medium text-electric-light bg-electric/10 border border-electric/20 px-4 py-2 rounded-full mb-6"
-        >
-          Legal
-        </div>
-        <h1 class="text-4xl md:text-5xl font-extrabold text-white mb-4">Terms of Service</h1>
-        <p class="text-white/40 text-sm">Last updated: February 2026</p>
-        <p class="text-white/50 mt-4 leading-relaxed">
+      <div class="page-header">
+        <div class="badge">Legal</div>
+        <h1>Terms of Service</h1>
+        <p class="last-updated">Last updated: February 2026</p>
+        <p class="header-intro">
           These Terms of Service govern your use of the Overseer AI Agency platform ("Service"),
           operated by Overseer AI Agency at overseerclaw.uk. By accessing or using the Service, you
           agree to be bound by these terms.
         </p>
       </div>
 
-      <div class="border border-white/5 rounded-2xl p-8 prose-custom" style="background: #16213e">
+      <div class="content-card">
         <!-- Section 1 -->
         <h2>1. Service Description</h2>
         <p>
@@ -275,39 +567,26 @@
         </ul>
       </div>
 
-      <!-- Back link -->
-      <div class="mt-10 flex items-center gap-6">
-        <a href="/" class="text-white/40 hover:text-white text-sm transition-colors">
-          &larr; Back to Home
-        </a>
-        <a
-          href="/client_portal.html"
-          class="text-electric-light hover:text-electric text-sm transition-colors"
-        >
-          Client Portal &rarr;
-        </a>
+      <!-- Back links -->
+      <div class="back-links">
+        <a href="/" class="back-link-home">&larr; Back to Home</a>
+        <a href="/client_portal.html" class="back-link-portal">Client Portal &rarr;</a>
       </div>
     </main>
 
     <!-- Footer -->
-    <footer class="border-t border-white/5 py-10 px-6 mt-12" style="background: #16213e">
-      <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-        <div class="flex items-center gap-2">
-          <div
-            class="w-7 h-7 rounded-lg bg-electric flex items-center justify-center text-xs font-bold"
-          >
-            O
-          </div>
-          <span class="font-semibold text-white">Overseer AI Agency</span>
+    <footer>
+      <div class="footer-inner">
+        <div class="footer-brand">
+          <div class="footer-logo">O</div>
+          <span>Overseer AI Agency</span>
         </div>
-        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-white/40">
-          <a href="/terms" class="text-white/60 hover:text-white transition-colors"
-            >Terms of Service</a
-          >
-          <a href="/client_portal.html" class="hover:text-white transition-colors">Client Portal</a>
-          <a href="/dashboard.html" class="hover:text-white transition-colors">Dashboard</a>
+        <div class="footer-links">
+          <a href="/terms" class="active">Terms of Service</a>
+          <a href="/client_portal.html">Client Portal</a>
+          <a href="/dashboard.html">Dashboard</a>
         </div>
-        <div class="text-sm text-white/30">&copy; 2026 Overseer AI Agency</div>
+        <div class="footer-copy">&copy; 2026 Overseer AI Agency</div>
       </div>
     </footer>
   </body>
