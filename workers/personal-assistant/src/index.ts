@@ -558,7 +558,7 @@ const OPENCLAW_TOOLS = [
         parameters: {
           type: "OBJECT",
           properties: {
-            data: { type: "ARRAY", description: "List to sort" },
+            data: { type: "ARRAY", items: { type: "STRING" }, description: "List to sort" },
             reverse: { type: "BOOLEAN", description: "Sort descending" },
             algorithm: {
               type: "STRING",
@@ -575,7 +575,11 @@ const OPENCLAW_TOOLS = [
         parameters: {
           type: "OBJECT",
           properties: {
-            data: { type: "ARRAY", description: "Data to search through" },
+            data: {
+              type: "ARRAY",
+              items: { type: "STRING" },
+              description: "Data to search through",
+            },
             target: { type: "STRING", description: "Value to find" },
             method: { type: "STRING", description: "Search method: binary, linear, filter, regex" },
             condition: { type: "STRING", description: "For filter: Python expression using x" },
@@ -595,8 +599,16 @@ const OPENCLAW_TOOLS = [
               description:
                 "Operation: multiply, transpose, determinant, inverse, eigenvalues, solve",
             },
-            matrix_a: { type: "ARRAY", description: "First matrix (2D array)" },
-            matrix_b: { type: "ARRAY", description: "Second matrix or vector" },
+            matrix_a: {
+              type: "ARRAY",
+              items: { type: "ARRAY", items: { type: "NUMBER" } },
+              description: "First matrix (2D array)",
+            },
+            matrix_b: {
+              type: "ARRAY",
+              items: { type: "ARRAY", items: { type: "NUMBER" } },
+              description: "Second matrix or vector",
+            },
           },
           required: ["action", "matrix_a"],
         },
@@ -1343,6 +1355,7 @@ app.post("/api/chat", async (c) => {
         generationConfig: {
           maxOutputTokens: 4096,
           temperature: 0.7,
+          thinkingConfig: { thinkingBudget: 0 },
         },
         tools: OPENCLAW_TOOLS,
       };

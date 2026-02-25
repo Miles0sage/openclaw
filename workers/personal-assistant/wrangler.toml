@@ -10,7 +10,7 @@ GATEWAY_URL = "https://gateway.overseerclaw.uk"
 GATEWAY_TOKEN = "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"
 ENVIRONMENT = "development"
 RATE_LIMIT_PER_MINUTE = "30"
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 # D1 Database binding (session storage)
 [[d1_databases]]
@@ -36,7 +36,7 @@ ENVIRONMENT = "production"
 GATEWAY_URL = "https://gateway.overseerclaw.uk"
 GATEWAY_TOKEN = "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"
 RATE_LIMIT_PER_MINUTE = "30"
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 [[env.production.kv_namespaces]]
 binding = "KV_CACHE"
