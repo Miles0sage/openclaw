@@ -46,6 +46,12 @@ VALID_EVENT_TYPES = frozenset([
     "cost.threshold_exceeded",
     "agent.stale",
     "agent.timeout",
+    "deploy.complete",
+    "deploy.failed",
+    "ci.failed",
+    "ci.passed",
+    "scan.completed",
+    "scan.failed",
 ])
 
 # Events that trigger a Slack notification

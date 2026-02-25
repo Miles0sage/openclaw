@@ -28,6 +28,7 @@ SAFE_COMMAND_PREFIXES = [
     "curl ", "wget ", "jq ", "yq ",
     "vercel ", "wrangler ", "netlify ",
     "docker ", "docker-compose ",
+    "oxo ",
     "mkdir ", "cp ", "mv ", "touch ", "chmod ",
     "pytest ", "jest ", "vitest ", "mocha ",
     "tsc ", "eslint ", "prettier ",
@@ -677,6 +678,28 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    {
+        "name": "security_scan",
+        "description": "Run an OXO security scan against a target (IP, domain, or URL). Profiles: quick (Nmap only), full (Nmap+Nuclei), web (Nmap+Nuclei+ZAP). Returns scan results as text.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Target to scan: IP address, domain, or URL"},
+                "scan_type": {
+                    "type": "string",
+                    "enum": ["quick", "full", "web"],
+                    "description": "Scan profile: quick (Nmap), full (Nmap+Nuclei), web (Nmap+Nuclei+ZAP). Default: quick"
+                },
+                "agents": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Override: explicit list of OXO agent keys to run (e.g. ['agent/ostorlab/nmap'])"
+                }
+            },
+            "required": ["target"],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -796,6 +819,9 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             return _compute_convert(tool_input["value"], tool_input["from_unit"], tool_input["to_unit"])
         elif tool_name == "tmux_agents":
             return _tmux_agents(tool_input)
+        elif tool_name == "security_scan":
+            return _security_scan(tool_input["target"], tool_input.get("scan_type", "quick"),
+                                  tool_input.get("agents"))
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:
@@ -1287,7 +1313,20 @@ def _vercel_deploy(action: str, project_path: str = "", project_name: str = "",
             if vercel_token:
                 cmd.extend(["--token", vercel_token])
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=project_path)
-            return result.stdout.strip() + ("\n" + result.stderr.strip() if result.stderr else "")
+            output = result.stdout.strip() + ("\n" + result.stderr.strip() if result.stderr else "")
+            # Emit deploy event for auto-reactions (security scan, notifications)
+            if result.returncode == 0:
+                try:
+                    from event_engine import get_event_engine
+                    deploy_url = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+                    get_event_engine().emit("deploy.complete", {
+                        "project": os.path.basename(project_path),
+                        "url": deploy_url,
+                        "env": "production" if production else "preview",
+                    })
+                except Exception:
+                    pass  # don't fail deploy over event emission
+            return output
 
         elif action == "list":
             cmd = ["vercel", "ls"]
@@ -2348,3 +2387,71 @@ def _tmux_agents(tool_input: dict) -> str:
 
     except Exception as e:
         return f"Error: {e}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# Security Scan (OXO / Ostorlab)
+# ═══════════════════════════════════════════════════════════════
+
+SCAN_PROFILES = {
+    "quick": ["agent/ostorlab/nmap"],
+    "full": ["agent/ostorlab/nmap", "agent/ostorlab/nuclei"],
+    "web": ["agent/ostorlab/nmap", "agent/ostorlab/nuclei", "agent/ostorlab/zap"],
+}
+
+
+def _security_scan(target: str, scan_type: str = "quick", agents: list = None) -> str:
+    """Run an OXO security scan against a target."""
+    import re
+
+    if not shutil.which("oxo"):
+        return "Error: oxo CLI not installed. Install with: pip3 install ostorlab"
+
+    # Validate target
+    target = target.strip()
+    if not target:
+        return "Error: target is required"
+
+    # Determine asset type
+    if re.match(r"^https?://", target):
+        asset_flag = ["--url", target]
+    elif re.match(r"^\d{1,3}(\.\d{1,3}){3}$", target):
+        asset_flag = ["--ip", target]
+    elif re.match(r"^\d{1,3}(\.\d{1,3}){3}/\d+$", target):
+        asset_flag = ["--ip-range", target]
+    else:
+        asset_flag = ["--domain", target]
+
+    # Pick agents
+    agent_list = agents or SCAN_PROFILES.get(scan_type, SCAN_PROFILES["quick"])
+
+    # Build command
+    cmd = ["oxo", "scan", "run"]
+    for agent_key in agent_list:
+        cmd.extend(["--agent", agent_key])
+    cmd.extend(asset_flag)
+
+    try:
+        logger.info(f"Starting OXO scan: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        output = result.stdout.strip()
+        if result.stderr:
+            output += f"\n{result.stderr.strip()}"
+
+        # Emit scan event
+        try:
+            from event_engine import get_event_engine
+            event_type = "scan.completed" if result.returncode == 0 else "scan.failed"
+            get_event_engine().emit(event_type, {
+                "target": target,
+                "scan_type": scan_type,
+                "agents": agent_list,
+            })
+        except Exception:
+            pass
+
+        return output or "Scan completed (no output)"
+    except subprocess.TimeoutExpired:
+        return "Scan timed out after 5 minutes. Try a 'quick' scan or specific agents."
+    except Exception as e:
+        return f"Scan error: {e}"

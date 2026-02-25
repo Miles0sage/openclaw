@@ -117,6 +117,22 @@ DEFAULT_RULES = [
         "cooldown_seconds": 60,
         "agent_pref": "coder_agent",
     },
+    {
+        "id": "post_deploy_security_scan",
+        "name": "Auto-scan after deploy",
+        "trigger": "deploy.complete",
+        "action": "spawn_agent",
+        "prompt_template": (
+            "A deploy just completed for {project}. URL: {url}\n\n"
+            "Run a quick security scan against the deployed URL using the security_scan tool "
+            "with scan_type='web'. Report any findings."
+        ),
+        "message_template": "",
+        "enabled": True,
+        "max_retries": 1,
+        "cooldown_seconds": 600,
+        "agent_pref": "hacker_agent",
+    },
 ]
 
 
