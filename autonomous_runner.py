@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Optional
 
 from agent_tools import execute_tool, AGENT_TOOLS
+from alerts import send_telegram
 from job_manager import get_job, update_job_status, list_jobs, get_pending_jobs
 # Cost tracking — import from cost_tracker (single source of truth)
 from cost_tracker import (
@@ -1892,6 +1893,14 @@ class AutonomousRunner:
 
                 await send_slack_message("", slack_msg)
 
+                status_emoji = "✅" if result["success"] else "❌"
+                tg_msg = (
+                    f"{status_emoji} *Job {'Done' if result['success'] else 'Failed'}*\n"
+                    f"{job_id}\n{task_desc[:80]}\n"
+                    f"Cost: ${progress.cost_usd:.4f}"
+                )
+                await send_telegram(tg_msg)
+
                 broadcast_event({
                     "type": "job_completed",
                     "job_id": job_id,
@@ -1912,6 +1921,10 @@ class AutonomousRunner:
             _save_progress(progress)
             update_job_status(job_id, "failed", error=str(e))
             logger.error(f"Job {job_id} BUDGET EXCEEDED: {e}")
+            try:
+                await send_telegram(f"💸 *Budget Exceeded*\n{job_id}\n{e}")
+            except Exception:
+                pass
 
         except GuardrailViolation as e:
             result["error"] = str(e)
@@ -1938,6 +1951,9 @@ class AutonomousRunner:
                     f"*Iterations:* {guardrails.iterations} / {guardrails.max_iterations}\n"
                     f"*Elapsed:* {guardrails.elapsed_seconds():.0f}s / {guardrails.max_duration_secs}s"
                 ))
+                await send_telegram(
+                    f"🛑 *Job Killed (Guardrail)*\n{job_id}\n{e.reason}"
+                )
             except Exception:
                 pass
 
@@ -1955,6 +1971,13 @@ class AutonomousRunner:
             _save_progress(progress)
             update_job_status(job_id, "failed", error=str(e))
             logger.error(f"Job {job_id} FAILED: {e}\n{traceback.format_exc()}")
+            try:
+                await send_telegram(
+                    f"❌ *Job Failed*\n{job_id}\n{job.get('task', '')[:80]}\n"
+                    f"Error: {str(e)[:100]}"
+                )
+            except Exception:
+                pass
 
         # Include final guardrail metrics in result
         result["guardrails"] = guardrails.summary()
