@@ -4177,9 +4177,12 @@ async def api_calendar_today():
         creds = _get_google_creds()
         service = build("calendar", "v3", credentials=creds)
 
-        now = datetime.now(timezone.utc)
-        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-        end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0).isoformat()
+        # Use Arizona time (MST, UTC-7, no daylight saving)
+        from zoneinfo import ZoneInfo
+        az = ZoneInfo("America/Phoenix")
+        now_local = datetime.now(az)
+        start_of_day = now_local.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        end_of_day = now_local.replace(hour=23, minute=59, second=59, microsecond=0).isoformat()
 
         # Query ALL calendars, not just primary
         cal_list = service.calendarList().list().execute()
@@ -4227,8 +4230,10 @@ async def api_calendar_upcoming(days: int = 7):
         creds = _get_google_creds()
         service = build("calendar", "v3", credentials=creds)
 
-        now = datetime.now(timezone.utc)
+        from zoneinfo import ZoneInfo
         from datetime import timedelta
+        az = ZoneInfo("America/Phoenix")
+        now = datetime.now(az)
         end = now + timedelta(days=days)
 
         # Query ALL calendars
