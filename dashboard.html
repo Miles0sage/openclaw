@@ -1545,6 +1545,228 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   </head>
   <body>
+    <!-- Floating Nav Dock -->
+    <div
+      id="ocNavDock"
+      style="
+        position: fixed;
+        right: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      "
+    >
+      <div
+        id="ocNavToggle"
+        style="
+          position: absolute;
+          right: 100%;
+          top: 50%;
+          transform: translateY(-50%);
+          background: #0f1116;
+          border: 1px solid #1e2230;
+          border-right: none;
+          border-radius: 6px 0 0 6px;
+          padding: 8px 6px;
+          cursor: pointer;
+          color: #e8a832;
+          font-size: 14px;
+          writing-mode: vertical-rl;
+          font-family: &quot;JetBrains Mono&quot;, monospace;
+          font-size: 10px;
+          letter-spacing: 2px;
+          text-transform: uppercase;
+        "
+        onclick="
+          document.getElementById('ocNavPanel').style.display =
+            document.getElementById('ocNavPanel').style.display === 'none' ? 'flex' : 'none'
+        "
+      >
+        NAV
+      </div>
+      <div
+        id="ocNavPanel"
+        style="
+          display: none;
+          flex-direction: column;
+          background: #0f1116;
+          border: 1px solid #1e2230;
+          border-right: none;
+          border-radius: 8px 0 0 8px;
+          padding: 8px 6px;
+          gap: 4px;
+          min-width: 140px;
+          box-shadow: -4px 0 20px rgba(0, 0, 0, 0.5);
+        "
+      >
+        <div
+          style="
+            font-family: &quot;JetBrains Mono&quot;, monospace;
+            font-size: 9px;
+            color: #6a7094;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            padding: 4px 8px;
+            margin-bottom: 2px;
+          "
+        >
+          OpenClaw
+        </div>
+        <a
+          href="/dashboard.html"
+          style="
+            font-family: &quot;JetBrains Mono&quot;, monospace;
+            font-size: 11px;
+            color: #d4d8e8;
+            text-decoration: none;
+            padding: 6px 8px;
+            border-radius: 4px;
+            transition: all 0.15s;
+            border-left: 2px solid transparent;
+          "
+          onmouseover="
+            this.style.background = '#151820';
+            this.style.borderLeftColor = '#e8a832';
+          "
+          onmouseout="
+            this.style.background = '';
+            this.style.borderLeftColor = 'transparent';
+          "
+          >Dashboard</a
+        >
+        <a
+          href="/control"
+          style="
+            font-family: &quot;JetBrains Mono&quot;, monospace;
+            font-size: 11px;
+            color: #e8a832;
+            text-decoration: none;
+            padding: 6px 8px;
+            border-radius: 4px;
+            transition: all 0.15s;
+            border-left: 2px solid transparent;
+            font-weight: 600;
+          "
+          onmouseover="
+            this.style.background = '#151820';
+            this.style.borderLeftColor = '#e8a832';
+          "
+          onmouseout="
+            this.style.background = '';
+            this.style.borderLeftColor = 'transparent';
+          "
+          >Control UI</a
+        >
+        <a
+          href="/client-portal"
+          style="
+            font-family: &quot;JetBrains Mono&quot;, monospace;
+            font-size: 11px;
+            color: #d4d8e8;
+            text-decoration: none;
+            padding: 6px 8px;
+            border-radius: 4px;
+            transition: all 0.15s;
+            border-left: 2px solid transparent;
+          "
+          onmouseover="
+            this.style.background = '#151820';
+            this.style.borderLeftColor = '#e8a832';
+          "
+          onmouseout="
+            this.style.background = '';
+            this.style.borderLeftColor = 'transparent';
+          "
+          >Client Portal</a
+        >
+        <a
+          href="/secrets"
+          style="
+            font-family: &quot;JetBrains Mono&quot;, monospace;
+            font-size: 11px;
+            color: #d4d8e8;
+            text-decoration: none;
+            padding: 6px 8px;
+            border-radius: 4px;
+            transition: all 0.15s;
+            border-left: 2px solid transparent;
+          "
+          onmouseover="
+            this.style.background = '#151820';
+            this.style.borderLeftColor = '#e8a832';
+          "
+          onmouseout="
+            this.style.background = '';
+            this.style.borderLeftColor = 'transparent';
+          "
+          >Secrets</a
+        >
+        <a
+          href="/metrics-dashboard"
+          style="
+            font-family: &quot;JetBrains Mono&quot;, monospace;
+            font-size: 11px;
+            color: #d4d8e8;
+            text-decoration: none;
+            padding: 6px 8px;
+            border-radius: 4px;
+            transition: all 0.15s;
+            border-left: 2px solid transparent;
+          "
+          onmouseover="
+            this.style.background = '#151820';
+            this.style.borderLeftColor = '#e8a832';
+          "
+          onmouseout="
+            this.style.background = '';
+            this.style.borderLeftColor = 'transparent';
+          "
+          >Metrics</a
+        >
+        <a
+          href="/mobile"
+          style="
+            font-family: &quot;JetBrains Mono&quot;, monospace;
+            font-size: 11px;
+            color: #d4d8e8;
+            text-decoration: none;
+            padding: 6px 8px;
+            border-radius: 4px;
+            transition: all 0.15s;
+            border-left: 2px solid transparent;
+          "
+          onmouseover="
+            this.style.background = '#151820';
+            this.style.borderLeftColor = '#e8a832';
+          "
+          onmouseout="
+            this.style.background = '';
+            this.style.borderLeftColor = 'transparent';
+          "
+          >Mobile</a
+        >
+        <div style="border-top: 1px solid #1e2230; margin: 4px 0"></div>
+        <a
+          href="/"
+          style="
+            font-family: &quot;JetBrains Mono&quot;, monospace;
+            font-size: 10px;
+            color: #6a7094;
+            text-decoration: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.15s;
+          "
+          onmouseover="this.style.color = '#e8a832'"
+          onmouseout="this.style.color = '#6a7094'"
+          >Landing Page</a
+        >
+      </div>
+    </div>
+
     <!-- Header -->
     <div class="header">
       <div class="header-left">

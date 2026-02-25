@@ -589,7 +589,7 @@ AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/api/health/detailed", "/api/health/circuit-breakers", "/api/health/alerts"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/api/health/detailed", "/api/health/circuit-breakers", "/api/health/alerts", "/secrets", "/metrics-dashboard", "/mobile"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
@@ -597,7 +597,7 @@ async def auth_middleware(request: Request, call_next):
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
-                 path.startswith(("/telegram/", "/slack/", "/api/audit", "/static/")) or
+                 path.startswith(("/telegram/", "/slack/", "/api/audit", "/static/", "/control")) or
                  any(path.startswith(prefix) for prefix in dashboard_exempt_prefixes))
     logger.debug(f"AUTH_CHECK: path={path}, is_exempt={is_exempt}")
 
@@ -1518,6 +1518,49 @@ async def monitoring_dashboard(request: Request):
         )
     except Exception as e:
         return HTMLResponse(content=f"<h1>Error loading dashboard</h1><p>{e}</p>", status_code=500)
+
+
+# ---------------------------------------------------------------------------
+# Native OpenClaw Control UI (Lit web components)
+# ---------------------------------------------------------------------------
+from starlette.staticfiles import StaticFiles as _StaticFiles
+
+_control_ui_path = os.path.join(os.path.dirname(__file__), "dist", "control-ui")
+if os.path.isdir(_control_ui_path):
+    app.mount("/control", _StaticFiles(directory=_control_ui_path, html=True), name="control-ui")
+
+
+# ---------------------------------------------------------------------------
+# Extra dashboard views
+# ---------------------------------------------------------------------------
+@app.get("/secrets")
+async def secrets_dashboard():
+    """Serve the secrets manager dashboard"""
+    html_path = os.path.join(os.path.dirname(__file__), "dashboard_secrets.html")
+    if os.path.exists(html_path):
+        with open(html_path, "r") as f:
+            return HTMLResponse(content=f.read())
+    return HTMLResponse(content="<h1>Secrets dashboard not found</h1>", status_code=404)
+
+
+@app.get("/metrics-dashboard")
+async def metrics_dashboard():
+    """Serve the metrics dashboard"""
+    html_path = os.path.join(os.path.dirname(__file__), "dashboard_metrics.html")
+    if os.path.exists(html_path):
+        with open(html_path, "r") as f:
+            return HTMLResponse(content=f.read())
+    return HTMLResponse(content="<h1>Metrics dashboard not found</h1>", status_code=404)
+
+
+@app.get("/mobile")
+async def mobile_dashboard():
+    """Serve the mobile dashboard"""
+    html_path = os.path.join(os.path.dirname(__file__), "dashboard_mobile.html")
+    if os.path.exists(html_path):
+        with open(html_path, "r") as f:
+            return HTMLResponse(content=f.read())
+    return HTMLResponse(content="<h1>Mobile dashboard not found</h1>", status_code=404)
 
 
 # ---------------------------------------------------------------------------
