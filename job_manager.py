@@ -110,16 +110,24 @@ def update_job_status(job_id: str, status: str, **kwargs):
     
     logger.info(f"✅ Job {job_id} → {status}")
 
-def list_jobs():
-    """List all jobs"""
+def list_jobs(status: str = "all"):
+    """List jobs, optionally filtered by status.
+
+    Args:
+        status: Filter by job status (e.g. 'pending', 'done', 'analyzing').
+                Use 'all' to return everything (default).
+    """
     if not JOBS_FILE.exists():
         return []
-    
+
     jobs = []
     with open(JOBS_FILE, "r") as f:
         for line in f:
             jobs.append(json.loads(line))
-    
+
+    if status != "all":
+        jobs = [j for j in jobs if j.get("status") == status]
+
     return jobs
 
 if __name__ == "__main__":

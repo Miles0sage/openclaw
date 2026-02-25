@@ -898,10 +898,7 @@ def _create_job(project: str, task: str, priority: str) -> str:
 def _list_jobs(status: str) -> str:
     """List jobs from the queue."""
     from job_manager import list_jobs
-    jobs = list_jobs()
-
-    if status != "all":
-        jobs = [j for j in jobs if j.get("status") == status]
+    jobs = list_jobs(status=status)
 
     if not jobs:
         return "No jobs found"
