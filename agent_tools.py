@@ -34,6 +34,7 @@ SAFE_COMMAND_PREFIXES = [
     "tsc ", "eslint ", "prettier ",
     "echo ", "pwd", "whoami", "date", "env ",
     "tar ", "zip ", "unzip ", "gzip ",
+    "polymarket ",
 ]
 
 # Commands that are NEVER allowed
@@ -700,6 +701,26 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    {
+        "name": "prediction_market",
+        "description": "Query Polymarket prediction markets. Search markets, get details, list events. Use for checking probabilities on current events, elections, tech, crypto, etc.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["search", "get_market", "list_markets", "list_events"],
+                    "description": "Action: search markets, get specific market, list markets, list events"
+                },
+                "query": {"type": "string", "description": "Search query (for search action)"},
+                "market_id": {"type": "string", "description": "Market ID or slug (for get_market action)"},
+                "tag": {"type": "string", "description": "Event tag filter (for list_events, e.g. 'politics', 'crypto')"},
+                "limit": {"type": "integer", "description": "Max results to return (default: 10)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -822,6 +843,10 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
         elif tool_name == "security_scan":
             return _security_scan(tool_input["target"], tool_input.get("scan_type", "quick"),
                                   tool_input.get("agents"))
+        elif tool_name == "prediction_market":
+            return _prediction_market(tool_input["action"], tool_input.get("query", ""),
+                                      tool_input.get("market_id", ""), tool_input.get("tag", ""),
+                                      tool_input.get("limit", 10))
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:
@@ -2455,3 +2480,44 @@ def _security_scan(target: str, scan_type: str = "quick", agents: list = None) -
         return "Scan timed out after 5 minutes. Try a 'quick' scan or specific agents."
     except Exception as e:
         return f"Scan error: {e}"
+
+
+def _prediction_market(action: str, query: str, market_id: str, tag: str, limit: int) -> str:
+    """Query Polymarket prediction markets via CLI."""
+    try:
+        if action == "search":
+            if not query:
+                return "Error: 'query' is required for search action"
+            cmd = ["polymarket", "markets", "search", query, "-o", "json"]
+        elif action == "get_market":
+            if not market_id:
+                return "Error: 'market_id' is required for get_market action"
+            cmd = ["polymarket", "markets", "get", market_id, "-o", "json"]
+        elif action == "list_markets":
+            cmd = ["polymarket", "markets", "list", "-o", "json"]
+        elif action == "list_events":
+            cmd = ["polymarket", "events", "list", "-o", "json"]
+            if tag:
+                cmd.extend(["--tag", tag])
+        else:
+            return f"Unknown action: {action}. Use: search, get_market, list_markets, list_events"
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        output = result.stdout.strip()
+        if result.returncode != 0 and result.stderr:
+            output = result.stderr.strip() if not output else f"{output}\n{result.stderr.strip()}"
+
+        if not output:
+            return "No results returned"
+
+        # Cap output size
+        if len(output) > MAX_SHELL_OUTPUT:
+            output = output[:MAX_SHELL_OUTPUT] + "\n... (truncated)"
+
+        return output
+    except subprocess.TimeoutExpired:
+        return "Polymarket query timed out after 30 seconds"
+    except FileNotFoundError:
+        return "Error: polymarket CLI not installed. Run: curl -sSL https://raw.githubusercontent.com/Polymarket/polymarket-cli/main/install.sh | sh"
+    except Exception as e:
+        return f"Prediction market error: {e}"
