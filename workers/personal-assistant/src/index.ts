@@ -741,6 +741,28 @@ const OPENCLAW_TOOLS = [
           required: ["job_id"],
         },
       },
+      // --- Reflexion (Agency Learning) ---
+      {
+        name: "get_reflections",
+        description:
+          "Get past job reflections — the agency's learning memory. Use to check what worked/failed before.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: stats (summary), list (recent), search (find similar)",
+            },
+            task: {
+              type: "STRING",
+              description: "Task description to search for (for search action)",
+            },
+            project: { type: "STRING", description: "Filter by project name" },
+            limit: { type: "NUMBER", description: "Max results" },
+          },
+          required: ["action"],
+        },
+      },
     ],
   },
 ];
@@ -1105,6 +1127,24 @@ async function executeTool(
       return (
         await gatewayFetch(env, `/api/job/${args.job_id}/approve`, { method: "POST" })
       ).json();
+    case "get_reflections":
+      if (args.action === "stats") {
+        return (await gatewayFetch(env, "/api/reflections/stats")).json();
+      } else if (args.action === "search") {
+        return (
+          await gatewayFetch(env, "/api/reflections/search", {
+            method: "POST",
+            body: JSON.stringify({ task: args.task, project: args.project, limit: args.limit }),
+          })
+        ).json();
+      } else {
+        return (
+          await gatewayFetch(
+            env,
+            `/api/reflections?limit=${args.limit || 10}${args.project ? `&project=${args.project}` : ""}`,
+          )
+        ).json();
+      }
     default:
       return { error: `Unknown tool: ${name}` };
   }
