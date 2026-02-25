@@ -4275,6 +4275,172 @@ async def api_calendar_upcoming(days: int = 7):
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# GMAIL & CALENDAR — WRITE ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/calendar/create")
+async def api_calendar_create(request: Request):
+    """Create a new Google Calendar event."""
+    try:
+        from googleapiclient.discovery import build
+        from zoneinfo import ZoneInfo
+        creds = _get_google_creds()
+        service = build("calendar", "v3", credentials=creds)
+        body = await request.json()
+
+        summary = body.get("summary", "New Event")
+        start_time = body.get("start")  # ISO format, e.g. "2026-02-26T09:00:00"
+        end_time = body.get("end")      # ISO format
+        location = body.get("location", "")
+        description = body.get("description", "")
+        calendar_id = body.get("calendar_id", "primary")
+
+        if not start_time or not end_time:
+            return JSONResponse({"error": "start and end times required"}, status_code=400)
+
+        # Default to Arizona timezone if no timezone offset in the time string
+        tz = "America/Phoenix"
+        event = {
+            "summary": summary,
+            "location": location,
+            "description": description,
+            "start": {"dateTime": start_time, "timeZone": tz},
+            "end": {"dateTime": end_time, "timeZone": tz},
+        }
+
+        created = service.events().insert(calendarId=calendar_id, body=event).execute()
+        return {"success": True, "event_id": created.get("id"), "link": created.get("htmlLink", "")}
+    except Exception as e:
+        logger.error(f"Calendar create error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/calendar/list")
+async def api_calendar_list():
+    """List all Google Calendar calendars."""
+    try:
+        from googleapiclient.discovery import build
+        creds = _get_google_creds()
+        service = build("calendar", "v3", credentials=creds)
+        results = service.calendarList().list().execute()
+        cals = [{"id": c["id"], "name": c.get("summary", ""), "access": c.get("accessRole", "")} for c in results.get("items", [])]
+        return {"calendars": cals, "total": len(cals)}
+    except Exception as e:
+        logger.error(f"Calendar list error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/gmail/send")
+async def api_gmail_send(request: Request):
+    """Send an email via Gmail."""
+    try:
+        from googleapiclient.discovery import build
+        import base64
+        from email.mime.text import MIMEText
+
+        creds = _get_google_creds()
+        service = build("gmail", "v1", credentials=creds)
+        body = await request.json()
+
+        to = body.get("to")
+        subject = body.get("subject", "")
+        message_text = body.get("body", "")
+
+        if not to:
+            return JSONResponse({"error": "to address required"}, status_code=400)
+
+        msg = MIMEText(message_text)
+        msg["to"] = to
+        msg["subject"] = subject
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+        sent = service.users().messages().send(userId="me", body={"raw": raw}).execute()
+
+        return {"success": True, "message_id": sent.get("id"), "thread_id": sent.get("threadId")}
+    except Exception as e:
+        logger.error(f"Gmail send error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/gmail/trash")
+async def api_gmail_trash(request: Request):
+    """Move emails to trash. Accepts a list of message IDs."""
+    try:
+        from googleapiclient.discovery import build
+        creds = _get_google_creds()
+        service = build("gmail", "v1", credentials=creds)
+        body = await request.json()
+        message_ids = body.get("message_ids", [])
+
+        if not message_ids:
+            return JSONResponse({"error": "message_ids required"}, status_code=400)
+
+        trashed = []
+        for mid in message_ids[:50]:  # Cap at 50 to prevent abuse
+            try:
+                service.users().messages().trash(userId="me", id=mid).execute()
+                trashed.append(mid)
+            except Exception as e:
+                logger.warning(f"Failed to trash {mid}: {e}")
+
+        return {"success": True, "trashed": len(trashed), "message_ids": trashed}
+    except Exception as e:
+        logger.error(f"Gmail trash error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/gmail/label")
+async def api_gmail_label(request: Request):
+    """Add or remove labels on emails."""
+    try:
+        from googleapiclient.discovery import build
+        creds = _get_google_creds()
+        service = build("gmail", "v1", credentials=creds)
+        body = await request.json()
+
+        message_ids = body.get("message_ids", [])
+        add_labels = body.get("add_labels", [])      # e.g. ["IMPORTANT", "STARRED"]
+        remove_labels = body.get("remove_labels", []) # e.g. ["UNREAD", "INBOX"]
+
+        if not message_ids:
+            return JSONResponse({"error": "message_ids required"}, status_code=400)
+
+        modified = []
+        label_body = {}
+        if add_labels:
+            label_body["addLabelIds"] = add_labels
+        if remove_labels:
+            label_body["removeLabelIds"] = remove_labels
+
+        for mid in message_ids[:50]:
+            try:
+                service.users().messages().modify(userId="me", id=mid, body=label_body).execute()
+                modified.append(mid)
+            except Exception as e:
+                logger.warning(f"Failed to label {mid}: {e}")
+
+        return {"success": True, "modified": len(modified), "message_ids": modified}
+    except Exception as e:
+        logger.error(f"Gmail label error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/gmail/labels")
+async def api_gmail_labels():
+    """List all Gmail labels."""
+    try:
+        from googleapiclient.discovery import build
+        creds = _get_google_creds()
+        service = build("gmail", "v1", credentials=creds)
+        results = service.users().labels().list(userId="me").execute()
+        labels = [{"id": l["id"], "name": l["name"], "type": l.get("type", "")} for l in results.get("labels", [])]
+        return {"labels": labels, "total": len(labels)}
+    except Exception as e:
+        logger.error(f"Gmail labels error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # HEALTH SYNC — Receive data from iOS Shortcuts (Apple Health)
 # ═══════════════════════════════════════════════════════════════════════
 

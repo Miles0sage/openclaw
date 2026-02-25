@@ -291,6 +291,94 @@ const OPENCLAW_TOOLS = [
         description: "Get today's Google Calendar events",
         parameters: { type: "OBJECT", properties: {} },
       },
+      {
+        name: "create_calendar_event",
+        description: "Create a new Google Calendar event. Use Arizona time (MST, UTC-7).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            summary: { type: "STRING", description: "Event title" },
+            start: {
+              type: "STRING",
+              description: "Start time ISO format e.g. 2026-02-26T09:00:00",
+            },
+            end: { type: "STRING", description: "End time ISO format e.g. 2026-02-26T10:00:00" },
+            location: { type: "STRING", description: "Event location (optional)" },
+            description: { type: "STRING", description: "Event description (optional)" },
+          },
+          required: ["summary", "start", "end"],
+        },
+      },
+      {
+        name: "get_calendar_upcoming",
+        description: "Get upcoming calendar events for the next N days",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            days: { type: "NUMBER", description: "Number of days to look ahead (default 7)" },
+          },
+        },
+      },
+      {
+        name: "list_calendars",
+        description: "List all Google Calendar calendars available",
+        parameters: { type: "OBJECT", properties: {} },
+      },
+      {
+        name: "trash_emails",
+        description: "Move emails to trash/delete them. Requires message IDs from get_gmail_inbox.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            message_ids: {
+              type: "ARRAY",
+              items: { type: "STRING" },
+              description: "List of Gmail message IDs to trash",
+            },
+          },
+          required: ["message_ids"],
+        },
+      },
+      {
+        name: "label_emails",
+        description:
+          "Add or remove labels on emails. Common labels: STARRED, IMPORTANT, UNREAD, INBOX, SPAM, TRASH",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            message_ids: {
+              type: "ARRAY",
+              items: { type: "STRING" },
+              description: "List of Gmail message IDs",
+            },
+            add_labels: { type: "ARRAY", items: { type: "STRING" }, description: "Labels to add" },
+            remove_labels: {
+              type: "ARRAY",
+              items: { type: "STRING" },
+              description: "Labels to remove",
+            },
+          },
+          required: ["message_ids"],
+        },
+      },
+      {
+        name: "send_email",
+        description: "Send an email via Gmail",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            to: { type: "STRING", description: "Recipient email address" },
+            subject: { type: "STRING", description: "Email subject" },
+            body: { type: "STRING", description: "Email body text" },
+          },
+          required: ["to", "subject", "body"],
+        },
+      },
+      {
+        name: "get_gmail_labels",
+        description: "List all Gmail labels/folders",
+        parameters: { type: "OBJECT", properties: {} },
+      },
       // --- GitHub ---
       {
         name: "github_repo_info",
@@ -855,6 +943,54 @@ async function executeTool(
       return (await gatewayFetch(env, `/api/gmail/inbox?limit=${args.limit || 10}`)).json();
     case "get_calendar_today":
       return (await gatewayFetch(env, "/api/calendar/today")).json();
+    case "create_calendar_event":
+      return (
+        await gatewayFetch(env, "/api/calendar/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            summary: args.summary,
+            start: args.start,
+            end: args.end,
+            location: args.location || "",
+            description: args.description || "",
+          }),
+        })
+      ).json();
+    case "get_calendar_upcoming":
+      return (await gatewayFetch(env, `/api/calendar/upcoming?days=${args.days || 7}`)).json();
+    case "list_calendars":
+      return (await gatewayFetch(env, "/api/calendar/list")).json();
+    case "trash_emails":
+      return (
+        await gatewayFetch(env, "/api/gmail/trash", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message_ids: args.message_ids }),
+        })
+      ).json();
+    case "label_emails":
+      return (
+        await gatewayFetch(env, "/api/gmail/label", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message_ids: args.message_ids,
+            add_labels: args.add_labels || [],
+            remove_labels: args.remove_labels || [],
+          }),
+        })
+      ).json();
+    case "send_email":
+      return (
+        await gatewayFetch(env, "/api/gmail/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to: args.to, subject: args.subject, body: args.body }),
+        })
+      ).json();
+    case "get_gmail_labels":
+      return (await gatewayFetch(env, "/api/gmail/labels")).json();
     // --- GitHub ---
     case "github_repo_info":
       return (
@@ -1276,8 +1412,11 @@ ROUTING:
 - When Miles asks about costs/spending/budget, call get_cost_summary.
 - When Miles says "what's running" or "status", call get_runner_status or get_agency_status.
 - When Miles asks about agents, call list_agents.
-- When Miles asks about email/inbox, call get_gmail_inbox.
-- When Miles asks about calendar/schedule, call get_calendar_today.
+- When Miles asks about email/inbox, call get_gmail_inbox. To clean up, use trash_emails. To organize, use label_emails.
+- When Miles asks about calendar/schedule, call get_calendar_today or get_calendar_upcoming.
+- To create events or plan the day, use create_calendar_event. Always use Arizona time (MST).
+- When asked to send email, use send_email. Always confirm recipient before sending.
+- For email cleanup: read inbox first, identify junk/spam, then trash them in one call.
 - When Miles asks about events/activity, call get_events.
 - When Miles asks about a GitHub repo, call github_repo_info.
 - When Miles asks to search the web or look something up, call web_search or research_task.
@@ -1663,220 +1802,548 @@ const LANDING_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenClaw Assistant</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<title>Overseer — OpenClaw</title>
 <style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  :root{
-    --bg:#0d1117;--surface:#161b22;--border:#30363d;
-    --text:#e6edf3;--text-muted:#8b949e;--accent:#58a6ff;
-    --accent-hover:#79c0ff;--user-bg:#1f6feb33;--bot-bg:#21262d;
-    --danger:#f85149;--success:#3fb950;
-  }
-  html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif}
-  body{background:var(--bg);color:var(--text);display:flex;flex-direction:column}
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#08090c;--surface:#0f1116;--surface-2:#151820;--surface-3:#1a1e28;
+  --border:#1e2230;--border-active:#2a3045;
+  --text:#d4d8e8;--text-bright:#eef0f8;--text-muted:#6a7094;--text-dim:#3d4260;
+  --amber:#e8a832;--amber-dim:#e8a83225;--amber-glow:#e8a83215;
+  --red:#e84545;--red-dim:#e8454520;
+  --green:#45c882;--green-dim:#45c88220;
+  --blue:#4588e8;--blue-dim:#4588e820;
+  --purple:#8b5cf6;--purple-dim:#8b5cf620;
+  --cyan:#22d3ee;--cyan-dim:#22d3ee20;
+  --font-mono:'JetBrains Mono',monospace;
+  --font-body:'Outfit',sans-serif;
+  --radius:10px;
+}
+html,body{height:100%;font-family:var(--font-body);-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--text);display:flex;flex-direction:column;overflow:hidden}
 
-  /* Header */
-  .header{
-    padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--border);
-    display:flex;align-items:center;gap:12px;flex-shrink:0;
-  }
-  .header .logo{
-    width:32px;height:32px;border-radius:8px;background:var(--accent);
-    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;color:#fff;
-  }
-  .header h1{font-size:16px;font-weight:600;color:var(--text)}
-  .header .badge{
-    font-size:11px;padding:2px 8px;border-radius:10px;
-    background:var(--success);color:#000;font-weight:600;margin-left:auto;
-  }
-  .header .status-dot{
-    width:8px;height:8px;border-radius:50%;background:var(--success);
-    animation:pulse 2s infinite;
-  }
-  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+/* Noise texture overlay */
+body::before{
+  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  background-size:128px 128px;
+}
 
-  /* Chat area */
-  .chat{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px}
-  .msg{max-width:720px;width:100%;padding:12px 16px;border-radius:12px;line-height:1.55;font-size:14px;white-space:pre-wrap;word-break:break-word}
-  .msg.user{background:var(--user-bg);border:1px solid #1f6feb55;align-self:flex-end;border-bottom-right-radius:4px}
-  .msg.bot{background:var(--bot-bg);border:1px solid var(--border);align-self:flex-start;border-bottom-left-radius:4px}
-  .msg .meta{font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:600}
-  .msg code{background:#ffffff12;padding:1px 5px;border-radius:4px;font-size:13px}
-  .msg pre{background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:10px;overflow-x:auto;margin:6px 0;font-size:13px}
-  .msg pre code{background:none;padding:0}
+/* Header */
+.header{
+  padding:0 20px;height:56px;background:var(--surface);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:14px;flex-shrink:0;
+  position:relative;z-index:10;
+}
+.header::after{
+  content:'';position:absolute;bottom:-1px;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--amber-dim),transparent);
+}
+.logo-mark{
+  width:34px;height:34px;border-radius:8px;position:relative;
+  background:linear-gradient(135deg,var(--amber),#c88520);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-mono);font-weight:700;font-size:15px;color:var(--bg);
+  box-shadow:0 0 20px var(--amber-dim);
+}
+.logo-mark::after{
+  content:'';position:absolute;inset:-2px;border-radius:10px;
+  background:linear-gradient(135deg,var(--amber),transparent);
+  opacity:.25;z-index:-1;
+}
+.header-title{
+  font-family:var(--font-mono);font-size:14px;font-weight:600;
+  color:var(--text-bright);letter-spacing:-.3px;
+}
+.header-title span{color:var(--text-muted);font-weight:400}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.session-info{
+  font-family:var(--font-mono);font-size:10px;color:var(--text-dim);
+  display:flex;align-items:center;gap:6px;
+}
+.session-info .count{color:var(--text-muted)}
+.status-pill{
+  display:flex;align-items:center;gap:6px;
+  padding:4px 10px 4px 8px;border-radius:20px;
+  font-family:var(--font-mono);font-size:10px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.5px;
+  background:var(--green-dim);color:var(--green);
+  border:1px solid transparent;
+  transition:all .3s;
+}
+.status-pill.offline{background:var(--red-dim);color:var(--red)}
+.status-pill.degraded{background:#d2992220;color:#d29922}
+.status-pill .dot{
+  width:6px;height:6px;border-radius:50%;background:currentColor;
+  animation:pulse 2s ease-in-out infinite;
+}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 
-  /* Typing indicator */
-  .typing{display:none;align-self:flex-start;padding:12px 16px;background:var(--bot-bg);border:1px solid var(--border);border-radius:12px;border-bottom-left-radius:4px;gap:4px;align-items:center}
-  .typing.show{display:flex}
-  .typing span{width:7px;height:7px;background:var(--text-muted);border-radius:50%;animation:bounce .6s infinite alternate}
-  .typing span:nth-child(2){animation-delay:.2s}
-  .typing span:nth-child(3){animation-delay:.4s}
-  @keyframes bounce{to{opacity:.3;transform:translateY(-4px)}}
+/* Chat */
+.chat{
+  flex:1;overflow-y:auto;padding:24px 20px;
+  display:flex;flex-direction:column;gap:4px;
+  position:relative;z-index:1;
+  scroll-behavior:smooth;
+}
+.chat::-webkit-scrollbar{width:5px}
+.chat::-webkit-scrollbar-track{background:transparent}
+.chat::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.chat::-webkit-scrollbar-thumb:hover{background:var(--border-active)}
 
-  /* Input area */
-  .input-area{
-    padding:16px 20px;background:var(--surface);border-top:1px solid var(--border);
-    display:flex;gap:10px;flex-shrink:0;
-  }
-  .input-area textarea{
-    flex:1;background:var(--bg);border:1px solid var(--border);border-radius:10px;
-    padding:10px 14px;color:var(--text);font-size:14px;font-family:inherit;
-    resize:none;outline:none;min-height:44px;max-height:160px;line-height:1.4;
-    transition:border-color .15s;
-  }
-  .input-area textarea:focus{border-color:var(--accent)}
-  .input-area textarea::placeholder{color:var(--text-muted)}
-  .input-area button{
-    background:var(--accent);color:#fff;border:none;border-radius:10px;
-    padding:0 20px;font-size:14px;font-weight:600;cursor:pointer;
-    transition:background .15s;flex-shrink:0;
-  }
-  .input-area button:hover{background:var(--accent-hover)}
-  .input-area button:disabled{opacity:.4;cursor:not-allowed}
+/* Messages */
+.msg-group{display:flex;flex-direction:column;gap:2px;max-width:780px;width:100%}
+.msg-group.user{align-self:flex-end}
+.msg-group.bot{align-self:flex-start}
+.msg-label{
+  font-family:var(--font-mono);font-size:10px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.8px;
+  padding:0 4px;margin-bottom:4px;margin-top:16px;
+}
+.msg-group.user .msg-label{color:var(--blue);text-align:right}
+.msg-group.bot .msg-label{color:var(--amber)}
 
-  /* Welcome */
-  .welcome{text-align:center;padding:60px 20px;color:var(--text-muted)}
-  .welcome h2{font-size:22px;color:var(--text);margin-bottom:8px}
-  .welcome p{font-size:14px;max-width:480px;margin:0 auto 20px}
-  .welcome .chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
-  .welcome .chip{
-    background:var(--surface);border:1px solid var(--border);border-radius:8px;
-    padding:8px 14px;font-size:13px;cursor:pointer;transition:border-color .15s;color:var(--text);
-  }
-  .welcome .chip:hover{border-color:var(--accent)}
+.msg{
+  padding:14px 18px;line-height:1.65;font-size:14px;
+  word-break:break-word;position:relative;
+}
+.msg-group.user .msg{
+  background:var(--blue-dim);border:1px solid #4588e830;
+  border-radius:var(--radius) var(--radius) 4px var(--radius);
+  color:var(--text-bright);
+}
+.msg-group.bot .msg{
+  background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--radius) var(--radius) var(--radius) 4px;
+}
 
-  /* Scrollbar */
-  .chat::-webkit-scrollbar{width:6px}
-  .chat::-webkit-scrollbar-track{background:transparent}
-  .chat::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+/* Tool badge */
+.tool-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:3px 10px 3px 7px;border-radius:6px;
+  font-family:var(--font-mono);font-size:10px;font-weight:600;
+  letter-spacing:.3px;text-transform:uppercase;
+  margin-bottom:10px;
+  animation:badgeFade .4s ease;
+}
+@keyframes badgeFade{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.tool-badge.jobs{background:var(--purple-dim);color:var(--purple);border:1px solid #8b5cf630}
+.tool-badge.costs{background:var(--green-dim);color:var(--green);border:1px solid #45c88230}
+.tool-badge.agents{background:var(--cyan-dim);color:var(--cyan);border:1px solid #22d3ee30}
+.tool-badge.memory{background:var(--amber-dim);color:var(--amber);border:1px solid #e8a83230}
+.tool-badge.github{background:#24292e;color:#e6edf3;border:1px solid #30363d}
+.tool-badge.system{background:var(--surface-3);color:var(--text-muted);border:1px solid var(--border)}
+.tool-badge .tool-icon{font-size:12px}
 
-  /* Mobile */
-  @media(max-width:600px){
-    .header{padding:10px 14px}
-    .chat{padding:12px}
-    .input-area{padding:10px 14px}
-    .msg{font-size:13px;padding:10px 12px}
-    .welcome{padding:40px 16px}
-    .welcome h2{font-size:18px}
-  }
+/* Markdown in messages */
+.msg h1,.msg h2,.msg h3{color:var(--text-bright);margin:12px 0 6px;font-family:var(--font-body)}
+.msg h1{font-size:18px} .msg h2{font-size:16px} .msg h3{font-size:14px;color:var(--amber)}
+.msg p{margin:4px 0}
+.msg strong{color:var(--text-bright);font-weight:600}
+.msg em{color:var(--text-muted);font-style:italic}
+.msg a{color:var(--amber);text-decoration:none;border-bottom:1px solid var(--amber-dim)}
+.msg a:hover{border-color:var(--amber)}
+.msg ul,.msg ol{margin:6px 0 6px 20px}
+.msg li{margin:3px 0;line-height:1.5}
+.msg li::marker{color:var(--text-dim)}
+.msg blockquote{
+  border-left:3px solid var(--amber);padding:6px 14px;margin:8px 0;
+  background:var(--amber-glow);border-radius:0 6px 6px 0;
+  color:var(--text-muted);font-style:italic;
+}
+.msg hr{border:none;border-top:1px solid var(--border);margin:12px 0}
+.msg code{
+  font-family:var(--font-mono);font-size:12px;
+  background:#ffffff08;padding:2px 6px;border-radius:4px;
+  color:var(--amber);border:1px solid #ffffff08;
+}
+.msg pre{
+  background:var(--bg);border:1px solid var(--border);border-radius:8px;
+  padding:14px 16px;overflow-x:auto;margin:10px 0;position:relative;
+}
+.msg pre code{
+  background:none;padding:0;border:none;color:var(--text);
+  font-size:12px;line-height:1.6;
+}
+.msg pre .lang-tag{
+  position:absolute;top:6px;right:10px;
+  font-family:var(--font-mono);font-size:9px;font-weight:600;
+  color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;
+}
+.msg table{
+  width:100%;border-collapse:collapse;margin:10px 0;font-size:13px;
+  font-family:var(--font-mono);
+}
+.msg th{
+  text-align:left;padding:8px 12px;border-bottom:2px solid var(--border);
+  color:var(--amber);font-weight:600;font-size:11px;
+  text-transform:uppercase;letter-spacing:.5px;
+}
+.msg td{
+  padding:7px 12px;border-bottom:1px solid var(--border);
+  color:var(--text);
+}
+.msg tr:hover td{background:var(--surface-3)}
+
+/* Typing indicator */
+.typing{
+  display:none;align-self:flex-start;max-width:780px;
+  padding:14px 18px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:var(--radius) var(--radius) var(--radius) 4px;
+  gap:6px;align-items:center;margin-top:4px;
+}
+.typing.show{display:flex}
+.typing-dots{display:flex;gap:4px;align-items:center}
+.typing-dots span{
+  width:6px;height:6px;background:var(--amber);border-radius:50%;
+  animation:typeBounce .8s infinite alternate;opacity:.4;
+}
+.typing-dots span:nth-child(2){animation-delay:.15s}
+.typing-dots span:nth-child(3){animation-delay:.3s}
+@keyframes typeBounce{to{opacity:1;transform:translateY(-3px)}}
+.typing-label{
+  font-family:var(--font-mono);font-size:11px;color:var(--text-muted);
+  margin-left:6px;
+}
+
+/* Input area */
+.input-area{
+  padding:16px 20px;background:var(--surface);
+  border-top:1px solid var(--border);
+  display:flex;gap:10px;flex-shrink:0;
+  position:relative;z-index:10;
+}
+.input-area::before{
+  content:'';position:absolute;top:-1px;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--amber-dim),transparent);
+}
+.input-wrap{
+  flex:1;position:relative;display:flex;align-items:flex-end;
+  background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);
+  transition:border-color .2s,box-shadow .2s;
+}
+.input-wrap:focus-within{
+  border-color:var(--amber);
+  box-shadow:0 0 0 3px var(--amber-dim);
+}
+.input-wrap textarea{
+  flex:1;background:transparent;border:none;
+  padding:12px 14px;color:var(--text-bright);font-size:14px;
+  font-family:var(--font-body);resize:none;outline:none;
+  min-height:44px;max-height:160px;line-height:1.45;
+}
+.input-wrap textarea::placeholder{color:var(--text-dim)}
+.send-btn{
+  background:linear-gradient(135deg,var(--amber),#c88520);
+  color:var(--bg);border:none;border-radius:var(--radius);
+  padding:0 22px;height:44px;font-size:13px;font-weight:700;
+  font-family:var(--font-mono);cursor:pointer;
+  transition:all .2s;flex-shrink:0;
+  text-transform:uppercase;letter-spacing:.5px;
+}
+.send-btn:hover{box-shadow:0 0 24px var(--amber-dim);transform:translateY(-1px)}
+.send-btn:active{transform:translateY(0)}
+.send-btn:disabled{opacity:.3;cursor:not-allowed;transform:none;box-shadow:none}
+
+/* Welcome screen */
+.welcome{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:80px 24px 40px;text-align:center;
+  animation:welcomeFade .8s ease;
+}
+@keyframes welcomeFade{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.welcome-logo{
+  width:64px;height:64px;border-radius:16px;margin-bottom:28px;
+  background:linear-gradient(135deg,var(--amber),#c88520);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-mono);font-weight:700;font-size:28px;color:var(--bg);
+  box-shadow:0 0 60px var(--amber-dim),0 0 120px var(--amber-glow);
+  position:relative;
+}
+.welcome-logo::before{
+  content:'';position:absolute;inset:-4px;border-radius:20px;
+  background:conic-gradient(from 0deg,var(--amber),transparent,var(--amber));
+  opacity:.2;animation:logoSpin 8s linear infinite;
+}
+@keyframes logoSpin{to{transform:rotate(360deg)}}
+.welcome h2{
+  font-family:var(--font-mono);font-size:20px;font-weight:700;
+  color:var(--text-bright);margin-bottom:10px;letter-spacing:-.3px;
+}
+.welcome p{
+  font-size:14px;color:var(--text-muted);max-width:440px;line-height:1.6;
+  margin-bottom:32px;
+}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:520px}
+.chip{
+  background:var(--surface-2);border:1px solid var(--border);border-radius:8px;
+  padding:10px 16px;font-size:12px;font-family:var(--font-mono);font-weight:500;
+  cursor:pointer;transition:all .2s;color:var(--text);
+  display:flex;align-items:center;gap:7px;
+}
+.chip:hover{border-color:var(--amber);color:var(--amber);background:var(--amber-dim)}
+.chip .chip-icon{font-size:14px;opacity:.7}
+
+/* Session bar */
+.session-bar{
+  padding:6px 20px;background:var(--bg);
+  border-bottom:1px solid var(--border);
+  font-family:var(--font-mono);font-size:10px;color:var(--text-dim);
+  display:flex;align-items:center;gap:16px;flex-shrink:0;
+}
+.session-bar .sep{color:var(--border)}
+
+/* Mobile */
+@media(max-width:640px){
+  .header{padding:0 14px;height:50px;gap:10px}
+  .logo-mark{width:28px;height:28px;font-size:13px;border-radius:6px}
+  .header-title{font-size:13px}
+  .session-info{display:none}
+  .chat{padding:16px 12px}
+  .msg{padding:12px 14px;font-size:13px}
+  .msg pre{padding:10px 12px}
+  .input-area{padding:12px}
+  .welcome{padding:50px 16px 30px}
+  .welcome-logo{width:52px;height:52px;font-size:22px}
+  .welcome h2{font-size:17px}
+  .chips{gap:6px}
+  .chip{padding:8px 12px;font-size:11px}
+  .session-bar{padding:5px 14px;font-size:9px}
+}
 </style>
 </head>
 <body>
 
 <div class="header">
-  <div class="logo">O</div>
-  <h1>OpenClaw Assistant</h1>
-  <div class="status-dot" id="statusDot" title="Gateway status"></div>
-  <span class="badge" id="statusBadge">checking...</span>
-</div>
-
-<div class="chat" id="chat">
-  <div class="welcome" id="welcome">
-    <h2>OpenClaw Personal Assistant</h2>
-    <p>Connected to the Overseer AI gateway. Ask anything — plan tasks, write code, check status, or manage your projects.</p>
-    <div class="chips">
-      <div class="chip" onclick="sendChip(this)">Show system status</div>
-      <div class="chip" onclick="sendChip(this)">What can you do?</div>
-      <div class="chip" onclick="sendChip(this)">List active agents</div>
-      <div class="chip" onclick="sendChip(this)">Check costs</div>
+  <div class="logo-mark">O</div>
+  <div class="header-title">OVERSEER <span>/ personal assistant</span></div>
+  <div class="header-right">
+    <div class="session-info">
+      <span id="sessionId">---</span>
+      <span class="count" id="msgCount">0 msgs</span>
+    </div>
+    <div class="status-pill" id="statusPill">
+      <span class="dot"></span>
+      <span id="statusText">INIT</span>
     </div>
   </div>
 </div>
 
-<div class="typing" id="typing"><span></span><span></span><span></span></div>
+<div class="session-bar" id="sessionBar">
+  <span>MODEL: <span id="modelName">gemini-2.5-flash</span></span>
+  <span class="sep">/</span>
+  <span>SESSION: <span id="sessionDisplay">---</span></span>
+  <span class="sep">/</span>
+  <span>EDGE: cloudflare</span>
+</div>
+
+<div class="chat" id="chat">
+  <div class="welcome" id="welcome">
+    <div class="welcome-logo">O</div>
+    <h2>OVERSEER</h2>
+    <p>Your AI agency command interface. Connected to the OpenClaw gateway with 48 live tools — jobs, agents, costs, memory, deployments, and more.</p>
+    <div class="chips">
+      <div class="chip" onclick="sendChip(this)"><span class="chip-icon">&#9881;</span> Agency status</div>
+      <div class="chip" onclick="sendChip(this)"><span class="chip-icon">&#9733;</span> What's running?</div>
+      <div class="chip" onclick="sendChip(this)"><span class="chip-icon">&#36;</span> Cost summary</div>
+      <div class="chip" onclick="sendChip(this)"><span class="chip-icon">&#128218;</span> Search memory</div>
+      <div class="chip" onclick="sendChip(this)"><span class="chip-icon">&#128640;</span> Create a job</div>
+      <div class="chip" onclick="sendChip(this)"><span class="chip-icon">&#128274;</span> List agents</div>
+    </div>
+  </div>
+</div>
+
+<div class="typing" id="typing">
+  <div class="typing-dots"><span></span><span></span><span></span></div>
+  <span class="typing-label" id="typingLabel">thinking...</span>
+</div>
 
 <div class="input-area">
-  <textarea id="input" placeholder="Message OpenClaw..." rows="1"></textarea>
-  <button id="sendBtn" onclick="send()">Send</button>
+  <div class="input-wrap">
+    <textarea id="input" placeholder="Ask Overseer anything..." rows="1"></textarea>
+  </div>
+  <button class="send-btn" id="sendBtn" onclick="send()">SEND</button>
 </div>
 
 <script>
-const chatEl=document.getElementById('chat');
-const inputEl=document.getElementById('input');
-const sendBtn=document.getElementById('sendBtn');
-const typingEl=document.getElementById('typing');
-const welcomeEl=document.getElementById('welcome');
-const statusDot=document.getElementById('statusDot');
-const statusBadge=document.getElementById('statusBadge');
+const $=id=>document.getElementById(id);
+const chatEl=$('chat'),inputEl=$('input'),sendBtn=$('sendBtn');
+const typingEl=$('typing'),welcomeEl=$('welcome');
+const statusPill=$('statusPill'),statusText=$('statusText');
+const typingLabel=$('typingLabel');
+const sessionDisplay=$('sessionDisplay'),msgCountEl=$('msgCount'),sessionIdEl=$('sessionId');
+const modelNameEl=$('modelName');
 
-// Session key — persisted in localStorage
 let sessionKey=localStorage.getItem('oc_session');
 if(!sessionKey){sessionKey='web:'+crypto.randomUUID();localStorage.setItem('oc_session',sessionKey)}
+sessionDisplay.textContent=sessionKey.slice(0,12)+'...';
+sessionIdEl.textContent=sessionKey.slice(4,12);
+let totalMsgs=0;
 
-// Auto-resize textarea
 inputEl.addEventListener('input',()=>{
   inputEl.style.height='auto';
   inputEl.style.height=Math.min(inputEl.scrollHeight,160)+'px';
 });
-
-// Enter to send (Shift+Enter for newline)
-inputEl.addEventListener('keydown',(e)=>{
+inputEl.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}
 });
 
-function sendChip(el){inputEl.value=el.textContent;send()}
+function sendChip(el){inputEl.value=el.textContent.replace(/^[^\\w]+/,'').trim();send()}
 
-function escapeHtml(s){
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
-function formatMsg(text){
-  // Code blocks
-  text=text.replace(/\`\`\`(\\w*?)\\n([\\s\\S]*?)\`\`\`/g,(_,lang,code)=>'<pre><code>'+escapeHtml(code.trim())+'</code></pre>');
+function renderMd(text){
+  // Code blocks with language tags
+  text=text.replace(/\`\`\`(\\w*?)\\n([\\s\\S]*?)\`\`\`/g,(_,lang,code)=>{
+    const tag=lang?'<span class="lang-tag">'+esc(lang)+'</span>':'';
+    return '<pre>'+tag+'<code>'+esc(code.trim())+'</code></pre>';
+  });
   // Inline code
-  text=text.replace(/\`([^\`]+)\`/g,(_,c)=>'<code>'+escapeHtml(c)+'</code>');
-  // Bold
+  text=text.replace(/\`([^\`]+)\`/g,(_,c)=>'<code>'+esc(c)+'</code>');
+  // Headers
+  text=text.replace(/^### (.+)$/gm,'<h3>$1</h3>');
+  text=text.replace(/^## (.+)$/gm,'<h2>$1</h2>');
+  text=text.replace(/^# (.+)$/gm,'<h1>$1</h1>');
+  // Bold & italic
+  text=text.replace(/\\*\\*\\*(.+?)\\*\\*\\*/g,'<strong><em>$1</em></strong>');
   text=text.replace(/\\*\\*(.+?)\\*\\*/g,'<strong>$1</strong>');
+  text=text.replace(/\\*(.+?)\\*/g,'<em>$1</em>');
+  // Links
+  text=text.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // Blockquotes
+  text=text.replace(/^> (.+)$/gm,'<blockquote>$1</blockquote>');
+  // Horizontal rules
+  text=text.replace(/^---$/gm,'<hr>');
+  // Unordered lists
+  text=text.replace(/^[\\-\\*] (.+)$/gm,'<li>$1</li>');
+  text=text.replace(/(<li>.*<\\/li>)/gs,m=>'<ul>'+m+'</ul>');
+  text=text.replace(/<\\/ul>\\s*<ul>/g,'');
+  // Ordered lists
+  text=text.replace(/^\\d+\\. (.+)$/gm,'<li>$1</li>');
+  // Tables
+  text=text.replace(/^\\|(.+)\\|$/gm,(_,row)=>{
+    const cells=row.split('|').map(c=>c.trim());
+    return '<tr>'+cells.map(c=>'<td>'+c+'</td>').join('')+'</tr>';
+  });
+  text=text.replace(/(<tr>.*<\\/tr>)/gs,m=>{
+    let rows=m;
+    // Convert separator row to nothing, first row to th
+    rows=rows.replace(/<tr><td>[-:\\s|]+<\\/td>(<td>[-:\\s|]+<\\/td>)*<\\/tr>/g,'');
+    rows=rows.replace(/<tr>(.*?)<\\/tr>/,(_, r)=>'<thead><tr>'+r.replace(/<td>/g,'<th>').replace(/<\\/td>/g,'</th>')+'</tr></thead>');
+    return '<table>'+rows+'</table>';
+  });
+  // Paragraphs (lines not already wrapped)
+  text=text.replace(/^(?!<[hupoltbr])(\\S.+)$/gm,'<p>$1</p>');
   return text;
 }
 
-function addMsg(role,text){
+const TOOL_CATEGORIES={
+  list_jobs:'jobs',create_job:'jobs',get_job:'jobs',kill_job:'jobs',approve_job:'jobs',
+  get_cost_summary:'costs',
+  get_agency_status:'system',get_runner_status:'system',get_events:'system',
+  list_agents:'agents',spawn_agent:'agents',
+  search_memory:'memory',save_memory:'memory',get_reflections:'memory',
+  list_proposals:'jobs',create_proposal:'jobs',
+  github_repo_info:'github',github_create_issue:'github',
+  web_search:'system',web_fetch:'system',web_scrape:'system',research_task:'system',
+  send_chat_to_gateway:'agents',
+  get_gmail_inbox:'system',get_calendar_today:'system',create_calendar_event:'system',get_calendar_upcoming:'system',list_calendars:'system',trash_emails:'system',label_emails:'system',send_email:'system',get_gmail_labels:'system',
+  shell_execute:'system',git_operations:'github',
+  vercel_deploy:'system',
+  file_read:'system',file_write:'system',file_edit:'system',
+  glob_files:'system',grep_search:'system',
+  compute_sort:'system',compute_stats:'system',compute_math:'system',
+  compute_search:'system',compute_matrix:'system',compute_prime:'system',
+  compute_hash:'system',compute_convert:'system',
+  send_slack_message:'system',security_scan:'system',
+  prediction_market:'system',env_manage:'system',
+  process_manage:'system',install_package:'system',
+};
+const TOOL_ICONS={
+  jobs:'&#9654;',costs:'&#36;',agents:'&#9881;',
+  memory:'&#128218;',github:'&#128025;',system:'&#9881;',
+};
+const TOOL_LABELS={
+  list_jobs:'JOBS',create_job:'CREATE JOB',get_job:'JOB',kill_job:'KILL JOB',
+  approve_job:'APPROVE',get_cost_summary:'COSTS',get_agency_status:'STATUS',
+  get_runner_status:'RUNNER',get_events:'EVENTS',list_agents:'AGENTS',
+  spawn_agent:'SPAWN',search_memory:'MEMORY',save_memory:'SAVE MEM',
+  get_reflections:'REFLECT',list_proposals:'PROPOSALS',create_proposal:'PROPOSAL',
+  github_repo_info:'GITHUB',github_create_issue:'NEW ISSUE',
+  web_search:'SEARCH',web_fetch:'FETCH',web_scrape:'SCRAPE',
+  research_task:'RESEARCH',send_chat_to_gateway:'DELEGATE',
+  get_gmail_inbox:'GMAIL',get_calendar_today:'CALENDAR',create_calendar_event:'CALENDAR',get_calendar_upcoming:'CALENDAR',list_calendars:'CALENDAR',trash_emails:'GMAIL',label_emails:'GMAIL',send_email:'GMAIL',get_gmail_labels:'GMAIL',
+  shell_execute:'SHELL',git_operations:'GIT',vercel_deploy:'DEPLOY',
+  file_read:'FILE',file_write:'WRITE',file_edit:'EDIT',
+  glob_files:'GLOB',grep_search:'GREP',
+  send_slack_message:'SLACK',security_scan:'SECURITY',
+  prediction_market:'MARKETS',env_manage:'ENV',
+  process_manage:'PROCESS',install_package:'INSTALL',
+};
+
+function toolBadgeHtml(toolName){
+  if(!toolName)return '';
+  const cat=TOOL_CATEGORIES[toolName]||'system';
+  const icon=TOOL_ICONS[cat]||'&#9881;';
+  const label=TOOL_LABELS[toolName]||toolName.toUpperCase().replace(/_/g,' ');
+  return '<div class="tool-badge '+cat+'"><span class="tool-icon">'+icon+'</span>'+label+'</div>';
+}
+
+function addMsg(role,text,meta){
   if(welcomeEl)welcomeEl.style.display='none';
-  const div=document.createElement('div');
-  div.className='msg '+role;
-  const meta=document.createElement('div');
-  meta.className='meta';
-  meta.textContent=role==='user'?'You':'Overseer';
-  div.appendChild(meta);
-  const body=document.createElement('div');
-  body.innerHTML=formatMsg(text);
-  div.appendChild(body);
-  chatEl.appendChild(div);
+  const group=document.createElement('div');
+  group.className='msg-group '+role;
+  const label=document.createElement('div');
+  label.className='msg-label';
+  label.textContent=role==='user'?'YOU':'OVERSEER';
+  group.appendChild(label);
+  const bubble=document.createElement('div');
+  bubble.className='msg';
+  let content='';
+  if(role==='bot'&&meta&&meta.tool_used){
+    content+=toolBadgeHtml(meta.tool_used);
+  }
+  content+=renderMd(text);
+  bubble.innerHTML=content;
+  group.appendChild(bubble);
+  chatEl.appendChild(group);
   chatEl.scrollTop=chatEl.scrollHeight;
+  totalMsgs++;
+  msgCountEl.textContent=totalMsgs+' msgs';
 }
 
 let sending=false;
 async function send(){
   const text=inputEl.value.trim();
   if(!text||sending)return;
-  sending=true;
-  sendBtn.disabled=true;
-  inputEl.value='';
-  inputEl.style.height='auto';
+  sending=true;sendBtn.disabled=true;
+  inputEl.value='';inputEl.style.height='auto';
   addMsg('user',text);
+  typingLabel.textContent='thinking...';
   typingEl.classList.add('show');
   chatEl.appendChild(typingEl);
   chatEl.scrollTop=chatEl.scrollHeight;
 
   try{
     const resp=await fetch('/api/chat',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+      method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({message:text,sessionKey})
     });
     const data=await resp.json();
-    if(data.sessionKey)sessionKey=data.sessionKey;
-    localStorage.setItem('oc_session',sessionKey);
+    if(data.sessionKey){sessionKey=data.sessionKey;localStorage.setItem('oc_session',sessionKey)}
+    if(data.model)modelNameEl.textContent=data.model;
+    if(data.sessionMessageCount)msgCountEl.textContent=data.sessionMessageCount+' in session';
+    if(data.tool_used)typingLabel.textContent='called '+data.tool_used+'...';
     const reply=data.response||data.message||data.reply||data.error||'No response';
-    addMsg('bot',reply);
+    addMsg('bot',reply,{tool_used:data.tool_used});
   }catch(err){
-    addMsg('bot','Error: '+err.message);
+    addMsg('bot','Connection error: '+err.message,{});
   }finally{
     typingEl.classList.remove('show');
-    sending=false;
-    sendBtn.disabled=false;
-    inputEl.focus();
+    sending=false;sendBtn.disabled=false;inputEl.focus();
   }
 }
 
@@ -1886,21 +2353,18 @@ async function send(){
     const r=await fetch('/health');
     const d=await r.json();
     if(d.gateway==='ok'){
-      statusBadge.textContent='online';
-      statusBadge.style.background='#3fb950';
+      statusText.textContent='ONLINE';
+      statusPill.className='status-pill';
     }else{
-      statusBadge.textContent='degraded';
-      statusBadge.style.background='#d29922';
-      statusDot.style.background='#d29922';
+      statusText.textContent='DEGRADED';
+      statusPill.className='status-pill degraded';
     }
   }catch{
-    statusBadge.textContent='offline';
-    statusBadge.style.background='#f85149';
-    statusDot.style.background='#f85149';
+    statusText.textContent='OFFLINE';
+    statusPill.className='status-pill offline';
   }
 })();
 
-// Focus input on load
 inputEl.focus();
 </script>
 </body>
