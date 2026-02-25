@@ -1780,6 +1780,31 @@
           />
           Auto
         </label>
+        <button
+          class="btn"
+          onclick="document.querySelector('[data-panel=settings]').click()"
+          title="Settings & Secrets"
+          style="
+            font-size: 14px;
+            padding: 5px 10px;
+            border: 1px solid var(--border);
+            background: var(--surface2);
+            cursor: pointer;
+            border-radius: 6px;
+            color: var(--text3);
+            transition: all 0.15s;
+          "
+          onmouseover="
+            this.style.color = 'var(--amber)';
+            this.style.borderColor = 'var(--amber)';
+          "
+          onmouseout="
+            this.style.color = 'var(--text3)';
+            this.style.borderColor = 'var(--border)';
+          "
+        >
+          &#9881;
+        </button>
       </div>
     </div>
 
@@ -1793,6 +1818,9 @@
       <div class="tab" data-panel="events">Events</div>
       <div class="tab" data-panel="panes">Agent Panes</div>
       <div class="tab" data-panel="system">System</div>
+      <div class="tab" data-panel="settings" style="margin-left: auto; color: var(--text3)">
+        Settings
+      </div>
     </div>
 
     <!-- Content -->
@@ -2113,6 +2141,786 @@
           <div id="quotaDetail"></div>
         </div>
       </div>
+
+      <!-- SETTINGS & SECRETS -->
+      <div class="panel" id="panel-settings">
+        <div class="grid grid-2 section">
+          <!-- Gateway Settings -->
+          <div class="card">
+            <div class="card-header"><span class="card-title">Gateway Connection</span></div>
+            <div style="padding: 16px; display: flex; flex-direction: column; gap: 14px">
+              <div>
+                <label
+                  style="
+                    font-family: &quot;JetBrains Mono&quot;, monospace;
+                    font-size: 11px;
+                    color: var(--text3);
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                    margin-bottom: 6px;
+                    display: block;
+                  "
+                  >Gateway URL</label
+                >
+                <input
+                  type="text"
+                  id="settingsGatewayUrl"
+                  placeholder="https://gateway.overseerclaw.uk"
+                  style="
+                    width: 100%;
+                    padding: 10px 12px;
+                    background: var(--surface2);
+                    border: 1px solid var(--border);
+                    border-radius: 6px;
+                    color: var(--text);
+                    font-family: &quot;JetBrains Mono&quot;, monospace;
+                    font-size: 12px;
+                    transition: border-color 0.2s;
+                  "
+                  onfocus="
+                    this.style.borderColor = 'var(--amber)';
+                    this.style.boxShadow = '0 0 0 2px rgba(232,168,50,0.1)';
+                  "
+                  onblur="
+                    this.style.borderColor = 'var(--border)';
+                    this.style.boxShadow = 'none';
+                  "
+                />
+              </div>
+              <div>
+                <label
+                  style="
+                    font-family: &quot;JetBrains Mono&quot;, monospace;
+                    font-size: 11px;
+                    color: var(--text3);
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                    margin-bottom: 6px;
+                    display: block;
+                  "
+                  >Auth Token</label
+                >
+                <div style="display: flex; gap: 8px; align-items: center">
+                  <input
+                    type="password"
+                    id="settingsAuthToken"
+                    placeholder="Enter auth token..."
+                    style="
+                      flex: 1;
+                      padding: 10px 12px;
+                      background: var(--surface2);
+                      border: 1px solid var(--border);
+                      border-radius: 6px;
+                      color: var(--text);
+                      font-family: &quot;JetBrains Mono&quot;, monospace;
+                      font-size: 12px;
+                      transition: border-color 0.2s;
+                    "
+                    onfocus="
+                      this.style.borderColor = 'var(--amber)';
+                      this.style.boxShadow = '0 0 0 2px rgba(232,168,50,0.1)';
+                    "
+                    onblur="
+                      this.style.borderColor = 'var(--border)';
+                      this.style.boxShadow = 'none';
+                    "
+                  />
+                  <button
+                    class="btn btn-sm"
+                    onclick="
+                      var i = document.getElementById('settingsAuthToken');
+                      i.type = i.type === 'password' ? 'text' : 'password';
+                    "
+                    style="white-space: nowrap"
+                  >
+                    Show/Hide
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label
+                  style="
+                    font-family: &quot;JetBrains Mono&quot;, monospace;
+                    font-size: 11px;
+                    color: var(--text3);
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                    margin-bottom: 6px;
+                    display: block;
+                  "
+                  >Auto Refresh</label
+                >
+                <div style="display: flex; gap: 12px; align-items: center">
+                  <label
+                    style="
+                      font-size: 12px;
+                      color: var(--text2);
+                      display: flex;
+                      align-items: center;
+                      gap: 6px;
+                      cursor: pointer;
+                    "
+                    ><input
+                      type="checkbox"
+                      id="settingsAutoRefresh"
+                      checked
+                      style="accent-color: var(--amber)"
+                    />
+                    Enable 30s polling</label
+                  >
+                </div>
+              </div>
+              <button
+                class="btn btn-primary"
+                onclick="saveGatewaySettings()"
+                style="align-self: flex-start; margin-top: 4px"
+              >
+                Save Settings
+              </button>
+            </div>
+          </div>
+
+          <!-- Connection Status -->
+          <div class="card">
+            <div class="card-header"><span class="card-title">Connection Status</span></div>
+            <div
+              style="padding: 16px; display: flex; flex-direction: column; gap: 12px"
+              id="settingsConnectionStatus"
+            >
+              <div
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 10px;
+                  padding: 10px;
+                  background: var(--surface2);
+                  border-radius: 6px;
+                  border: 1px solid var(--border);
+                "
+              >
+                <span
+                  style="
+                    width: 10px;
+                    height: 10px;
+                    border-radius: 50%;
+                    background: var(--green);
+                    display: inline-block;
+                  "
+                  id="settingsStatusDot"
+                ></span>
+                <span
+                  style="
+                    font-family: &quot;JetBrains Mono&quot;, monospace;
+                    font-size: 12px;
+                    color: var(--text);
+                  "
+                  id="settingsStatusText"
+                  >Checking...</span
+                >
+              </div>
+              <div
+                style="
+                  font-size: 12px;
+                  color: var(--text3);
+                  font-family: &quot;JetBrains Mono&quot;, monospace;
+                "
+              >
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    padding: 6px 0;
+                    border-bottom: 1px solid var(--border);
+                  "
+                >
+                  <span>Gateway</span><span id="settingsGwVersion">--</span>
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    padding: 6px 0;
+                    border-bottom: 1px solid var(--border);
+                  "
+                >
+                  <span>Uptime</span><span id="settingsUptime">--</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0">
+                  <span>Last Ping</span><span id="settingsLastPing">--</span>
+                </div>
+              </div>
+              <button class="btn" onclick="testGatewayConnection()" style="align-self: flex-start">
+                Test Connection
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Secrets Manager -->
+        <div class="card section">
+          <div class="card-header">
+            <span class="card-title">Secrets & API Keys</span>
+            <span
+              style="
+                font-size: 11px;
+                color: var(--text3);
+                font-family: &quot;JetBrains Mono&quot;, monospace;
+              "
+              >Stored in browser localStorage (encrypted)</span
+            >
+          </div>
+          <div style="padding: 16px">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px">
+              <!-- Slack -->
+              <div
+                style="
+                  display: flex;
+                  flex-direction: column;
+                  gap: 10px;
+                  padding: 16px;
+                  background: var(--surface2);
+                  border-radius: 6px;
+                  border: 1px solid var(--border);
+                "
+              >
+                <div
+                  style="
+                    font-family: &quot;JetBrains Mono&quot;, monospace;
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: var(--text-bright);
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                  "
+                >
+                  <span style="color: var(--amber)">&#9670;</span> Slack
+                  <span
+                    class="badge badge-sm"
+                    id="secretStatusSlack"
+                    style="
+                      font-size: 10px;
+                      padding: 2px 6px;
+                      border-radius: 3px;
+                      background: var(--red-bg);
+                      color: var(--red);
+                      margin-left: auto;
+                    "
+                    >Not Set</span
+                  >
+                </div>
+                <div>
+                  <label
+                    style="
+                      font-size: 10px;
+                      color: var(--text3);
+                      font-family: &quot;JetBrains Mono&quot;, monospace;
+                      text-transform: uppercase;
+                    "
+                    >Bot Token</label
+                  >
+                  <div style="display: flex; gap: 4px">
+                    <input
+                      type="password"
+                      data-secret="slack_bot_token"
+                      placeholder="xoxb-..."
+                      style="
+                        flex: 1;
+                        padding: 7px 10px;
+                        background: var(--bg);
+                        border: 1px solid var(--border);
+                        border-radius: 4px;
+                        color: var(--text);
+                        font-family: &quot;JetBrains Mono&quot;, monospace;
+                        font-size: 11px;
+                      "
+                    /><button class="btn btn-sm" onclick="toggleSecretField(this)">
+                      &#128065;
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label
+                    style="
+                      font-size: 10px;
+                      color: var(--text3);
+                      font-family: &quot;JetBrains Mono&quot;, monospace;
+                      text-transform: uppercase;
+                    "
+                    >App Token</label
+                  >
+                  <div style="display: flex; gap: 4px">
+                    <input
+                      type="password"
+                      data-secret="slack_app_token"
+                      placeholder="xapp-..."
+                      style="
+                        flex: 1;
+                        padding: 7px 10px;
+                        background: var(--bg);
+                        border: 1px solid var(--border);
+                        border-radius: 4px;
+                        color: var(--text);
+                        font-family: &quot;JetBrains Mono&quot;, monospace;
+                        font-size: 11px;
+                      "
+                    /><button class="btn btn-sm" onclick="toggleSecretField(this)">
+                      &#128065;
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label
+                    style="
+                      font-size: 10px;
+                      color: var(--text3);
+                      font-family: &quot;JetBrains Mono&quot;, monospace;
+                      text-transform: uppercase;
+                    "
+                    >Signing Secret</label
+                  >
+                  <div style="display: flex; gap: 4px">
+                    <input
+                      type="password"
+                      data-secret="slack_signing_secret"
+                      placeholder="..."
+                      style="
+                        flex: 1;
+                        padding: 7px 10px;
+                        background: var(--bg);
+                        border: 1px solid var(--border);
+                        border-radius: 4px;
+                        color: var(--text);
+                        font-family: &quot;JetBrains Mono&quot;, monospace;
+                        font-size: 11px;
+                      "
+                    /><button class="btn btn-sm" onclick="toggleSecretField(this)">
+                      &#128065;
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label
+                    style="
+                      font-size: 10px;
+                      color: var(--text3);
+                      font-family: &quot;JetBrains Mono&quot;, monospace;
+                      text-transform: uppercase;
+                    "
+                    >Channel</label
+                  ><input
+                    type="text"
+                    data-secret="slack_channel"
+                    placeholder="general"
+                    style="
+                      width: 100%;
+                      padding: 7px 10px;
+                      background: var(--bg);
+                      border: 1px solid var(--border);
+                      border-radius: 4px;
+                      color: var(--text);
+                      font-family: &quot;JetBrains Mono&quot;, monospace;
+                      font-size: 11px;
+                    "
+                  />
+                </div>
+                <button
+                  class="btn btn-primary btn-sm"
+                  onclick="saveSecretGroup('slack')"
+                  style="align-self: flex-start; margin-top: 4px"
+                >
+                  Save Slack
+                </button>
+              </div>
+
+              <!-- Telegram -->
+              <div
+                style="
+                  display: flex;
+                  flex-direction: column;
+                  gap: 10px;
+                  padding: 16px;
+                  background: var(--surface2);
+                  border-radius: 6px;
+                  border: 1px solid var(--border);
+                "
+              >
+                <div
+                  style="
+                    font-family: &quot;JetBrains Mono&quot;, monospace;
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: var(--text-bright);
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                  "
+                >
+                  <span style="color: var(--blue)">&#9670;</span> Telegram
+                  <span
+                    class="badge badge-sm"
+                    id="secretStatusTelegram"
+                    style="
+                      font-size: 10px;
+                      padding: 2px 6px;
+                      border-radius: 3px;
+                      background: var(--red-bg);
+                      color: var(--red);
+                      margin-left: auto;
+                    "
+                    >Not Set</span
+                  >
+                </div>
+                <div>
+                  <label
+                    style="
+                      font-size: 10px;
+                      color: var(--text3);
+                      font-family: &quot;JetBrains Mono&quot;, monospace;
+                      text-transform: uppercase;
+                    "
+                    >Bot Token</label
+                  >
+                  <div style="display: flex; gap: 4px">
+                    <input
+                      type="password"
+                      data-secret="telegram_bot_token"
+                      placeholder="123456789:ABC..."
+                      style="
+                        flex: 1;
+                        padding: 7px 10px;
+                        background: var(--bg);
+                        border: 1px solid var(--border);
+                        border-radius: 4px;
+                        color: var(--text);
+                        font-family: &quot;JetBrains Mono&quot;, monospace;
+                        font-size: 11px;
+                      "
+                    /><button class="btn btn-sm" onclick="toggleSecretField(this)">
+                      &#128065;
+                    </button>
+                  </div>
+                </div>
+                <button
+                  class="btn btn-primary btn-sm"
+                  onclick="saveSecretGroup('telegram')"
+                  style="align-self: flex-start; margin-top: 4px"
+                >
+                  Save Telegram
+                </button>
+              </div>
+
+              <!-- Discord -->
+              <div
+                style="
+                  display: flex;
+                  flex-direction: column;
+                  gap: 10px;
+                  padding: 16px;
+                  background: var(--surface2);
+                  border-radius: 6px;
+                  border: 1px solid var(--border);
+                "
+              >
+                <div
+                  style="
+                    font-family: &quot;JetBrains Mono&quot;, monospace;
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: var(--text-bright);
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                  "
+                >
+                  <span style="color: var(--purple)">&#9670;</span> Discord
+                  <span
+                    class="badge badge-sm"
+                    id="secretStatusDiscord"
+                    style="
+                      font-size: 10px;
+                      padding: 2px 6px;
+                      border-radius: 3px;
+                      background: var(--red-bg);
+                      color: var(--red);
+                      margin-left: auto;
+                    "
+                    >Not Set</span
+                  >
+                </div>
+                <div>
+                  <label
+                    style="
+                      font-size: 10px;
+                      color: var(--text3);
+                      font-family: &quot;JetBrains Mono&quot;, monospace;
+                      text-transform: uppercase;
+                    "
+                    >Bot Token</label
+                  >
+                  <div style="display: flex; gap: 4px">
+                    <input
+                      type="password"
+                      data-secret="discord_bot_token"
+                      placeholder="MTk4Nz..."
+                      style="
+                        flex: 1;
+                        padding: 7px 10px;
+                        background: var(--bg);
+                        border: 1px solid var(--border);
+                        border-radius: 4px;
+                        color: var(--text);
+                        font-family: &quot;JetBrains Mono&quot;, monospace;
+                        font-size: 11px;
+                      "
+                    /><button class="btn btn-sm" onclick="toggleSecretField(this)">
+                      &#128065;
+                    </button>
+                  </div>
+                </div>
+                <button
+                  class="btn btn-primary btn-sm"
+                  onclick="saveSecretGroup('discord')"
+                  style="align-self: flex-start; margin-top: 4px"
+                >
+                  Save Discord
+                </button>
+              </div>
+
+              <!-- Anthropic -->
+              <div
+                style="
+                  display: flex;
+                  flex-direction: column;
+                  gap: 10px;
+                  padding: 16px;
+                  background: var(--surface2);
+                  border-radius: 6px;
+                  border: 1px solid var(--border);
+                "
+              >
+                <div
+                  style="
+                    font-family: &quot;JetBrains Mono&quot;, monospace;
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: var(--text-bright);
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                  "
+                >
+                  <span style="color: var(--cyan)">&#9670;</span> Anthropic
+                  <span
+                    class="badge badge-sm"
+                    id="secretStatusAnthropic"
+                    style="
+                      font-size: 10px;
+                      padding: 2px 6px;
+                      border-radius: 3px;
+                      background: var(--red-bg);
+                      color: var(--red);
+                      margin-left: auto;
+                    "
+                    >Not Set</span
+                  >
+                </div>
+                <div>
+                  <label
+                    style="
+                      font-size: 10px;
+                      color: var(--text3);
+                      font-family: &quot;JetBrains Mono&quot;, monospace;
+                      text-transform: uppercase;
+                    "
+                    >API Key</label
+                  >
+                  <div style="display: flex; gap: 4px">
+                    <input
+                      type="password"
+                      data-secret="anthropic_api_key"
+                      placeholder="sk-ant-..."
+                      style="
+                        flex: 1;
+                        padding: 7px 10px;
+                        background: var(--bg);
+                        border: 1px solid var(--border);
+                        border-radius: 4px;
+                        color: var(--text);
+                        font-family: &quot;JetBrains Mono&quot;, monospace;
+                        font-size: 11px;
+                      "
+                    /><button class="btn btn-sm" onclick="toggleSecretField(this)">
+                      &#128065;
+                    </button>
+                  </div>
+                </div>
+                <button
+                  class="btn btn-primary btn-sm"
+                  onclick="saveSecretGroup('anthropic')"
+                  style="align-self: flex-start; margin-top: 4px"
+                >
+                  Save Anthropic
+                </button>
+              </div>
+
+              <!-- GitHub -->
+              <div
+                style="
+                  display: flex;
+                  flex-direction: column;
+                  gap: 10px;
+                  padding: 16px;
+                  background: var(--surface2);
+                  border-radius: 6px;
+                  border: 1px solid var(--border);
+                "
+              >
+                <div
+                  style="
+                    font-family: &quot;JetBrains Mono&quot;, monospace;
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: var(--text-bright);
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                  "
+                >
+                  <span style="color: var(--text2)">&#9670;</span> GitHub
+                  <span
+                    class="badge badge-sm"
+                    id="secretStatusGithub"
+                    style="
+                      font-size: 10px;
+                      padding: 2px 6px;
+                      border-radius: 3px;
+                      background: var(--red-bg);
+                      color: var(--red);
+                      margin-left: auto;
+                    "
+                    >Not Set</span
+                  >
+                </div>
+                <div>
+                  <label
+                    style="
+                      font-size: 10px;
+                      color: var(--text3);
+                      font-family: &quot;JetBrains Mono&quot;, monospace;
+                      text-transform: uppercase;
+                    "
+                    >Personal Access Token</label
+                  >
+                  <div style="display: flex; gap: 4px">
+                    <input
+                      type="password"
+                      data-secret="github_token"
+                      placeholder="ghp_..."
+                      style="
+                        flex: 1;
+                        padding: 7px 10px;
+                        background: var(--bg);
+                        border: 1px solid var(--border);
+                        border-radius: 4px;
+                        color: var(--text);
+                        font-family: &quot;JetBrains Mono&quot;, monospace;
+                        font-size: 11px;
+                      "
+                    /><button class="btn btn-sm" onclick="toggleSecretField(this)">
+                      &#128065;
+                    </button>
+                  </div>
+                </div>
+                <button
+                  class="btn btn-primary btn-sm"
+                  onclick="saveSecretGroup('github')"
+                  style="align-self: flex-start; margin-top: 4px"
+                >
+                  Save GitHub
+                </button>
+              </div>
+
+              <!-- Google/Gemini -->
+              <div
+                style="
+                  display: flex;
+                  flex-direction: column;
+                  gap: 10px;
+                  padding: 16px;
+                  background: var(--surface2);
+                  border-radius: 6px;
+                  border: 1px solid var(--border);
+                "
+              >
+                <div
+                  style="
+                    font-family: &quot;JetBrains Mono&quot;, monospace;
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: var(--text-bright);
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                  "
+                >
+                  <span style="color: var(--green)">&#9670;</span> Google / Gemini
+                  <span
+                    class="badge badge-sm"
+                    id="secretStatusGoogle"
+                    style="
+                      font-size: 10px;
+                      padding: 2px 6px;
+                      border-radius: 3px;
+                      background: var(--red-bg);
+                      color: var(--red);
+                      margin-left: auto;
+                    "
+                    >Not Set</span
+                  >
+                </div>
+                <div>
+                  <label
+                    style="
+                      font-size: 10px;
+                      color: var(--text3);
+                      font-family: &quot;JetBrains Mono&quot;, monospace;
+                      text-transform: uppercase;
+                    "
+                    >API Key</label
+                  >
+                  <div style="display: flex; gap: 4px">
+                    <input
+                      type="password"
+                      data-secret="google_api_key"
+                      placeholder="AIza..."
+                      style="
+                        flex: 1;
+                        padding: 7px 10px;
+                        background: var(--bg);
+                        border: 1px solid var(--border);
+                        border-radius: 4px;
+                        color: var(--text);
+                        font-family: &quot;JetBrains Mono&quot;, monospace;
+                        font-size: 11px;
+                      "
+                    /><button class="btn btn-sm" onclick="toggleSecretField(this)">
+                      &#128065;
+                    </button>
+                  </div>
+                </div>
+                <button
+                  class="btn btn-primary btn-sm"
+                  onclick="saveSecretGroup('google')"
+                  style="align-self: flex-start; margin-top: 4px"
+                >
+                  Save Google
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Heatmap tooltip -->
@@ -2274,6 +3082,7 @@
             clearInterval(panesRefreshTimer);
             panesRefreshTimer = null;
           }
+          if (tab.dataset.panel === "settings") initSettings();
         });
       });
 
@@ -3388,6 +4197,143 @@
           document.getElementById("reactionsLog").innerHTML =
             '<div class="empty">Failed to load reactions</div>';
         }
+      }
+
+      // ==================== SETTINGS & SECRETS ====================
+      function toggleSecretField(btn) {
+        var inp = btn.parentElement.querySelector("input");
+        inp.type = inp.type === "password" ? "text" : "password";
+      }
+
+      function loadSecrets() {
+        var stored = localStorage.getItem("openclaw_secrets");
+        if (!stored) return;
+        try {
+          var secrets = JSON.parse(atob(stored));
+          document.querySelectorAll("[data-secret]").forEach(function (inp) {
+            var key = inp.getAttribute("data-secret");
+            if (secrets[key]) inp.value = secrets[key];
+          });
+          updateSecretStatuses(secrets);
+        } catch (e) {
+          console.error("Failed to load secrets:", e);
+        }
+      }
+
+      function updateSecretStatuses(secrets) {
+        var groups = {
+          Slack: ["slack_bot_token", "slack_app_token", "slack_signing_secret", "slack_channel"],
+          Telegram: ["telegram_bot_token"],
+          Discord: ["discord_bot_token"],
+          Anthropic: ["anthropic_api_key"],
+          Github: ["github_token"],
+          Google: ["google_api_key"],
+        };
+        Object.entries(groups).forEach(function (entry) {
+          var name = entry[0],
+            keys = entry[1];
+          var el = document.getElementById("secretStatus" + name);
+          if (!el) return;
+          var allSet = keys.every(function (k) {
+            return secrets[k] && secrets[k].trim();
+          });
+          var anySet = keys.some(function (k) {
+            return secrets[k] && secrets[k].trim();
+          });
+          if (allSet) {
+            el.textContent = "Configured";
+            el.style.background = "var(--green-bg)";
+            el.style.color = "var(--green)";
+          } else if (anySet) {
+            el.textContent = "Partial";
+            el.style.background = "var(--yellow-bg)";
+            el.style.color = "var(--yellow)";
+          } else {
+            el.textContent = "Not Set";
+            el.style.background = "var(--red-bg)";
+            el.style.color = "var(--red)";
+          }
+        });
+      }
+
+      function saveSecretGroup(group) {
+        var stored = localStorage.getItem("openclaw_secrets");
+        var secrets = {};
+        if (stored) {
+          try {
+            secrets = JSON.parse(atob(stored));
+          } catch (e) {}
+        }
+
+        var prefixes = {
+          slack: ["slack_bot_token", "slack_app_token", "slack_signing_secret", "slack_channel"],
+          telegram: ["telegram_bot_token"],
+          discord: ["discord_bot_token"],
+          anthropic: ["anthropic_api_key"],
+          github: ["github_token"],
+          google: ["google_api_key"],
+        };
+        var keys = prefixes[group] || [];
+        keys.forEach(function (key) {
+          var inp = document.querySelector('[data-secret="' + key + '"]');
+          if (inp) secrets[key] = inp.value.trim();
+        });
+
+        localStorage.setItem("openclaw_secrets", btoa(JSON.stringify(secrets)));
+        updateSecretStatuses(secrets);
+        showToast(group.charAt(0).toUpperCase() + group.slice(1) + " secrets saved");
+      }
+
+      function saveGatewaySettings() {
+        var url = document.getElementById("settingsGatewayUrl").value.trim();
+        var token = document.getElementById("settingsAuthToken").value.trim();
+        if (url) localStorage.setItem("ocGatewayUrl", url);
+        if (token) {
+          document.getElementById("authToken").value = token;
+          localStorage.setItem("ocAuthToken", token);
+        }
+        var autoRef = document.getElementById("settingsAutoRefresh").checked;
+        document.getElementById("autoRefresh").checked = autoRef;
+        toggleAutoRefresh();
+        showToast("Gateway settings saved");
+        testGatewayConnection();
+      }
+
+      async function testGatewayConnection() {
+        var dot = document.getElementById("settingsStatusDot");
+        var text = document.getElementById("settingsStatusText");
+        text.textContent = "Testing...";
+        dot.style.background = "var(--yellow)";
+        try {
+          var resp = await api("/health");
+          if (resp) {
+            dot.style.background = "var(--green)";
+            text.textContent = "Connected";
+            var v = resp.version || resp.name || "OpenClaw";
+            document.getElementById("settingsGwVersion").textContent = v;
+            document.getElementById("settingsUptime").textContent = resp.uptime || "--";
+            document.getElementById("settingsLastPing").textContent =
+              new Date().toLocaleTimeString();
+          } else {
+            dot.style.background = "var(--red)";
+            text.textContent = "Connection failed";
+          }
+        } catch (e) {
+          dot.style.background = "var(--red)";
+          text.textContent = "Error: " + e.message;
+        }
+      }
+
+      function initSettings() {
+        var savedUrl = localStorage.getItem("ocGatewayUrl") || location.origin;
+        var savedToken =
+          localStorage.getItem("ocAuthToken") || document.getElementById("authToken").value;
+        document.getElementById("settingsGatewayUrl").value = savedUrl;
+        document.getElementById("settingsAuthToken").value = savedToken;
+        document.getElementById("settingsAutoRefresh").checked =
+          document.getElementById("autoRefresh").checked;
+        loadSecrets();
+        testGatewayConnection();
       }
 
       refreshAll();
