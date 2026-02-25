@@ -593,7 +593,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -3699,6 +3699,57 @@ async def approve_job(job_id: str, request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# REFLEXION LOOP — Self-improving agent memory
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/reflections")
+async def api_list_reflections(request: Request):
+    """List all reflections, optionally filtered by project."""
+    try:
+        from reflexion import list_reflections
+        project = request.query_params.get("project")
+        limit = int(request.query_params.get("limit", "50"))
+        refs = list_reflections(project=project, limit=limit)
+        return {"reflections": refs, "total": len(refs)}
+    except Exception as e:
+        logger.error(f"Reflections list error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/reflections/stats")
+async def api_reflections_stats():
+    """Get reflection statistics."""
+    try:
+        from reflexion import get_stats
+        return get_stats()
+    except Exception as e:
+        logger.error(f"Reflections stats error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/reflections/search")
+async def api_search_reflections(request: Request):
+    """Search reflections for a task description."""
+    try:
+        from reflexion import search_reflections, format_reflections_for_prompt
+        data = await request.json()
+        task = data.get("task", "")
+        project = data.get("project")
+        limit = data.get("limit", 3)
+        if not task:
+            return JSONResponse({"error": "task required"}, status_code=400)
+        refs = search_reflections(task, project=project, limit=limit)
+        return {
+            "reflections": refs,
+            "total": len(refs),
+            "formatted": format_reflections_for_prompt(refs),
+        }
+    except Exception as e:
+        logger.error(f"Reflections search error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # CLOSED LOOP — Proposals, Auto-Approval, Events, Policy
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -3767,13 +3818,49 @@ async def api_get_policy():
 
 
 @app.get("/api/events")
-async def api_get_events(limit: int = 50, event_type: Optional[str] = None):
-    """Get recent events"""
+async def api_get_events(limit: int = 50, event_type: Optional[str] = None, since: Optional[str] = None):
+    """Get recent events. Optional ?since= ISO timestamp filter."""
     try:
         engine = get_event_engine()
-        if not engine:
-            return {"events": [], "total": 0}
-        events = engine.get_recent_events(limit=limit, event_type=event_type)
+        # Also read from persistent file if engine is empty
+        events = []
+        if engine:
+            events = engine.get_recent_events(limit=200, event_type=event_type)
+
+        # Supplement from events.jsonl if we have few in-memory events
+        if len(events) < limit:
+            events_file = os.path.join(DATA_DIR, "events", "events.jsonl")
+            if os.path.exists(events_file):
+                with open(events_file) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            evt = json.loads(line)
+                            if event_type and evt.get("event_type") != event_type:
+                                continue
+                            events.append(evt)
+                        except:
+                            continue
+
+        # Deduplicate by event_id
+        seen = set()
+        unique = []
+        for e in events:
+            eid = e.get("event_id") or e.get("id") or id(e)
+            if eid not in seen:
+                seen.add(eid)
+                unique.append(e)
+        events = unique
+
+        # Filter by since timestamp
+        if since:
+            events = [e for e in events if (e.get("timestamp", "") or "") > since]
+
+        # Sort by timestamp descending, limit
+        events.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+        events = events[:limit]
         return {"events": events, "total": len(events)}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -3973,6 +4060,166 @@ async def oauth_callback(code: str = None, error: str = None):
     if code:
         return await oauth_exchange(code=code)
     return HTMLResponse("<h1>Missing code</h1>", status_code=400)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# GMAIL & CALENDAR — Read-only endpoints for PA Worker
+# ═══════════════════════════════════════════════════════════════════════
+
+def _get_google_creds():
+    """Load and refresh Google OAuth credentials."""
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request as GRequest
+
+    token_path = os.path.join(GOOGLE_TOKEN_DIR, "token.json")
+    if not os.path.exists(token_path):
+        raise HTTPException(status_code=500, detail="Google token not found. Run /oauth/start first.")
+
+    with open(token_path) as f:
+        token_data = json.load(f)
+
+    # Merge client_id/client_secret from credentials.json if missing
+    if "client_id" not in token_data or "client_secret" not in token_data:
+        with open(GOOGLE_CREDS_FILE) as f:
+            creds_data = json.load(f)
+        installed = creds_data.get("installed", creds_data.get("web", {}))
+        token_data["client_id"] = installed["client_id"]
+        token_data["client_secret"] = installed["client_secret"]
+        token_data["token_uri"] = installed.get("token_uri", "https://oauth2.googleapis.com/token")
+        # Save merged version for future loads
+        with open(token_path, "w") as f:
+            json.dump(token_data, f, indent=2)
+
+    creds = Credentials.from_authorized_user_info(token_data, GOOGLE_SCOPES)
+    if creds.expired and creds.refresh_token:
+        creds.refresh(GRequest())
+        # Save refreshed token
+        with open(token_path, "w") as f:
+            f.write(creds.to_json())
+    return creds
+
+
+@app.get("/api/gmail/inbox")
+async def api_gmail_inbox(limit: int = 10, unread_only: bool = True):
+    """Get Gmail inbox messages. Returns subject, from, snippet, date, read status."""
+    try:
+        from googleapiclient.discovery import build
+        creds = _get_google_creds()
+        service = build("gmail", "v1", credentials=creds)
+
+        query = "in:inbox"
+        if unread_only:
+            query += " is:unread"
+
+        results = service.users().messages().list(
+            userId="me", q=query, maxResults=limit
+        ).execute()
+        msg_ids = results.get("messages", [])
+
+        messages = []
+        for msg_ref in msg_ids[:limit]:
+            msg = service.users().messages().get(
+                userId="me", id=msg_ref["id"], format="metadata",
+                metadataHeaders=["From", "Subject", "Date"]
+            ).execute()
+            headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
+            messages.append({
+                "id": msg["id"],
+                "from": headers.get("From", ""),
+                "subject": headers.get("Subject", "(no subject)"),
+                "snippet": msg.get("snippet", ""),
+                "date": headers.get("Date", ""),
+                "is_read": "UNREAD" not in msg.get("labelIds", []),
+            })
+
+        return {"messages": messages, "total": len(messages)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Gmail inbox error: {e}")
+        return JSONResponse({"error": str(e), "messages": []}, status_code=500)
+
+
+@app.get("/api/calendar/today")
+async def api_calendar_today():
+    """Get today's calendar events."""
+    try:
+        from googleapiclient.discovery import build
+        creds = _get_google_creds()
+        service = build("calendar", "v3", credentials=creds)
+
+        now = datetime.now(timezone.utc)
+        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0).isoformat()
+
+        results = service.events().list(
+            calendarId="primary",
+            timeMin=start_of_day,
+            timeMax=end_of_day,
+            singleEvents=True,
+            orderBy="startTime",
+            maxResults=20,
+        ).execute()
+
+        events = []
+        for item in results.get("items", []):
+            start = item.get("start", {})
+            end = item.get("end", {})
+            events.append({
+                "id": item.get("id", ""),
+                "summary": item.get("summary", "(no title)"),
+                "start": start.get("dateTime", start.get("date", "")),
+                "end": end.get("dateTime", end.get("date", "")),
+                "location": item.get("location", ""),
+            })
+
+        return {"events": events, "total": len(events)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Calendar today error: {e}")
+        return JSONResponse({"error": str(e), "events": []}, status_code=500)
+
+
+@app.get("/api/calendar/upcoming")
+async def api_calendar_upcoming(days: int = 7):
+    """Get upcoming calendar events for the next N days."""
+    try:
+        from googleapiclient.discovery import build
+        creds = _get_google_creds()
+        service = build("calendar", "v3", credentials=creds)
+
+        now = datetime.now(timezone.utc)
+        from datetime import timedelta
+        end = now + timedelta(days=days)
+
+        results = service.events().list(
+            calendarId="primary",
+            timeMin=now.isoformat(),
+            timeMax=end.isoformat(),
+            singleEvents=True,
+            orderBy="startTime",
+            maxResults=50,
+        ).execute()
+
+        events = []
+        for item in results.get("items", []):
+            start = item.get("start", {})
+            end_t = item.get("end", {})
+            events.append({
+                "id": item.get("id", ""),
+                "summary": item.get("summary", "(no title)"),
+                "start": start.get("dateTime", start.get("date", "")),
+                "end": end_t.get("dateTime", end_t.get("date", "")),
+                "location": item.get("location", ""),
+            })
+
+        return {"events": events, "total": len(events)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Calendar upcoming error: {e}")
+        return JSONResponse({"error": str(e), "events": []}, status_code=500)
 
 
 # ═══════════════════════════════════════════════════════════════════════

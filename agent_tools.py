@@ -721,6 +721,25 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    {
+        "name": "get_reflections",
+        "description": "Get past job reflections (learnings from completed/failed jobs). Returns stats, recent reflections, or searches for reflections relevant to a task. Use to learn from past experience before starting work.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["stats", "list", "search"],
+                    "description": "Action: stats (summary), list (recent reflections), search (find relevant reflections for a task)"
+                },
+                "task": {"type": "string", "description": "Task description to search for (required for search action)"},
+                "project": {"type": "string", "description": "Filter by project name (optional)"},
+                "limit": {"type": "integer", "description": "Max reflections to return (default: 5)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -847,6 +866,9 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             return _prediction_market(tool_input["action"], tool_input.get("query", ""),
                                       tool_input.get("market_id", ""), tool_input.get("tag", ""),
                                       tool_input.get("limit", 10))
+        elif tool_name == "get_reflections":
+            return _get_reflections(tool_input["action"], tool_input.get("task", ""),
+                                    tool_input.get("project"), tool_input.get("limit", 5))
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:
@@ -2521,3 +2543,40 @@ def _prediction_market(action: str, query: str, market_id: str, tag: str, limit:
         return "Error: polymarket CLI not installed. Run: curl -sSL https://raw.githubusercontent.com/Polymarket/polymarket-cli/main/install.sh | sh"
     except Exception as e:
         return f"Prediction market error: {e}"
+
+
+def _get_reflections(action: str, task: str = "", project: str = None, limit: int = 5) -> str:
+    """Get past job reflections — learnings from completed/failed jobs."""
+    try:
+        from reflexion import get_stats, list_reflections, search_reflections, format_reflections_for_prompt
+
+        if action == "stats":
+            stats = get_stats()
+            return json.dumps(stats, indent=2)
+
+        elif action == "list":
+            refs = list_reflections(project=project, limit=limit)
+            if not refs:
+                return "No reflections found."
+            lines = [f"Reflections ({len(refs)} total):"]
+            for r in refs:
+                outcome = "SUCCESS" if r.get("outcome") == "success" else "FAILED"
+                lines.append(
+                    f"  [{outcome}] {r.get('job_id', '?')} — {r.get('task', '?')[:80]} "
+                    f"(project={r.get('project', '?')}, {r.get('duration_seconds', 0):.0f}s)"
+                )
+            return "\n".join(lines)
+
+        elif action == "search":
+            if not task:
+                return "Error: 'task' parameter required for search action"
+            refs = search_reflections(task, project=project, limit=limit)
+            if not refs:
+                return "No relevant reflections found for this task."
+            return format_reflections_for_prompt(refs)
+
+        else:
+            return f"Unknown action: {action}. Use: stats, list, search"
+
+    except Exception as e:
+        return f"Reflections error: {e}"

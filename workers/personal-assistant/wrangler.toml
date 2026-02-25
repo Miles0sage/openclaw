@@ -2,6 +2,7 @@ name = "personal-assistant"
 main = "src/index.ts"
 compatibility_date = "2026-02-19"
 compatibility_flags = ["nodejs_compat"]
+workers_dev = true
 
 # Environment variables (override via wrangler secret for production)
 [vars]
@@ -9,6 +10,7 @@ GATEWAY_URL = "https://gateway.overseerclaw.uk"
 GATEWAY_TOKEN = "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"
 ENVIRONMENT = "development"
 RATE_LIMIT_PER_MINUTE = "30"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 # D1 Database binding (session storage)
 [[d1_databases]]
@@ -27,8 +29,27 @@ id = "a4119f70fe7d42ecb8b8b49569c11e32"
 
 [env.production]
 name = "personal-assistant"
-vars = { ENVIRONMENT = "production" }
 routes = [{ pattern = "assistant.overseerclaw.uk/*", zone_name = "overseerclaw.uk" }]
+
+[env.production.vars]
+ENVIRONMENT = "production"
+GATEWAY_URL = "https://gateway.overseerclaw.uk"
+GATEWAY_TOKEN = "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"
+RATE_LIMIT_PER_MINUTE = "30"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
+
+[[env.production.kv_namespaces]]
+binding = "KV_CACHE"
+id = "35795036d1084b8284a8c57f4b170618"
+
+[[env.production.kv_namespaces]]
+binding = "KV_SESSIONS"
+id = "a4119f70fe7d42ecb8b8b49569c11e32"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "personal-assistant"
+database_id = "9cf10366-f49c-4532-89c2-8859e1ed9673"
 
 [env.development]
 name = "personal-assistant-dev"

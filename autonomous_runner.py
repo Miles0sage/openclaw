@@ -38,6 +38,7 @@ from typing import Optional
 from agent_tools import execute_tool, AGENT_TOOLS
 from alerts import send_telegram
 from job_manager import get_job, update_job_status, list_jobs, get_pending_jobs
+from reflexion import save_reflection, search_reflections, format_reflections_for_prompt
 # Cost tracking — import from cost_tracker (single source of truth)
 from cost_tracker import (
     calculate_cost,
@@ -627,6 +628,12 @@ async def _research_phase(job: dict, agent_key: str, progress: JobProgress,
     project = job.get("project", "unknown")
     workspace = progress.workspace
 
+    # Inject past experience from reflexion loop
+    past_reflections = search_reflections(task, project=project, limit=3)
+    reflexion_context = format_reflections_for_prompt(past_reflections)
+    if reflexion_context:
+        logger.info(f"Job {job['id']}: Injecting {len(past_reflections)} past reflections into research prompt")
+
     prompt = (
         f"You are researching a task before planning and executing it.\n\n"
         f"PROJECT: {project}\n"
@@ -634,6 +641,10 @@ async def _research_phase(job: dict, agent_key: str, progress: JobProgress,
         f"WORKSPACE DIRECTORY: {workspace}\n"
         f"This is your isolated working directory for this job. Any files you need to\n"
         f"clone, download, or create during research should go inside {workspace}/\n\n"
+    )
+    if reflexion_context:
+        prompt += f"{reflexion_context}\n\n"
+    prompt += (
         f"Gather all the context you need:\n"
         f"1. Use research_task to understand the domain/technology involved\n"
         f"2. Use glob_files and grep_search to find relevant existing code\n"
@@ -2019,6 +2030,20 @@ class AutonomousRunner:
             )
         except Exception as si_err:
             logger.warning(f"Failed to log self-improve metric: {si_err}")
+
+        # Save reflexion for future jobs
+        try:
+            elapsed_secs = time.time() - (getattr(progress, '_start_time', None) or time.time())
+            outcome = "success" if result.get("success") else "failed"
+            save_reflection(
+                job_id=job_id,
+                job_data=job,
+                outcome=outcome,
+                duration_seconds=abs(elapsed_secs),
+            )
+            logger.info(f"Job {job_id}: Reflexion saved (outcome={outcome})")
+        except Exception as ref_err:
+            logger.warning(f"Failed to save reflexion: {ref_err}")
 
         return result
 
