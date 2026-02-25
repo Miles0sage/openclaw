@@ -462,17 +462,22 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                 # Anthropic tool-use path (original)
                 # Cache the FIRST user message only (iteration 1) — avoids
                 # accumulating >4 cache_control blocks across tool-loop iterations.
+                # Anthropic allows max 4 cache_control blocks total.
                 if iterations == 1 and messages:
-                    for i in range(len(messages) - 1, -1, -1):
-                        if messages[i]["role"] == "user":
-                            content = messages[i]["content"]
-                            if isinstance(content, str):
-                                messages[i]["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
-                            elif isinstance(content, list):
-                                last_block = content[-1]
-                                if isinstance(last_block, dict) and "cache_control" not in last_block:
-                                    content[-1] = {**last_block, "cache_control": {"type": "ephemeral"}}
-                            break
+                    # Count existing cache blocks (system + tools = up to 2)
+                    _cache_count = sum(1 for b in (cached_system or []) if isinstance(b, dict) and "cache_control" in b)
+                    _cache_count += sum(1 for t in (cached_tools or []) if isinstance(t, dict) and "cache_control" in t)
+                    if _cache_count < 4:
+                        for i in range(len(messages) - 1, -1, -1):
+                            if messages[i]["role"] == "user":
+                                content = messages[i]["content"]
+                                if isinstance(content, str):
+                                    messages[i]["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+                                elif isinstance(content, list):
+                                    last_block = content[-1]
+                                    if isinstance(last_block, dict) and "cache_control" not in last_block:
+                                        content[-1] = {**last_block, "cache_control": {"type": "ephemeral"}}
+                                break
 
                 # Snapshot current messages list length to avoid lambda closure mutation issues
                 _current_messages = list(messages)

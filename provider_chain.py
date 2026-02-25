@@ -306,7 +306,9 @@ def _call_anthropic(
         kwargs["tools"] = cached_tools
 
     # Cache conversation prefix — mark last user message
-    if messages and len(messages) >= 2:
+    # Anthropic allows max 4 cache_control blocks; system (1) + tools (1) = 2 already
+    existing_cache_blocks = (1 if system else 0) + (1 if tools else 0)
+    if messages and len(messages) >= 2 and existing_cache_blocks < 4:
         for i in range(len(messages) - 1, -1, -1):
             if messages[i]["role"] == "user":
                 content = messages[i]["content"]
