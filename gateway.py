@@ -597,7 +597,7 @@ async def auth_middleware(request: Request, call_next):
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
-                 path.startswith(("/telegram/", "/slack/", "/api/audit", "/static/", "/control")) or
+                 path.startswith(("/telegram/", "/slack/", "/api/audit", "/static/")) or
                  any(path.startswith(prefix) for prefix in dashboard_exempt_prefixes))
     logger.debug(f"AUTH_CHECK: path={path}, is_exempt={is_exempt}")
 
@@ -1518,16 +1518,6 @@ async def monitoring_dashboard(request: Request):
         )
     except Exception as e:
         return HTMLResponse(content=f"<h1>Error loading dashboard</h1><p>{e}</p>", status_code=500)
-
-
-# ---------------------------------------------------------------------------
-# Native OpenClaw Control UI (Lit web components)
-# ---------------------------------------------------------------------------
-from starlette.staticfiles import StaticFiles as _StaticFiles
-
-_control_ui_path = os.path.join(os.path.dirname(__file__), "dist", "control-ui")
-if os.path.isdir(_control_ui_path):
-    app.mount("/control", _StaticFiles(directory=_control_ui_path, html=True), name="control-ui")
 
 
 # ---------------------------------------------------------------------------
