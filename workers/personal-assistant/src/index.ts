@@ -926,7 +926,7 @@ const OPENCLAW_TOOLS = [
       {
         name: "read_ai_news",
         description:
-          "Fetch latest AI news from RSS feeds (Anthropic, OpenAI, DeepMind, HuggingFace, arXiv, The Verge, Ars Technica, TechCrunch). Returns article titles, summaries, and links.",
+          "Fetch latest AI news from RSS feeds (OpenAI, DeepMind, HuggingFace, arXiv, The Verge, Ars Technica, TechCrunch, Hacker News, MIT Tech Review). Returns article titles, summaries, and links.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -934,11 +934,12 @@ const OPENCLAW_TOOLS = [
             source: {
               type: "STRING",
               description:
-                "Filter to specific source: anthropic, openai, deepmind, huggingface, arxiv, verge, arstechnica, techcrunch",
+                "Filter to specific source: openai, deepmind, huggingface, arxiv, verge, arstechnica, techcrunch, hackernews, mittech",
             },
             hours: {
               type: "NUMBER",
-              description: "Only return articles from last N hours (default: 24)",
+              description:
+                "Only return articles from last N hours (default: 24). Use 72 or 168 for less frequent sources.",
             },
           },
         },
@@ -946,12 +947,16 @@ const OPENCLAW_TOOLS = [
       {
         name: "read_tweets",
         description:
-          "Read recent tweets from AI thought leaders and companies via Nitter. Accounts: @AnthropicAI, @OpenAI, @GoogleDeepMind, @ylecun, @sama",
+          "Read recent AI community posts from Reddit (r/MachineLearning, r/artificial, r/LocalLLaMA), Bluesky, or Twitter. Returns posts with text, links, and platform.",
         parameters: {
           type: "OBJECT",
           properties: {
-            account: { type: "STRING", description: "Twitter username to read (without @)" },
-            limit: { type: "NUMBER", description: "Max tweets per account (default: 5)" },
+            account: {
+              type: "STRING",
+              description:
+                "Twitter/Bluesky username to read (without @). Leave empty for aggregated AI community feed.",
+            },
+            limit: { type: "NUMBER", description: "Max posts per source (default: 5)" },
           },
         },
       },
@@ -1590,8 +1595,8 @@ ROUTING:
 - When Miles asks about predictions/markets, use prediction_market.
 - When Miles asks to send a Slack message, use send_slack_message.
 - When Miles asks about security scanning, use security_scan.
-- When Miles asks about AI news, latest developments, or what's happening in AI, call read_ai_news.
-- When Miles asks about tweets or what AI accounts are posting, call read_tweets.
+- When Miles asks about AI news, latest developments, or what's happening in AI, call read_ai_news. Use hours=72 for a broader view since some blogs post infrequently.
+- When Miles asks about tweets, social posts, or what the AI community is discussing, call read_tweets. This pulls from Reddit AI subs (primary), Bluesky, and Twitter.
 - For complex coding/security/database questions, use send_chat_to_gateway to delegate to a specialist.`;
 
 // ---------------------------------------------------------------------------
@@ -1617,8 +1622,9 @@ app.post("/webhook/telegram", async (c) => {
   const chatId = String(chat.id);
   const text = String(message.text);
 
-  // Owner-only check
-  if (env.TELEGRAM_OWNER_ID && chatId !== env.TELEGRAM_OWNER_ID) {
+  // Owner-only check (trim to handle whitespace in secrets)
+  const ownerId = (env.TELEGRAM_OWNER_ID || "").trim();
+  if (ownerId && chatId !== ownerId) {
     return c.json({ ok: true }); // silently ignore non-owner messages
   }
 

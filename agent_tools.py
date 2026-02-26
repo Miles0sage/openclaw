@@ -810,7 +810,7 @@ AGENT_TOOLS = [
             "type": "object",
             "properties": {
                 "limit": {"type": "integer", "description": "Max articles to return (default: 10)"},
-                "source": {"type": "string", "description": "Filter to specific source: anthropic, openai, deepmind, huggingface, arxiv, verge, arstechnica, techcrunch"},
+                "source": {"type": "string", "description": "Filter to specific source: openai, deepmind, huggingface, arxiv, verge, arstechnica, techcrunch, hackernews, mittech"},
                 "hours": {"type": "integer", "description": "Only return articles from last N hours (default: 24)"}
             },
             "required": [],
@@ -819,7 +819,7 @@ AGENT_TOOLS = [
     },
     {
         "name": "read_tweets",
-        "description": "Read recent tweets from AI-related Twitter/X accounts via self-hosted RSSHub (primary), Nitter (fallback), or web search. Returns tweet text and timestamps.",
+        "description": "Read recent AI community posts and social media. Tries Reddit AI subs (primary), then Bluesky, then RSSHub Twitter, then Nitter, then web search. Returns posts with text, links, and platform.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -2837,7 +2837,6 @@ def _plan_my_day(focus: str = "all") -> str:
 # ═══════════════════════════════════════════════════════════════
 
 RSS_FEEDS = {
-    "anthropic": "https://www.anthropic.com/rss.xml",
     "openai": "https://openai.com/blog/rss.xml",
     "deepmind": "https://deepmind.google/blog/rss.xml",
     "huggingface": "https://huggingface.co/blog/feed.xml",
@@ -2845,12 +2844,14 @@ RSS_FEEDS = {
     "verge": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
     "arstechnica": "https://feeds.arstechnica.com/arstechnica/technology-lab",
     "techcrunch": "https://techcrunch.com/category/artificial-intelligence/feed/",
+    "hackernews": "https://hnrss.org/frontpage?q=AI+OR+LLM+OR+GPT+OR+Claude+OR+machine+learning",
+    "mittech": "https://www.technologyreview.com/topic/artificial-intelligence/feed",
 }
 
 NITTER_INSTANCES = [
     "https://nitter.poast.org",
     "https://nitter.privacydev.net",
-    "https://nitter.woodland.cafe",
+    "https://xcancel.com",
 ]
 
 AI_TWITTER_ACCOUNTS = [
@@ -2859,6 +2860,31 @@ AI_TWITTER_ACCOUNTS = [
     "GoogleDeepMind",
     "ylecun",
     "sama",
+    "kaboragora",
+]
+
+# Bluesky AT Protocol — free public API, no auth needed
+BLUESKY_API = "https://public.api.bsky.app/xrpc"
+BLUESKY_ACCOUNTS = [
+    "sama.bsky.social",
+    "karpathy.bsky.social",
+    "jimfan.bsky.social",
+    "huggingface.bsky.social",
+    "deepmind.bsky.social",
+]
+
+# Map Twitter handles to Bluesky handles where available
+TWITTER_TO_BLUESKY = {
+    "sama": "sama.bsky.social",
+    "karpathy": "karpathy.bsky.social",
+    "jimfan": "jimfan.bsky.social",
+}
+
+# Reddit AI subreddits (native RSS, no auth needed, very reliable)
+REDDIT_AI_FEEDS = [
+    "https://www.reddit.com/r/MachineLearning/hot/.rss",
+    "https://www.reddit.com/r/artificial/hot/.rss",
+    "https://www.reddit.com/r/LocalLLaMA/hot/.rss",
 ]
 
 
@@ -2959,6 +2985,7 @@ def _perplexity_research(query: str, model: str = "sonar", focus: str = "web") -
 def _read_ai_news(limit: int = 10, source: str = None, hours: int = 24) -> str:
     """Fetch AI news from RSS feeds. Returns article titles, summaries, and links."""
     import re
+    import html
     from datetime import timedelta
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
@@ -3045,9 +3072,9 @@ def _read_ai_news(limit: int = 10, source: str = None, hours: int = 24) -> str:
                     if title:
                         all_articles.append({
                             "source": src_name,
-                            "title": title,
+                            "title": html.unescape(title),
                             "link": link,
-                            "summary": description,
+                            "summary": html.unescape(description) if description else "",
                             "published": pub_date,
                             "parsed_time": article_time,
                         })
@@ -3128,29 +3155,124 @@ RSSHUB_BASE_URL = "http://localhost:1200"
 
 
 def _read_tweets(account: str = None, limit: int = 5) -> str:
-    """Read recent tweets from AI accounts. Tries RSSHub (self-hosted) first, then Nitter, then web search."""
+    """Read recent AI community posts. Tries Reddit AI subs, Bluesky, RSSHub Twitter, Nitter, then web search."""
+    import html as html_mod
+    import re as re_mod
+
     accounts = [account] if account else AI_TWITTER_ACCOUNTS
     all_tweets = []
     source = None
 
-    # === Strategy 1: Self-hosted RSSHub (localhost:1200) ===
-    for acct in accounts:
-        try:
-            url = f"{RSSHUB_BASE_URL}/twitter/user/{acct}"
-            with httpx.Client(timeout=15, follow_redirects=True) as client:
-                resp = client.get(url, headers={
+    # === Strategy 0: Reddit AI subreddits (most reliable, always fresh) ===
+    if not account:  # Only use Reddit when not looking for a specific account
+        for feed_url in REDDIT_AI_FEEDS:
+            try:
+                # Use urllib (not httpx) — Reddit blocks HTTP/2 Python clients
+                import urllib.request
+                req = urllib.request.Request(feed_url, headers={
                     "User-Agent": "Mozilla/5.0 (compatible; OpenClaw/2.0)"
                 })
-                # RSSHub returns HTML error pages on failure, RSS XML on success
-                if resp.status_code == 200 and '<?xml' in resp.text[:100]:
-                    tweets = _parse_rss_items(resp.text, acct, limit)
-                    if tweets:
-                        all_tweets.extend(tweets)
-                        source = "rsshub"
-        except Exception as e:
-            logger.warning(f"RSSHub failed for @{acct}: {e}")
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    if resp.status != 200:
+                        continue
+                    xml = resp.read().decode("utf-8")
+                    # Parse Atom entries
+                    entries = re_mod.findall(r'<entry>(.*?)</entry>', xml, re_mod.DOTALL)
+                    subreddit = re_mod.search(r'/r/(\w+)/', feed_url)
+                    sub_name = subreddit.group(1) if subreddit else "reddit"
+                    for entry_xml in entries[:limit]:
+                        title = ""
+                        link = ""
+                        updated = ""
 
-    # === Strategy 2: Nitter instances (fallback) ===
+                        t = re_mod.search(r'<title[^>]*>(.*?)</title>', entry_xml, re_mod.DOTALL)
+                        if t:
+                            title = html_mod.unescape(re_mod.sub(r'<[^>]+>', '', t.group(1))).strip()
+
+                        l = re_mod.search(r'<link href="([^"]+)"', entry_xml)
+                        if l:
+                            link = l.group(1)
+
+                        u = re_mod.search(r'<updated[^>]*>(.*?)</updated>', entry_xml, re_mod.DOTALL)
+                        if u:
+                            updated = u.group(1).strip()
+
+                        if title and not title.startswith("[D]") and not title.startswith("[P]"):
+                            # Skip pure discussion/project threads, keep research/news
+                            pass
+                        if title:
+                            all_tweets.append({
+                                "account": f"r/{sub_name}",
+                                "text": html_mod.unescape(title),
+                                "link": link,
+                                "published": updated,
+                                "platform": "reddit",
+                            })
+                if all_tweets:
+                    source = "reddit"
+            except Exception as e:
+                logger.warning(f"Reddit RSS failed for {feed_url}: {e}")
+
+    # === Strategy 1: Bluesky AT Protocol (free, no auth) ===
+    if not all_tweets:
+        bsky_accounts_to_check = []
+        if account:
+            bsky_handle = TWITTER_TO_BLUESKY.get(account.lower())
+            if bsky_handle:
+                bsky_accounts_to_check = [bsky_handle]
+            elif account.endswith(".bsky.social"):
+                bsky_accounts_to_check = [account]
+        else:
+            bsky_accounts_to_check = BLUESKY_ACCOUNTS
+
+        for bsky_acct in bsky_accounts_to_check:
+            try:
+                url = f"{BLUESKY_API}/app.bsky.feed.getAuthorFeed?actor={bsky_acct}&limit={limit}&filter=posts_no_replies"
+                with httpx.Client(timeout=10) as client:
+                    resp = client.get(url)
+                    if resp.status_code != 200:
+                        continue
+                    data = resp.json()
+                    for item in data.get("feed", [])[:limit]:
+                        post = item.get("post", {})
+                        record = post.get("record", {})
+                        author = post.get("author", {})
+                        text = record.get("text", "")
+                        if not text:
+                            continue
+                        all_tweets.append({
+                            "account": f"@{author.get('handle', bsky_acct)}",
+                            "display_name": author.get("displayName", ""),
+                            "text": html_mod.unescape(text),
+                            "link": f"https://bsky.app/profile/{author.get('handle', bsky_acct)}/post/{post.get('uri', '').split('/')[-1]}",
+                            "published": record.get("createdAt", ""),
+                            "likes": post.get("likeCount", 0),
+                            "reposts": post.get("repostCount", 0),
+                            "platform": "bluesky",
+                        })
+                    if all_tweets:
+                        source = "bluesky"
+            except Exception as e:
+                logger.warning(f"Bluesky failed for {bsky_acct}: {e}")
+
+    # === Strategy 2: Self-hosted RSSHub Twitter (localhost:1200) ===
+    if not all_tweets:
+        for acct in accounts:
+            try:
+                url = f"{RSSHUB_BASE_URL}/twitter/user/{acct}"
+                with httpx.Client(timeout=15, follow_redirects=True) as client:
+                    resp = client.get(url, headers={
+                        "User-Agent": "Mozilla/5.0 (compatible; OpenClaw/2.0)"
+                    })
+                    if resp.status_code == 200 and '<?xml' in resp.text[:100]:
+                        tweets = _parse_rss_items(resp.text, acct, limit)
+                        if tweets:
+                            all_tweets.extend(tweets)
+                            source = "rsshub_twitter"
+            except Exception as e:
+                logger.warning(f"RSSHub failed for @{acct}: {e}")
+
+    # === Strategy 3: Nitter instances (fallback) ===
     if not all_tweets:
         for nitter_url in NITTER_INSTANCES:
             if all_tweets:
@@ -3172,28 +3294,22 @@ def _read_tweets(account: str = None, limit: int = 5) -> str:
                     logger.warning(f"Nitter failed for @{acct} from {nitter_url}: {e}")
                     continue
 
-    # === Strategy 3: Web search fallback ===
+    # === Strategy 4: Web search fallback ===
     if not all_tweets:
         try:
             search_accounts = account or "AnthropicAI OR OpenAI OR GoogleDeepMind"
-            search_result = _web_search(f"site:twitter.com {search_accounts} AI latest")
+            search_result = _web_search(f"{search_accounts} AI latest announcement 2026")
             return json.dumps({
                 "tweets": [],
                 "source": "web_search_fallback",
                 "fallback_search": search_result,
-                "message": "RSSHub and Nitter unavailable. Used web search fallback.",
-                "hint": "To enable RSSHub Twitter feeds, add TWITTER_COOKIE to the RSSHub container. "
-                        "Run: docker stop rsshub && docker rm rsshub && "
-                        "docker run -d --name rsshub --restart always -p 1200:1200 "
-                        "-e TWITTER_COOKIE='auth_token=XXX; ct0=YYY' "
-                        "-e NODE_ENV=production -e CACHE_EXPIRE=3600 diygod/rsshub:latest"
+                "message": "Reddit, Bluesky, RSSHub, and Nitter unavailable. Used web search fallback.",
             }, indent=2)
         except Exception:
             pass
         return json.dumps({
             "tweets": [],
-            "message": "All sources failed (RSSHub, Nitter, web search)",
-            "hint": "To enable RSSHub Twitter feeds, configure TWITTER_COOKIE on the RSSHub Docker container."
+            "message": "All sources failed (Reddit, Bluesky, RSSHub, Nitter, web search)",
         })
 
     return json.dumps({
