@@ -85,3 +85,4 @@ data/memories/
 *.db
 __pycache__/
 *.pyc
+ci.yml.wanted
