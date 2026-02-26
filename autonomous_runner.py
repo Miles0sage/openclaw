@@ -201,6 +201,18 @@ def _save_progress(progress: JobProgress):
         json.dump(progress.to_dict(), f, indent=2)
 
 
+def _trim_context(text: str, max_chars: int = 2000) -> str:
+    """Trim context data to prevent token bloat between phases.
+
+    Keeps the first max_chars characters. If truncated, appends a note
+    so the agent knows context was trimmed.
+    """
+    if not text or len(text) <= max_chars:
+        return text
+    trimmed = text[:max_chars]
+    return trimmed + f"\n\n[... truncated from {len(text)} to {max_chars} chars to save tokens ...]"
+
+
 def _filter_tools_for_phase(phase: Phase, agent_key: str = None) -> list:
     """Return the AGENT_TOOLS definitions filtered for a given phase.
 
@@ -231,58 +243,104 @@ def _filter_tools_for_phase(phase: Phase, agent_key: str = None) -> list:
 
 
 def _select_agent_for_job(job: dict) -> str:
-    """Pick the best agent for a job based on its task description and project.
+    """Pick the best agent for a job based on its task description, project, and cost.
 
-    Priority order matters: complex-code keywords are checked before security
-    keywords so that 'Refactor authentication architecture' routes to elite_coder
-    rather than hacker_agent.
+    Cost-aware routing: always pick the cheapest agent that won't compromise quality.
+    Cost hierarchy: coder_agent ($0.14) → hacker_agent ($0.27) → elite_coder ($0.30)
+                    → project_manager ($15) / database_agent ($15)
+
+    NEVER route "create", "fix", "build", "add" tasks to project_manager — that wastes
+    Opus tokens on work Kimi/MiniMax handle fine.
     """
     task_lower = (job.get("task", "") + " " + job.get("project", "")).lower()
 
-    # Code-building tasks (check FIRST — "Build a KDS with Supabase" is a code task,
-    # not a database task. Only route to database_agent for pure data queries.)
+    # --- Action keywords that ALWAYS mean code work, never PM ---
+    action_keywords = [
+        "create", "fix", "build", "add", "implement", "update", "write",
+        "deploy", "install", "configure", "setup", "migrate",
+    ]
+    is_action_task = any(kw in task_lower for kw in action_keywords)
+
+    # --- Complexity detection ---
+    complex_keywords = [
+        "refactor", "architecture", "redesign", "system design", "multi-file",
+        "algorithm", "race condition", "memory leak", "performance",
+        "rewrite", "overhaul", "optimize",
+    ]
+    is_complex = any(kw in task_lower for kw in complex_keywords)
+
+    # --- Simple/small task detection ---
+    simple_keywords = [
+        "bug", "css", "typo", "button", "color", "font", "margin", "padding",
+        "single file", "simple", "small", "minor", "tweak", "rename",
+        "endpoint", "route", "api endpoint",
+    ]
+    is_simple = any(kw in task_lower for kw in simple_keywords)
+
+    # --- Security detection ---
+    # NOTE: "auth" removed — too broad (matches "authentication" in refactor tasks).
+    # Use "auth exploit", "auth bypass", "auth vuln" etc. for security routing.
+    security_keywords = [
+        "security", "pentest", "vulnerability", "owasp",
+        "xss", "injection", "penetration", "auth exploit", "auth bypass",
+        "csrf", "ssrf", "security audit",
+    ]
+    is_security = any(kw in task_lower for kw in security_keywords)
+
+    # --- Database detection (pure data work only) ---
+    db_keywords = [
+        "database", "sql", "query", "migration", "schema", "rls policy",
+        "data analysis", "supabase query", "table", "index",
+        "analyze data", "revenue data", "fetch data",
+    ]
+    is_db = any(kw in task_lower for kw in db_keywords)
+
+    # --- Code-building detection ---
     build_keywords = [
         "build", "create", "implement", "page", "component", "feature",
         "frontend", "backend", "ui", "ux", "layout", "app",
     ]
-    if any(kw in task_lower for kw in build_keywords):
-        # If it's also complex (multi-file, architecture), route to elite
-        complex_keywords = [
-            "refactor", "architecture", "redesign", "system design", "multi-file",
-            "algorithm", "race condition", "memory leak", "performance",
-        ]
-        if any(kw in task_lower for kw in complex_keywords):
-            return "elite_coder"
-        return "coder_agent"
+    is_build = any(kw in task_lower for kw in build_keywords)
 
-    # Complex code tasks
-    if any(kw in task_lower for kw in [
-        "refactor", "architecture", "redesign", "system design", "multi-file",
-        "algorithm", "race condition", "memory leak", "performance",
-    ]):
+    # --- Question detection (questions are planning, not action) ---
+    is_question = any(task_lower.strip().startswith(q) for q in [
+        "what ", "how ", "should ", "can ", "why ", "when ", "where ",
+    ]) or task_lower.strip().endswith("?")
+
+    # --- Routing logic (cheapest capable agent first) ---
+
+    # 1. Complex code tasks → elite_coder (MiniMax, $0.30 — deep reasoning)
+    #    Check FIRST: "Refactor auth architecture" is complex, not security
+    if is_complex and not is_question:
         return "elite_coder"
 
-    # Security tasks
-    if any(kw in task_lower for kw in [
-        "security", "audit", "pentest", "vulnerability", "rls", "owasp",
-        "xss", "injection", "penetration",
-    ]):
+    # 2. Security tasks → hacker_agent (cheap, specialized)
+    if is_security and not is_build:
         return "hacker_agent"
 
-    # Database / data tasks (pure data work — queries, migrations, schema changes)
-    if any(kw in task_lower for kw in [
-        "database", "supabase", "sql", "query", "migration", "schema",
-        "rls policy", "data analysis",
-    ]):
-        return "database_agent"
-
-    # Simple code tasks
-    if any(kw in task_lower for kw in [
-        "fix", "add", "update", "css", "endpoint", "test", "bug",
-    ]):
+    # 3. Build/action tasks → coder_agent (Kimi, cheapest)
+    #    But NOT questions like "what should we build?"
+    if (is_build or is_action_task) and not is_question:
         return "coder_agent"
 
-    # Fallback: PM handles ambiguous tasks
+    # 4. Simple code tasks → coder_agent (cheapest)
+    if is_simple and not is_question:
+        return "coder_agent"
+
+    # 5. Pure database/data tasks → database_agent
+    if is_db:
+        return "database_agent"
+
+    # 6. Fallback: if the task has any code-related words, use coder_agent
+    #    NEVER default to project_manager for actionable tasks
+    code_signals = [
+        "fix", "add", "update", "test", "endpoint", "deploy", "file",
+        "code", "function", "class", "module", "script", "config",
+    ]
+    if any(kw in task_lower for kw in code_signals) and not is_question:
+        return "coder_agent"
+
+    # 7. Truly ambiguous tasks with no action words → PM for decomposition only
     return "project_manager"
 
 
@@ -846,10 +904,11 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                                            guardrails=guardrails)
                 progress.cost_usd += result["cost_usd"]
 
-                # Budget check (legacy — guardrails also check this)
-                if progress.cost_usd > DEFAULT_BUDGET_LIMIT_USD:
+                # Budget check (legacy fallback — guardrails are the primary check)
+                budget_limit = guardrails.max_cost_usd * 1.10 if guardrails else DEFAULT_BUDGET_LIMIT_USD
+                if progress.cost_usd > budget_limit:
                     raise BudgetExceededError(
-                        f"Job budget exceeded: ${progress.cost_usd:.4f} > ${DEFAULT_BUDGET_LIMIT_USD}"
+                        f"Job budget exceeded: ${progress.cost_usd:.4f} > ${budget_limit:.2f}"
                     )
 
                 # Clear error streak on success (for circuit breaker)
@@ -927,6 +986,8 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
     progress.phase = Phase.VERIFY
     progress.phase_status = "running"
     _save_progress(progress)
+    if guardrails:
+        guardrails.set_phase("verify")
 
     project = job.get("project", "unknown")
 
@@ -1043,6 +1104,8 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
     progress.phase = Phase.DELIVER
     progress.phase_status = "running"
     _save_progress(progress)
+    if guardrails:
+        guardrails.set_phase("deliver")
 
     project = job.get("project", "unknown")
     workspace = progress.workspace
@@ -1397,10 +1460,13 @@ class JobGuardrails:
     GuardrailViolation if any limit is breached.
 
     Defaults:
-        max_cost_usd      = $2.00   (hard kill)
-        max_iterations     = 50      (total agent calls across all phases)
+        max_cost_usd      = priority-based (P0=$5, P1=$3, P2=$2, P3=$1) + 10% grace
+        max_iterations     = 80      (total agent calls across all phases)
         max_duration_secs  = 1800    (30 minutes wall-clock)
         circuit_breaker_n  = 3       (same error 3x in a row → kill)
+
+    Phase iteration limits (prevents any single phase from hogging all iterations):
+        research=15, plan=10, execute=40, verify=10, deliver=5
 
     Progressive warnings are logged at 50%, 75%, 90% of cost and iteration
     limits so operators see problems before the hard kill fires.
@@ -1497,14 +1563,17 @@ class JobGuardrails:
                 self.job_id, f"Kill switch activated: {reason}", "killed_manual"
             )
 
-        # 2. Cost cap
+        # 2. Cost cap (with 10% grace period to avoid killing jobs that are
+        #    about to finish — the last API call often pushes just over the limit)
         self._check_progressive_warnings(
             "cost", self.cost_usd, self.max_cost_usd, self._cost_warnings_fired
         )
-        if self.cost_usd > self.max_cost_usd:
+        hard_limit = self.max_cost_usd * 1.10  # 10% grace
+        if self.cost_usd > hard_limit:
             raise GuardrailViolation(
                 self.job_id,
-                f"Cost ${self.cost_usd:.4f} exceeds cap ${self.max_cost_usd:.2f}",
+                f"Cost ${self.cost_usd:.4f} exceeds cap ${self.max_cost_usd:.2f} "
+                f"(+10% grace = ${hard_limit:.2f})",
                 "killed_cost_limit",
             )
 
@@ -1861,9 +1930,12 @@ class AutonomousRunner:
                 raise CancelledError(job_id)
 
             # ---- Phase 2: PLAN ----
+            # Trim research context for plan phase (full context was used during research;
+            # plan only needs the summary, not the raw tool output)
+            research_for_plan = _trim_context(research, max_chars=3000)
             plan = await self._run_phase_with_retry(
                 "plan",
-                lambda: _plan_phase(job, agent_key, research, progress, guardrails=guardrails),
+                lambda: _plan_phase(job, agent_key, research_for_plan, progress, guardrails=guardrails),
                 progress,
             )
             result["phases"]["plan"] = {
@@ -1875,10 +1947,14 @@ class AutonomousRunner:
                 raise CancelledError(job_id)
 
             # ---- Phase 3: EXECUTE ----
+            # Trim research further for execute phase — the plan already encodes
+            # the research findings as concrete steps; research is only kept for
+            # high-level context (file paths, patterns, etc.)
+            research_for_execute = _trim_context(research, max_chars=2000)
             update_job_status(job_id, "code_generated")
             exec_results = await self._run_phase_with_retry(
                 "execute",
-                lambda: _execute_phase(job, agent_key, plan, research, progress, guardrails=guardrails),
+                lambda: _execute_phase(job, agent_key, plan, research_for_execute, progress, guardrails=guardrails),
                 progress,
             )
 
