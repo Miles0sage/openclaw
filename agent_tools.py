@@ -2779,20 +2779,37 @@ def _create_event(event_type: str, data: dict) -> str:
 
 
 def _plan_my_day(focus: str = "all") -> str:
-    """Gather calendar, jobs, agency status, and emails for a daily plan."""
+    """Gather calendar, jobs, agency status, emails, schedule, and todos for a daily plan."""
     try:
         import requests as req
         gw = "http://localhost:18789"
         results = {}
+        now = datetime.now(timezone.utc)
+        day_name = now.strftime("%A")
 
-        # Calendar
+        # === Miles' Schedule Context ===
+        schedule = {
+            "today": day_name,
+            "date": now.strftime("%Y-%m-%d"),
+            "work_today": day_name != "Monday",
+            "work_hours": "5pm-10pm" if day_name != "Monday" else "OFF",
+            "free_hours": "All day" if day_name == "Monday" else "Before 5pm, after 10pm",
+            "notes": [],
+        }
+        if day_name == "Thursday":
+            schedule["notes"].append("Soccer at 9:20pm — leave work early")
+        if day_name == "Monday":
+            schedule["notes"].append("Day off — best day for big tasks, Claude sessions, planning")
+        results["schedule"] = schedule
+
+        # === Calendar ===
         try:
             r = req.get(f"{gw}/api/calendar/today", timeout=10)
             results["calendar"] = r.json() if r.ok else {"events": []}
         except Exception:
             results["calendar"] = {"events": []}
 
-        # Jobs
+        # === Jobs ===
         try:
             r = req.get(f"{gw}/api/jobs?limit=20", timeout=10)
             jobs = r.json().get("jobs", []) if r.ok else []
@@ -2804,28 +2821,54 @@ def _plan_my_day(focus: str = "all") -> str:
             results["active_jobs"] = []
             results["recent_completed"] = []
 
-        # Agency status
+        # === Agency status ===
         try:
             r = req.get(f"{gw}/api/agency/status", timeout=10)
             results["agency_status"] = r.json() if r.ok else {}
         except Exception:
             results["agency_status"] = {}
 
-        # Emails
+        # === Emails ===
         try:
             r = req.get(f"{gw}/api/gmail/inbox?max_results=10", timeout=10)
             results["unread_emails"] = r.json().get("messages", []) if r.ok else []
         except Exception:
             results["unread_emails"] = []
 
+        # === Todos / Assignments ===
+        try:
+            r = req.get(f"{gw}/api/tasks", timeout=10)
+            tasks = r.json() if r.ok else []
+            if isinstance(tasks, dict):
+                tasks = tasks.get("tasks", [])
+            results["todos"] = [t for t in tasks if t.get("status") != "done"]
+        except Exception:
+            results["todos"] = []
+
+        # === Memories (assignments, deadlines, commitments) ===
+        try:
+            memories = _search_memory("assignments deadlines schedule todo", limit=5)
+            results["relevant_memories"] = memories
+        except Exception:
+            results["relevant_memories"] = "No memories found"
+
         results["focus"] = focus
 
-        # AI News Highlights
+        # === AI News Highlights ===
         try:
             news = _read_ai_news(limit=5, source=None, hours=24)
             results["ai_news_highlights"] = news
         except Exception:
             results["ai_news_highlights"] = "Could not fetch AI news"
+
+        # === Suggested todos based on context ===
+        suggested = []
+        if results.get("pending_jobs"):
+            suggested.append(f"Review {len(results['pending_jobs'])} pending jobs")
+        if day_name == "Monday":
+            suggested.append("Plan the week — review all projects")
+            suggested.append("Work on OpenClaw (Stripe go-live, client dashboard)")
+        results["suggested_todos"] = suggested
 
         return json.dumps(results, indent=2, default=str)
     except Exception as e:
