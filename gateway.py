@@ -13,6 +13,7 @@ import sys
 import pathlib
 import hmac
 import hashlib
+from contextlib import asynccontextmanager
 import time
 from fastapi import FastAPI, WebSocket, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -558,7 +559,136 @@ async def call_claude_with_tools(client, model: str, system_prompt: str, message
 # Initialize Orchestrator
 orchestrator = Orchestrator()
 
-app = FastAPI(title="OpenClaw Gateway", version="1.0.0")
+@asynccontextmanager
+async def lifespan(application):
+    # ── STARTUP ──────────────────────────────────────────────────────
+    # Metrics
+    try:
+        metrics.load_from_disk()
+        logger.info("✅ Metrics system initialized (loaded costs from disk)")
+    except Exception as e:
+        logger.warning(f"⚠️  Could not load metrics from disk: {e}")
+
+    # Cost gates
+    cost_gates_config = CONFIG.get("cost_gates", {})
+    if cost_gates_config.get("enabled", True):
+        cg = init_cost_gates(cost_gates_config)
+        logger.info(f"✅ Cost gates initialized: per-task=${cg.gates['per_task'].limit}, daily=${cg.gates['daily'].limit}, monthly=${cg.gates['monthly'].limit}")
+    else:
+        logger.info("⚠️  Cost gates disabled in config")
+
+    # Heartbeat monitor
+    try:
+        hb_config = HeartbeatMonitorConfig(
+            check_interval_ms=30000,
+            stale_threshold_ms=5 * 60 * 1000,
+            timeout_threshold_ms=60 * 60 * 1000,
+        )
+        await init_heartbeat_monitor(alert_manager=None, config=hb_config)
+        logger.info("✅ Heartbeat monitor initialized and started")
+    except Exception as err:
+        logger.error(f"Failed to initialize heartbeat monitor: {err}")
+
+    # Event engine
+    try:
+        event_engine = init_event_engine()
+        logger.info("✅ Event engine initialized (closed-loop system active)")
+    except Exception as err:
+        logger.error(f"Failed to initialize event engine: {err}")
+        event_engine = None
+
+    # Cron scheduler
+    try:
+        cron = init_cron_scheduler()
+        cron.start()
+        logger.info(f"✅ Cron scheduler initialized ({len(cron.list_jobs())} jobs)")
+    except Exception as err:
+        logger.error(f"Failed to initialize cron scheduler: {err}")
+
+    # Memory manager
+    try:
+        memory = init_memory_manager()
+        logger.info(f"✅ Memory manager initialized ({memory.count()} memories)")
+    except Exception as err:
+        logger.error(f"Failed to initialize memory manager: {err}")
+
+    # Reactions engine
+    try:
+        from reactions import get_reactions_engine, register_with_event_engine
+        reactions_eng = get_reactions_engine()
+        if event_engine:
+            register_with_event_engine(event_engine)
+        logger.info(f"✅ Reactions engine initialized ({len(reactions_eng.get_rules())} rules)")
+    except Exception as err:
+        logger.error(f"Failed to initialize reactions engine: {err}")
+
+    # Self-improvement engine
+    try:
+        from self_improve import get_self_improve_engine
+        get_self_improve_engine()
+        logger.info("✅ Self-improvement engine initialized")
+    except Exception as err:
+        logger.error(f"Failed to initialize self-improve engine: {err}")
+
+    # Response cache
+    try:
+        init_response_cache(default_ttl=30, max_entries=1000)
+        logger.info("Response cache initialized (TTL=30s, max=1000)")
+    except Exception as err:
+        logger.error(f"Failed to initialize response cache: {err}")
+
+    # Autonomous runner
+    try:
+        runner = init_runner(max_concurrent=2, budget_limit_usd=15.0)
+        await runner.start()
+        logger.info("✅ Autonomous job runner started (max_concurrent=2, budget=$15/job)")
+    except Exception as err:
+        logger.error(f"Failed to start autonomous runner: {err}")
+
+    # Review cycle + output verifier
+    try:
+        global _review_engine, _output_verifier
+        _review_engine = ReviewCycleEngine(call_agent_fn=call_model_for_agent)
+        _output_verifier = OutputVerifier()
+        logger.info("✅ Review cycle engine + output verifier initialized")
+    except Exception as err:
+        logger.error(f"Failed to init review/verifier: {err}")
+
+    # Error recovery
+    try:
+        recovery = await init_error_recovery()
+        application.include_router(recovery.create_routes())
+        logger.info("✅ Error recovery system initialized (circuit breakers + crash recovery)")
+    except Exception as err:
+        logger.error(f"Failed to init error recovery: {err}")
+
+    yield  # ── APP RUNNING ──
+
+    # ── SHUTDOWN ─────────────────────────────────────────────────────
+    try:
+        stop_heartbeat_monitor()
+        logger.info("✅ Heartbeat monitor stopped")
+    except Exception as err:
+        logger.error(f"Failed to stop heartbeat monitor: {err}")
+
+    try:
+        r = get_runner()
+        if r:
+            await r.stop()
+        logger.info("✅ Autonomous runner stopped")
+    except Exception as err:
+        logger.error(f"Failed to stop autonomous runner: {err}")
+
+    try:
+        c = get_cron_scheduler()
+        if c:
+            c.stop()
+        logger.info("✅ Cron scheduler stopped")
+    except Exception as err:
+        logger.error(f"Failed to stop cron scheduler: {err}")
+
+
+app = FastAPI(title="OpenClaw Gateway", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -683,135 +813,8 @@ active_connections: Dict[str, WebSocket] = {}
 session_store = SessionStore(SESSIONS_DIR)
 
 # FastAPI startup/shutdown event handlers for heartbeat monitor
-@app.on_event("startup")
-async def startup_heartbeat_monitor():
-    """Initialize heartbeat monitor on FastAPI startup"""
-    # Initialize metrics system
-    try:
-        metrics.load_from_disk()
-        logger.info(f"✅ Metrics system initialized (loaded costs from disk)")
-    except Exception as e:
-        logger.warning(f"⚠️  Could not load metrics from disk: {e}")
 
-    # Initialize cost gates
-    cost_gates_config = CONFIG.get("cost_gates", {})
-    if cost_gates_config.get("enabled", True):
-        cost_gates = init_cost_gates(cost_gates_config)
-        logger.info(f"✅ Cost gates initialized: per-task=${cost_gates.gates['per_task'].limit}, daily=${cost_gates.gates['daily'].limit}, monthly=${cost_gates.gates['monthly'].limit}")
-    else:
-        logger.info("⚠️  Cost gates disabled in config")
-    
-    try:
-        config = HeartbeatMonitorConfig(
-            check_interval_ms=30000,  # 30 seconds
-            stale_threshold_ms=5 * 60 * 1000,  # 5 minutes
-            timeout_threshold_ms=60 * 60 * 1000  # 1 hour
-        )
-        monitor = await init_heartbeat_monitor(alert_manager=None, config=config)
-        logger.info("✅ Heartbeat monitor initialized and started")
-    except Exception as err:
-        logger.error(f"Failed to initialize heartbeat monitor: {err}")
-
-    # Initialize event engine (closed-loop system)
-    try:
-        event_engine = init_event_engine()
-        logger.info("✅ Event engine initialized (closed-loop system active)")
-    except Exception as err:
-        logger.error(f"Failed to initialize event engine: {err}")
-
-    # Initialize cron scheduler
-    try:
-        cron = init_cron_scheduler()
-        cron.start()
-        logger.info(f"✅ Cron scheduler initialized ({len(cron.list_jobs())} jobs)")
-    except Exception as err:
-        logger.error(f"Failed to initialize cron scheduler: {err}")
-
-    # Initialize memory manager
-    try:
-        memory = init_memory_manager()
-        logger.info(f"✅ Memory manager initialized ({memory.count()} memories)")
-    except Exception as err:
-        logger.error(f"Failed to initialize memory manager: {err}")
-
-    # Initialize reactions engine
-    try:
-        from reactions import get_reactions_engine, register_with_event_engine
-        reactions_eng = get_reactions_engine()
-        if event_engine:
-            register_with_event_engine(event_engine)
-        logger.info(f"✅ Reactions engine initialized ({len(reactions_eng.get_rules())} rules)")
-    except Exception as err:
-        logger.error(f"Failed to initialize reactions engine: {err}")
-
-    # Initialize self-improvement engine
-    try:
-        from self_improve import get_self_improve_engine
-        si_engine = get_self_improve_engine()
-        logger.info("✅ Self-improvement engine initialized")
-    except Exception as err:
-        logger.error(f"Failed to initialize self-improve engine: {err}")
-
-    # Initialize response cache
-    try:
-        cache = init_response_cache(default_ttl=30, max_entries=1000)
-        logger.info("Response cache initialized (TTL=30s, max=1000)")
-    except Exception as err:
-        logger.error(f"Failed to initialize response cache: {err}")
-
-
-@app.on_event("startup")
-async def startup_autonomous_runner():
-    """Initialize autonomous job runner on FastAPI startup"""
-    try:
-        runner = init_runner(max_concurrent=2, budget_limit_usd=15.0)
-        await runner.start()
-        logger.info("✅ Autonomous job runner started (max_concurrent=2, budget=$15/job)")
-    except Exception as err:
-        logger.error(f"Failed to start autonomous runner: {err}")
-
-    # Initialize review cycle engine with agent caller
-    try:
-        global _review_engine, _output_verifier
-        _review_engine = ReviewCycleEngine(call_agent_fn=call_model_for_agent)
-        _output_verifier = OutputVerifier()
-        logger.info("✅ Review cycle engine + output verifier initialized")
-    except Exception as err:
-        logger.error(f"Failed to init review/verifier: {err}")
-
-    # Initialize error recovery system
-    try:
-        recovery = await init_error_recovery()
-        app.include_router(recovery.create_routes())
-        logger.info("✅ Error recovery system initialized (circuit breakers + crash recovery)")
-    except Exception as err:
-        logger.error(f"Failed to init error recovery: {err}")
-
-
-@app.on_event("shutdown")
-async def shutdown_heartbeat_monitor():
-    """Stop heartbeat monitor and autonomous runner on FastAPI shutdown"""
-    try:
-        stop_heartbeat_monitor()
-        logger.info("✅ Heartbeat monitor stopped")
-    except Exception as err:
-        logger.error(f"Failed to stop heartbeat monitor: {err}")
-
-    try:
-        runner = get_runner()
-        if runner:
-            await runner.stop()
-        logger.info("✅ Autonomous runner stopped")
-    except Exception as err:
-        logger.error(f"Failed to stop autonomous runner: {err}")
-
-    try:
-        cron = get_cron_scheduler()
-        if cron:
-            cron.stop()
-        logger.info("✅ Cron scheduler stopped")
-    except Exception as err:
-        logger.error(f"Failed to stop cron scheduler: {err}")
+# (startup/shutdown handled by lifespan context manager above)
 
 # Sessions use lazy loading via SessionStore
 logger.info(f"✅ Session lazy loading enabled — sessions loaded on demand from {SESSIONS_DIR}")

@@ -863,6 +863,41 @@ const OPENCLAW_TOOLS = [
           required: ["action"],
         },
       },
+      {
+        name: "create_event",
+        description:
+          "Create/emit an event to the OpenClaw event engine. Use for logging custom events, milestones, or triggers.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            event_type: {
+              type: "STRING",
+              description:
+                "Event type: job.created, job.completed, job.failed, deploy.complete, cost.alert, custom, etc.",
+            },
+            data: {
+              type: "OBJECT",
+              description: "Event payload data (any key-value pairs)",
+              properties: {},
+            },
+          },
+          required: ["event_type"],
+        },
+      },
+      {
+        name: "plan_my_day",
+        description:
+          "Plan the user's day: fetches calendar events, pending jobs, agency status, and emails to create a prioritized daily plan. Call this when the user asks to plan their day or wants a morning briefing.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            focus: {
+              type: "STRING",
+              description: "Optional focus area: work, personal, or all (default: all)",
+            },
+          },
+        },
+      },
     ],
   },
 ];
@@ -1293,6 +1328,46 @@ async function executeTool(
           )
         ).json();
       }
+    case "create_event":
+      return (
+        await gatewayFetch(env, "/api/events", {
+          method: "POST",
+          body: JSON.stringify({
+            event_type: args.event_type || "custom",
+            data: args.data || {},
+          }),
+        })
+      ).json();
+    case "plan_my_day": {
+      const [calRes, jobsRes, statusRes, emailRes] = await Promise.all([
+        gatewayFetch(env, "/api/calendar/today")
+          .then((r) => r.json())
+          .catch(() => ({ events: [] })),
+        gatewayFetch(env, "/api/jobs?limit=20")
+          .then((r) => r.json())
+          .catch(() => ({ jobs: [] })),
+        gatewayFetch(env, "/api/agency/status")
+          .then((r) => r.json())
+          .catch(() => ({})),
+        gatewayFetch(env, "/api/gmail/inbox?max_results=10")
+          .then((r) => r.json())
+          .catch(() => ({ messages: [] })),
+      ]);
+      return {
+        calendar: calRes,
+        pending_jobs: (jobsRes.jobs || []).filter(
+          (j: any) => j.status === "pending" || j.status === "analyzing",
+        ),
+        active_jobs: (jobsRes.jobs || []).filter(
+          (j: any) => j.status === "running" || j.status === "in_progress",
+        ),
+        recent_completed: (jobsRes.jobs || []).filter((j: any) => j.status === "done").slice(0, 5),
+        agency_status: statusRes,
+        unread_emails: emailRes.messages || emailRes.emails || [],
+        focus: args.focus || "all",
+        generated_at: new Date().toISOString(),
+      };
+    }
     default:
       return { error: `Unknown tool: ${name}` };
   }

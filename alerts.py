@@ -1,5 +1,8 @@
 import os
 import httpx
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 async def send_telegram(text: str) -> None:

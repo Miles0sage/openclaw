@@ -52,6 +52,8 @@ VALID_EVENT_TYPES = frozenset([
     "ci.passed",
     "scan.completed",
     "scan.failed",
+    "custom",
+    "test",
 ])
 
 # Events that trigger a Slack notification

@@ -740,6 +740,30 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    {
+        "name": "create_event",
+        "description": "Create/emit an event to the OpenClaw event engine. Use for logging custom events, milestones, or triggers.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "event_type": {"type": "string", "description": "Event type: job.created, job.completed, job.failed, deploy.complete, cost.alert, custom, etc."},
+                "data": {"type": "object", "description": "Event payload data (any key-value pairs)"}
+            },
+            "required": ["event_type"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "plan_my_day",
+        "description": "Plan the user's day: fetches calendar events, pending jobs, agency status, and emails to create a prioritized daily plan.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "focus": {"type": "string", "description": "Optional focus area: work, personal, or all (default: all)"}
+            },
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -869,6 +893,10 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
         elif tool_name == "get_reflections":
             return _get_reflections(tool_input["action"], tool_input.get("task", ""),
                                     tool_input.get("project"), tool_input.get("limit", 5))
+        elif tool_name == "create_event":
+            return _create_event(tool_input["event_type"], tool_input.get("data", {}))
+        elif tool_name == "plan_my_day":
+            return _plan_my_day(tool_input.get("focus", "all"))
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:
@@ -1149,14 +1177,25 @@ def _agency_status() -> str:
                 parts.append(f"  {w}")
     except Exception:
         pass
-    # Self-improve metrics
+    # 7-day performance (computed from jobs.jsonl — source of truth)
     try:
-        from self_improve import get_self_improve_engine
-        engine = get_self_improve_engine()
-        summary = engine.get_summary(days=7)
-        parts.append(f"\n7-day performance: {summary.get('success_rate', 0)}% success ({summary.get('total_jobs', 0)} jobs)")
-    except Exception:
-        pass
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y%m%d")
+        recent_all = [j for j in jobs if j.get("id", "")[4:12] >= cutoff]
+        terminal = [j for j in recent_all if j.get("status") in ("done", "failed", "killed_iteration_limit", "killed_cost_limit", "killed_timeout")]
+        successes = sum(1 for j in terminal if j.get("status") == "done")
+        failures = len(terminal) - successes
+        rate = round(successes / len(terminal) * 100, 1) if terminal else 0
+        parts.append(f"\n7-day performance: {rate}% success ({successes}/{len(terminal)} jobs)")
+        if failures > 0:
+            fail_types = {}
+            for j in terminal:
+                if j.get("status") != "done":
+                    s = j.get("status", "unknown")
+                    fail_types[s] = fail_types.get(s, 0) + 1
+            parts.append(f"  Failures: {fail_types}")
+    except Exception as e:
+        parts.append(f"\n7-day performance: error - {e}")
     return "\n".join(parts)
 
 
@@ -2580,3 +2619,63 @@ def _get_reflections(action: str, task: str = "", project: str = None, limit: in
 
     except Exception as e:
         return f"Reflections error: {e}"
+
+
+def _create_event(event_type: str, data: dict) -> str:
+    """Emit an event to the OpenClaw event engine."""
+    try:
+        import requests as req
+        resp = req.post(
+            "http://localhost:18789/api/events",
+            json={"event_type": event_type, "data": data},
+            timeout=10,
+        )
+        return json.dumps(resp.json(), indent=2)
+    except Exception as e:
+        return f"Error creating event: {e}"
+
+
+def _plan_my_day(focus: str = "all") -> str:
+    """Gather calendar, jobs, agency status, and emails for a daily plan."""
+    try:
+        import requests as req
+        gw = "http://localhost:18789"
+        results = {}
+
+        # Calendar
+        try:
+            r = req.get(f"{gw}/api/calendar/today", timeout=10)
+            results["calendar"] = r.json() if r.ok else {"events": []}
+        except Exception:
+            results["calendar"] = {"events": []}
+
+        # Jobs
+        try:
+            r = req.get(f"{gw}/api/jobs?limit=20", timeout=10)
+            jobs = r.json().get("jobs", []) if r.ok else []
+            results["pending_jobs"] = [j for j in jobs if j.get("status") in ("pending", "analyzing")]
+            results["active_jobs"] = [j for j in jobs if j.get("status") in ("running", "in_progress")]
+            results["recent_completed"] = [j for j in jobs if j.get("status") == "done"][:5]
+        except Exception:
+            results["pending_jobs"] = []
+            results["active_jobs"] = []
+            results["recent_completed"] = []
+
+        # Agency status
+        try:
+            r = req.get(f"{gw}/api/agency/status", timeout=10)
+            results["agency_status"] = r.json() if r.ok else {}
+        except Exception:
+            results["agency_status"] = {}
+
+        # Emails
+        try:
+            r = req.get(f"{gw}/api/gmail/inbox?max_results=10", timeout=10)
+            results["unread_emails"] = r.json().get("messages", []) if r.ok else []
+        except Exception:
+            results["unread_emails"] = []
+
+        results["focus"] = focus
+        return json.dumps(results, indent=2, default=str)
+    except Exception as e:
+        return f"Error planning day: {e}"
