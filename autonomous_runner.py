@@ -54,7 +54,7 @@ JOB_RUNS_DIR = Path(os.path.join(DATA_DIR, "jobs", "runs"))
 DEFAULT_POLL_INTERVAL = 10        # seconds between job queue checks
 DEFAULT_MAX_CONCURRENT = 2        # max parallel job executions
 DEFAULT_MAX_RETRIES = 3           # retries per phase on failure
-DEFAULT_BUDGET_LIMIT_USD = 15.0   # per-job cost cap (raised: complex builds need headroom)
+DEFAULT_BUDGET_LIMIT_USD = 5.0    # per-job cost cap (legacy fallback — guardrails enforce priority-based caps)
 MAX_TOOL_ITERATIONS = 30          # safety cap on agent tool loops per step
 MAX_PLAN_STEPS = 20               # safety cap on plan step count
 
@@ -623,6 +623,8 @@ async def _research_phase(job: dict, agent_key: str, progress: JobProgress,
     progress.phase = Phase.RESEARCH
     progress.phase_status = "running"
     _save_progress(progress)
+    if guardrails:
+        guardrails.set_phase("research")
 
     task = job["task"]
     project = job.get("project", "unknown")
@@ -688,6 +690,8 @@ async def _plan_phase(job: dict, agent_key: str, research: str,
     progress.phase = Phase.PLAN
     progress.phase_status = "running"
     _save_progress(progress)
+    if guardrails:
+        guardrails.set_phase("plan")
 
     task = job["task"]
     project = job.get("project", "unknown")
@@ -780,6 +784,8 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
     progress.phase = Phase.EXECUTE
     progress.phase_status = "running"
     _save_progress(progress)
+    if guardrails:
+        guardrails.set_phase("execute")
 
     results = []
     conversation_context = []
@@ -1402,11 +1408,21 @@ class JobGuardrails:
 
     WARNING_THRESHOLDS = (0.50, 0.75, 0.90)
 
+    # Phase-specific iteration budgets — prevents any single phase from
+    # eating the entire iteration allowance (e.g. execute hogging 48/50).
+    PHASE_ITERATION_LIMITS = {
+        "research": 15,
+        "plan":     10,
+        "execute":  40,
+        "verify":   10,
+        "deliver":  5,
+    }
+
     def __init__(
         self,
         job_id: str,
         max_cost_usd: float = 2.0,
-        max_iterations: int = 50,
+        max_iterations: int = 80,
         max_duration_secs: int = 1800,
         circuit_breaker_n: int = 3,
     ):
@@ -1419,6 +1435,12 @@ class JobGuardrails:
         self.iterations = 0
         self.cost_usd = 0.0
         self.start_time = time.monotonic()
+
+        # Phase-level iteration tracking
+        self.current_phase: str = "research"
+        self.phase_iterations: dict[str, int] = {
+            "research": 0, "plan": 0, "execute": 0, "verify": 0, "deliver": 0,
+        }
 
         # Circuit breaker state
         self._recent_errors: list[str] = []
@@ -1437,10 +1459,17 @@ class JobGuardrails:
     # Public: call after every agent iteration / tool loop turn
     # ------------------------------------------------------------------
 
+    def set_phase(self, phase: str):
+        """Set the current phase for per-phase iteration tracking."""
+        self.current_phase = phase
+
     def record_iteration(self, cost_increment: float = 0.0):
         """Record one agent iteration and its cost. Call this BEFORE check()."""
         self.iterations += 1
         self.cost_usd += cost_increment
+        # Track per-phase iterations
+        if self.current_phase in self.phase_iterations:
+            self.phase_iterations[self.current_phase] += 1
 
     def record_error(self, error_msg: str):
         """Record an error message for circuit breaker detection."""
@@ -1479,7 +1508,7 @@ class JobGuardrails:
                 "killed_cost_limit",
             )
 
-        # 3. Iteration cap
+        # 3. Iteration cap (global)
         self._check_progressive_warnings(
             "iterations", self.iterations, self.max_iterations, self._iter_warnings_fired
         )
@@ -1489,6 +1518,18 @@ class JobGuardrails:
                 f"Iterations {self.iterations} exceeds cap {self.max_iterations}",
                 "killed_iteration_limit",
             )
+
+        # 3b. Per-phase iteration cap
+        if self.current_phase in self.PHASE_ITERATION_LIMITS:
+            phase_count = self.phase_iterations.get(self.current_phase, 0)
+            phase_limit = self.PHASE_ITERATION_LIMITS[self.current_phase]
+            if phase_count > phase_limit:
+                raise GuardrailViolation(
+                    self.job_id,
+                    f"Phase '{self.current_phase}' iterations {phase_count} exceeds "
+                    f"phase cap {phase_limit} (global: {self.iterations}/{self.max_iterations})",
+                    "killed_phase_iteration_limit",
+                )
 
         # 4. Wall-clock timeout
         elapsed = time.monotonic() - self.start_time
@@ -1522,6 +1563,8 @@ class JobGuardrails:
             "elapsed_seconds": round(self.elapsed_seconds(), 1),
             "max_duration_seconds": self.max_duration_secs,
             "recent_errors": len(self._recent_errors),
+            "current_phase": self.current_phase,
+            "phase_iterations": dict(self.phase_iterations),
         }
 
     # ------------------------------------------------------------------
@@ -1782,9 +1825,11 @@ class AutonomousRunner:
         update_job_status(job_id, "analyzing")
 
         # --- Initialize guardrails for this job ---
-        # Job-level overrides can be set in job data (e.g. from API)
-        job_max_cost = job.get("max_cost_usd", 2.0)
-        job_max_iter = job.get("max_iterations", 50)
+        # Priority-based cost caps: P0 gets most headroom, P3 is cheapest
+        job_priority = job.get("priority", "P2")
+        budget_map = {"P0": 5.0, "P1": 3.0, "P2": 2.0, "P3": 1.0}
+        job_max_cost = float(job.get("max_cost_usd", budget_map.get(job_priority, 2.0)))
+        job_max_iter = job.get("max_iterations", 80)
         job_max_dur  = job.get("max_duration_seconds", 1800)
         guardrails = JobGuardrails(
             job_id=job_id,

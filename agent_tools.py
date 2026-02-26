@@ -819,7 +819,7 @@ AGENT_TOOLS = [
     },
     {
         "name": "read_tweets",
-        "description": "Read recent tweets from AI-related Twitter/X accounts via Nitter instances. Returns tweet text and timestamps.",
+        "description": "Read recent tweets from AI-related Twitter/X accounts via self-hosted RSSHub (primary), Nitter (fallback), or web search. Returns tweet text and timestamps.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -3084,80 +3084,121 @@ def _read_ai_news(limit: int = 10, source: str = None, hours: int = 24) -> str:
     return json.dumps({"articles": output, "count": len(output)}, indent=2)
 
 
-def _read_tweets(account: str = None, limit: int = 5) -> str:
-    """Read recent tweets from AI accounts via Nitter instances."""
+def _parse_rss_items(xml: str, acct: str, limit: int) -> list:
+    """Parse RSS XML and extract tweet items. Shared between RSSHub and Nitter."""
     import re
+    tweets = []
+    items = re.findall(r'<item[^>]*>(.*?)</item>', xml, re.DOTALL)
+    for item_xml in items[:limit]:
+        title = ""
+        link = ""
+        pub_date = ""
+        description = ""
 
+        t = re.search(r'<title[^>]*>(.*?)</title>', item_xml, re.DOTALL)
+        if t:
+            title = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', t.group(1)).strip()
+            title = re.sub(r'<[^>]+>', '', title).strip()
+
+        l = re.search(r'<link[^>]*>(.*?)</link>', item_xml, re.DOTALL)
+        if l:
+            link = l.group(1).strip()
+
+        p = re.search(r'<pubDate[^>]*>(.*?)</pubDate>', item_xml, re.DOTALL)
+        if p:
+            pub_date = p.group(1).strip()
+
+        d = re.search(r'<description[^>]*>(.*?)</description>', item_xml, re.DOTALL)
+        if d:
+            description = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', d.group(1), flags=re.DOTALL).strip()
+            description = re.sub(r'<[^>]+>', '', description).strip()
+            description = description[:280]
+
+        if title or description:
+            tweets.append({
+                "account": acct,
+                "text": description or title,
+                "link": link,
+                "published": pub_date,
+            })
+    return tweets
+
+
+RSSHUB_BASE_URL = "http://localhost:1200"
+
+
+def _read_tweets(account: str = None, limit: int = 5) -> str:
+    """Read recent tweets from AI accounts. Tries RSSHub (self-hosted) first, then Nitter, then web search."""
     accounts = [account] if account else AI_TWITTER_ACCOUNTS
     all_tweets = []
+    source = None
 
-    for nitter_url in NITTER_INSTANCES:
-        if all_tweets:
-            break  # Got results from one instance, stop trying
+    # === Strategy 1: Self-hosted RSSHub (localhost:1200) ===
+    for acct in accounts:
+        try:
+            url = f"{RSSHUB_BASE_URL}/twitter/user/{acct}"
+            with httpx.Client(timeout=15, follow_redirects=True) as client:
+                resp = client.get(url, headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; OpenClaw/2.0)"
+                })
+                # RSSHub returns HTML error pages on failure, RSS XML on success
+                if resp.status_code == 200 and '<?xml' in resp.text[:100]:
+                    tweets = _parse_rss_items(resp.text, acct, limit)
+                    if tweets:
+                        all_tweets.extend(tweets)
+                        source = "rsshub"
+        except Exception as e:
+            logger.warning(f"RSSHub failed for @{acct}: {e}")
 
-        for acct in accounts:
-            try:
-                url = f"{nitter_url}/{acct}/rss"
-                with httpx.Client(timeout=10, follow_redirects=True) as client:
-                    resp = client.get(url, headers={
-                        "User-Agent": "Mozilla/5.0 (compatible; OpenClaw/2.0)"
-                    })
-                    if resp.status_code != 200:
-                        continue
-
-                    xml = resp.text
-
-                    items = re.findall(r'<item[^>]*>(.*?)</item>', xml, re.DOTALL)
-                    for item_xml in items[:limit]:
-                        title = ""
-                        link = ""
-                        pub_date = ""
-                        description = ""
-
-                        t = re.search(r'<title[^>]*>(.*?)</title>', item_xml, re.DOTALL)
-                        if t:
-                            title = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', t.group(1)).strip()
-                            title = re.sub(r'<[^>]+>', '', title).strip()
-
-                        l = re.search(r'<link[^>]*>(.*?)</link>', item_xml, re.DOTALL)
-                        if l:
-                            link = l.group(1).strip()
-
-                        p = re.search(r'<pubDate[^>]*>(.*?)</pubDate>', item_xml, re.DOTALL)
-                        if p:
-                            pub_date = p.group(1).strip()
-
-                        d = re.search(r'<description[^>]*>(.*?)</description>', item_xml, re.DOTALL)
-                        if d:
-                            description = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', d.group(1), flags=re.DOTALL).strip()
-                            description = re.sub(r'<[^>]+>', '', description).strip()
-                            description = description[:280]
-
-                        if title or description:
-                            all_tweets.append({
-                                "account": acct,
-                                "text": description or title,
-                                "link": link,
-                                "published": pub_date,
-                            })
-
-            except Exception as e:
-                logger.warning(f"Failed to fetch tweets for @{acct} from {nitter_url}: {e}")
-                continue
-
+    # === Strategy 2: Nitter instances (fallback) ===
     if not all_tweets:
-        # Fallback: try web search for recent tweets
+        for nitter_url in NITTER_INSTANCES:
+            if all_tweets:
+                break
+            for acct in accounts:
+                try:
+                    url = f"{nitter_url}/{acct}/rss"
+                    with httpx.Client(timeout=10, follow_redirects=True) as client:
+                        resp = client.get(url, headers={
+                            "User-Agent": "Mozilla/5.0 (compatible; OpenClaw/2.0)"
+                        })
+                        if resp.status_code != 200:
+                            continue
+                        tweets = _parse_rss_items(resp.text, acct, limit)
+                        if tweets:
+                            all_tweets.extend(tweets)
+                            source = "nitter"
+                except Exception as e:
+                    logger.warning(f"Nitter failed for @{acct} from {nitter_url}: {e}")
+                    continue
+
+    # === Strategy 3: Web search fallback ===
+    if not all_tweets:
         try:
             search_accounts = account or "AnthropicAI OR OpenAI OR GoogleDeepMind"
             search_result = _web_search(f"site:twitter.com {search_accounts} AI latest")
             return json.dumps({
                 "tweets": [],
+                "source": "web_search_fallback",
                 "fallback_search": search_result,
-                "message": "Nitter instances unavailable. Used web search fallback."
+                "message": "RSSHub and Nitter unavailable. Used web search fallback.",
+                "hint": "To enable RSSHub Twitter feeds, add TWITTER_COOKIE to the RSSHub container. "
+                        "Run: docker stop rsshub && docker rm rsshub && "
+                        "docker run -d --name rsshub --restart always -p 1200:1200 "
+                        "-e TWITTER_COOKIE='auth_token=XXX; ct0=YYY' "
+                        "-e NODE_ENV=production -e CACHE_EXPIRE=3600 diygod/rsshub:latest"
             }, indent=2)
         except Exception:
             pass
-        return json.dumps({"tweets": [], "message": "All Nitter instances unavailable and web search fallback failed"})
+        return json.dumps({
+            "tweets": [],
+            "message": "All sources failed (RSSHub, Nitter, web search)",
+            "hint": "To enable RSSHub Twitter feeds, configure TWITTER_COOKIE on the RSSHub Docker container."
+        })
 
-    return json.dumps({"tweets": all_tweets, "count": len(all_tweets)}, indent=2)
+    return json.dumps({
+        "tweets": all_tweets,
+        "count": len(all_tweets),
+        "source": source
+    }, indent=2)
 
