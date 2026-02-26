@@ -713,8 +713,10 @@ app.include_router(github_router)
 
 # Include email notification routes
 app.include_router(email_router)
-# Authentication token - read from environment for security
-AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3")
+# Authentication token - MUST be set in environment (via .env or systemd)
+AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN")
+if not AUTH_TOKEN:
+    raise RuntimeError("GATEWAY_AUTH_TOKEN environment variable is required. Set it in .env or systemd unit.")
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
@@ -3916,6 +3918,61 @@ async def api_post_event(request: Request):
             return JSONResponse({"error": "Event engine not available"}, status_code=503)
         event_id = engine.emit(event_type, data)
         return {"ok": True, "event_id": event_id}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# PERPLEXITY RESEARCH ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/perplexity-research")
+async def api_perplexity_research_get(query: str, model: str = "sonar", focus: str = "web"):
+    """Deep research via Perplexity Sonar API (GET)."""
+    try:
+        from agent_tools import _perplexity_research
+        result = _perplexity_research(query=query, model=model, focus=focus)
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/perplexity-research")
+async def api_perplexity_research_post(request: Request):
+    """Deep research via Perplexity Sonar API (POST)."""
+    try:
+        body = await request.json()
+        from agent_tools import _perplexity_research
+        result = _perplexity_research(
+            query=body.get("query", ""),
+            model=body.get("model", "sonar"),
+            focus=body.get("focus", "web")
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# ═══════════════════════════════════════════════════════════════════════
+# AI NEWS & TWEETS ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/ai-news")
+async def api_ai_news(limit: int = 10, source: Optional[str] = None, hours: int = 24):
+    """Fetch latest AI news from RSS feeds."""
+    try:
+        from agent_tools import _read_ai_news
+        result = _read_ai_news(limit=limit, source=source, hours=hours)
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/tweets")
+async def api_tweets(account: Optional[str] = None, limit: int = 5):
+    """Read recent tweets from AI accounts via Nitter."""
+    try:
+        from agent_tools import _read_tweets
+        result = _read_tweets(account=account, limit=limit)
+        return json.loads(result)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

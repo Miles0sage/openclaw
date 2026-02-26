@@ -6,7 +6,7 @@
 set -euo pipefail
 
 GATEWAY="http://localhost:18789"
-AUTH="f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"
+AUTH="${GATEWAY_AUTH_TOKEN:?GATEWAY_AUTH_TOKEN must be set}"
 
 echo "=== OpenClaw Morning Briefing ==="
 echo "Date: $(date '+%Y-%m-%d %H:%M')"

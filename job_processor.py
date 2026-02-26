@@ -31,7 +31,7 @@ logger = logging.getLogger("job_processor")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(message)s')
 
 GATEWAY_URL = "http://localhost:18789"
-GATEWAY_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3")
+GATEWAY_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "")
 SLACK_RETRIES = 3
 SLACK_TIMEOUT = 15  # Increased timeout for slow connections
 

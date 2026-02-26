@@ -5,6 +5,7 @@ Available to agents via Claude tool_use in /api/chat, Slack, and Telegram
 """
 
 import os
+import re
 import subprocess
 import json
 import logging
@@ -42,6 +43,21 @@ BLOCKED_COMMANDS = [
     "rm -rf /", "rm -rf /*", "mkfs", "dd if=", ":(){ :|:& };:",
     "shutdown", "reboot", "halt", "poweroff",
     "> /dev/sd", "chmod -R 777 /",
+    # Interpreter inline-execution bypasses
+    "python3 -c", "python -c",
+    "node -e", "node --eval",
+    "perl -e", "perl -E",
+    "ruby -e",
+    "bash -c", "sh -c", "zsh -c",
+    # Dangerous file targets
+    "/etc/shadow", "/etc/passwd",
+    "~/.ssh", "/root/.ssh",
+]
+
+# Patterns for subshell / backtick injection with dangerous payloads
+_DANGEROUS_SUBSHELL_PATTERNS = [
+    re.compile(r'\$\(.*(?:rm|mkfs|dd|shutdown|reboot|halt|poweroff|chmod\s+-R|curl.*\|\s*(?:bash|sh)).*\)', re.IGNORECASE),
+    re.compile(r'`.*(?:rm|mkfs|dd|shutdown|reboot|halt|poweroff|chmod\s+-R|curl.*\|\s*(?:bash|sh)).*`', re.IGNORECASE),
 ]
 
 # Directories agents can write to
@@ -764,6 +780,56 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    # ═══════════════════════════════════════════════════════════════
+    # NEWS & SOCIAL MEDIA TOOLS
+    # ═══════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════
+    # PERPLEXITY RESEARCH
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "perplexity_research",
+        "description": "Deep research using Perplexity Sonar — returns AI-synthesized answers with web citations. Better than web_search for complex questions requiring synthesis.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Research question"},
+                "model": {"type": "string", "enum": ["sonar", "sonar-pro"], "description": "Model: sonar (fast, cheap $1/M) or sonar-pro (deeper, $3/$15 per M). Default: sonar"},
+                "focus": {"type": "string", "enum": ["web", "academic", "news"], "description": "Search focus: web (general), academic (papers/research), news (recent events). Default: web"}
+            },
+            "required": ["query"],
+            "additionalProperties": False
+        }
+    },
+    # ═══════════════════════════════════════════════════════════════
+    # NEWS & SOCIAL MEDIA TOOLS
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "read_ai_news",
+        "description": "Fetch RSS feeds from major AI news sources and return article summaries. Great for staying up to date on AI research, product launches, and industry news.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Max articles to return (default: 10)"},
+                "source": {"type": "string", "description": "Filter to specific source: anthropic, openai, deepmind, huggingface, arxiv, verge, arstechnica, techcrunch"},
+                "hours": {"type": "integer", "description": "Only return articles from last N hours (default: 24)"}
+            },
+            "required": [],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "read_tweets",
+        "description": "Read recent tweets from AI-related Twitter/X accounts via Nitter instances. Returns tweet text and timestamps.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "account": {"type": "string", "description": "Twitter username to read (without @). Default: reads from a list of top AI accounts"},
+                "limit": {"type": "integer", "description": "Max tweets per account (default: 5)"},
+            },
+            "required": [],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -897,6 +963,15 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             return _create_event(tool_input["event_type"], tool_input.get("data", {}))
         elif tool_name == "plan_my_day":
             return _plan_my_day(tool_input.get("focus", "all"))
+        # ═ Perplexity research
+        elif tool_name == "perplexity_research":
+            return _perplexity_research(tool_input["query"], tool_input.get("model", "sonar"),
+                                        tool_input.get("focus", "web"))
+        # ═ News & Social Media tools
+        elif tool_name == "read_ai_news":
+            return _read_ai_news(tool_input.get("limit", 10), tool_input.get("source"), tool_input.get("hours", 24))
+        elif tool_name == "read_tweets":
+            return _read_tweets(tool_input.get("account"), tool_input.get("limit", 5))
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:
@@ -1255,10 +1330,15 @@ def _is_command_safe(command: str) -> tuple[bool, str]:
     """Check if a command is safe to execute."""
     cmd_lower = command.strip().lower()
 
-    # Check blocked commands
+    # Check blocked commands (substring match)
     for blocked in BLOCKED_COMMANDS:
         if blocked in cmd_lower:
             return False, f"BLOCKED: '{blocked}' is not allowed"
+
+    # Check for dangerous subshell / backtick injection patterns
+    for pattern in _DANGEROUS_SUBSHELL_PATTERNS:
+        if pattern.search(command):
+            return False, "BLOCKED: dangerous subshell/backtick injection detected"
 
     # Check if starts with a safe prefix
     for prefix in SAFE_COMMAND_PREFIXES:
@@ -1287,14 +1367,49 @@ def _is_command_safe(command: str) -> tuple[bool, str]:
     return False, f"Command not in allowlist. Allowed prefixes: git, npm, python3, node, curl, vercel, docker, etc."
 
 
+# Paths that must NEVER be written to by agents (even if inside ALLOWED_WRITE_DIRS)
+BLOCKED_WRITE_PATHS = [
+    "/etc/",                # System configs
+    "/root/.ssh/",          # SSH keys
+    "/root/.ssh",           # SSH dir itself
+    "/root/.env",           # Environment secrets (edit manually only)
+    "/root/.bashrc",        # Shell config
+    "/root/.profile",       # Shell config
+]
+
+# Path components that block writes when found anywhere in the path
+BLOCKED_PATH_COMPONENTS = [
+    "/.git/",               # Git internals (objects, hooks, config)
+    "/.env",                # Dotenv files anywhere
+]
+
+
 def _is_path_writable(path: str) -> bool:
-    """Check if path is in allowed write directories."""
+    """Check if path is in allowed write directories and not in blocked paths."""
     abs_path = os.path.abspath(path)
+
+    # Check blocked paths (exact prefix match)
+    for blocked in BLOCKED_WRITE_PATHS:
+        if abs_path == blocked.rstrip("/") or abs_path.startswith(blocked):
+            return False
+
+    # Check blocked path components (substring match)
+    for component in BLOCKED_PATH_COMPONENTS:
+        if component in abs_path:
+            return False
+
     return any(abs_path.startswith(d) for d in ALLOWED_WRITE_DIRS)
 
 
 def _shell_execute(command: str, cwd: str = "/root", timeout: int = 60) -> str:
     """Execute a sandboxed shell command."""
+    # Sanitize cwd
+    if "\x00" in cwd:
+        return "⛔ Command rejected: null byte in working directory path"
+    cwd = os.path.realpath(os.path.abspath(cwd))
+    if not os.path.isdir(cwd):
+        return f"⛔ Working directory does not exist: {cwd}"
+
     safe, reason = _is_command_safe(command)
     if not safe:
         return f"⛔ Command rejected: {reason}"
@@ -1454,10 +1569,24 @@ def _vercel_deploy(action: str, project_path: str = "", project_name: str = "",
         return f"Vercel error: {e}"
 
 
+# Paths agents should never read (secrets, SSH keys, etc.)
+BLOCKED_READ_PATHS = [
+    "/root/.ssh/",
+    "/root/.env",
+    "/etc/shadow",
+]
+
+
 def _file_read(path: str, lines: int = None, offset: int = 0) -> str:
     """Read file contents with optional line limits."""
     try:
-        abs_path = os.path.abspath(path)
+        abs_path, err = _sanitize_path(path)
+        if err:
+            return f"⛔ {err}"
+        # Block reading sensitive files
+        for blocked in BLOCKED_READ_PATHS:
+            if abs_path == blocked.rstrip("/") or abs_path.startswith(blocked):
+                return f"⛔ Access denied: reading {path} is not permitted"
         if not os.path.exists(abs_path):
             return f"File not found: {path}"
         if os.path.isdir(abs_path):
@@ -1482,10 +1611,22 @@ def _file_read(path: str, lines: int = None, offset: int = 0) -> str:
         return f"Error reading file: {e}"
 
 
+def _sanitize_path(path: str) -> tuple[str, str | None]:
+    """Sanitize a file path. Returns (abs_path, error_msg_or_None)."""
+    # Block null bytes (can truncate paths in C-based libs)
+    if "\x00" in path:
+        return "", "BLOCKED: null byte in path"
+    # Resolve to absolute, collapsing any ../
+    abs_path = os.path.realpath(os.path.abspath(path))
+    return abs_path, None
+
+
 def _file_write(path: str, content: str, mode: str = "write") -> str:
     """Write or append to a file."""
     try:
-        abs_path = os.path.abspath(path)
+        abs_path, err = _sanitize_path(path)
+        if err:
+            return f"⛔ {err}"
         if not _is_path_writable(abs_path):
             return f"⛔ Path not writable: {path}. Allowed dirs: {', '.join(ALLOWED_WRITE_DIRS)}"
 
@@ -1643,7 +1784,9 @@ def _web_scrape(url: str, extract: str = "text", selector: str = "") -> str:
 def _file_edit(path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
     """Find and replace a string in a file (surgical edit, not overwrite)."""
     try:
-        abs_path = os.path.abspath(path)
+        abs_path, err = _sanitize_path(path)
+        if err:
+            return f"⛔ {err}"
         if not os.path.exists(abs_path):
             return f"File not found: {path}"
         if not _is_path_writable(abs_path):
@@ -2676,6 +2819,345 @@ def _plan_my_day(focus: str = "all") -> str:
             results["unread_emails"] = []
 
         results["focus"] = focus
+
+        # AI News Highlights
+        try:
+            news = _read_ai_news(limit=5, source=None, hours=24)
+            results["ai_news_highlights"] = news
+        except Exception:
+            results["ai_news_highlights"] = "Could not fetch AI news"
+
         return json.dumps(results, indent=2, default=str)
     except Exception as e:
         return f"Error planning day: {e}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# NEWS & SOCIAL MEDIA IMPLEMENTATIONS
+# ═══════════════════════════════════════════════════════════════
+
+RSS_FEEDS = {
+    "anthropic": "https://www.anthropic.com/rss.xml",
+    "openai": "https://openai.com/blog/rss.xml",
+    "deepmind": "https://deepmind.google/blog/rss.xml",
+    "huggingface": "https://huggingface.co/blog/feed.xml",
+    "arxiv": "https://rss.arxiv.org/rss/cs.AI",
+    "verge": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
+    "arstechnica": "https://feeds.arstechnica.com/arstechnica/technology-lab",
+    "techcrunch": "https://techcrunch.com/category/artificial-intelligence/feed/",
+}
+
+NITTER_INSTANCES = [
+    "https://nitter.poast.org",
+    "https://nitter.privacydev.net",
+    "https://nitter.woodland.cafe",
+]
+
+AI_TWITTER_ACCOUNTS = [
+    "AnthropicAI",
+    "OpenAI",
+    "GoogleDeepMind",
+    "ylecun",
+    "sama",
+]
+
+
+def _perplexity_research(query: str, model: str = "sonar", focus: str = "web") -> str:
+    """Deep research using Perplexity Sonar API — returns AI-synthesized answers with citations."""
+    api_key = os.environ.get("PERPLEXITY_API_KEY", "")
+    if not api_key:
+        return json.dumps({
+            "error": "PERPLEXITY_API_KEY not set. Get one at https://perplexity.ai/settings/api",
+            "hint": "Add PERPLEXITY_API_KEY to /root/.env and restart the gateway."
+        })
+
+    # Validate model
+    if model not in ("sonar", "sonar-pro"):
+        model = "sonar"
+
+    # Map focus to search_mode (Perplexity API parameter)
+    # Perplexity supports: web, academic, sec
+    search_mode_map = {"web": "web", "academic": "academic", "news": "web"}
+    search_mode = search_mode_map.get(focus, "web")
+
+    # Build recency filter for news focus
+    search_recency = None
+    if focus == "news":
+        search_recency = "week"
+
+    # Build system message
+    system_msg = "You are a research assistant. Provide detailed, factual answers with citations. Be thorough and precise."
+
+    # Build request body (OpenAI-compatible format)
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": query}
+        ],
+        "max_tokens": 4096,
+        "temperature": 0.2,
+        "search_mode": search_mode,
+    }
+
+    # Add recency filter for news
+    if search_recency:
+        body["search_recency_filter"] = search_recency
+
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.post(
+                "https://api.perplexity.ai/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                json=body
+            )
+
+            if resp.status_code != 200:
+                error_text = resp.text[:500]
+                return json.dumps({
+                    "error": f"Perplexity API returned {resp.status_code}",
+                    "detail": error_text
+                })
+
+            data = resp.json()
+
+            # Extract response
+            answer = ""
+            if data.get("choices"):
+                answer = data["choices"][0].get("message", {}).get("content", "")
+
+            # Extract citations
+            citations = data.get("citations", [])
+
+            # Extract usage for cost tracking
+            usage = data.get("usage", {})
+
+            result = {
+                "answer": answer,
+                "citations": citations,
+                "model": data.get("model", model),
+                "usage": {
+                    "prompt_tokens": usage.get("prompt_tokens", 0),
+                    "completion_tokens": usage.get("completion_tokens", 0),
+                    "total_tokens": usage.get("total_tokens", 0)
+                },
+                "query": query,
+                "focus": focus
+            }
+
+            return json.dumps(result)
+
+    except httpx.TimeoutException:
+        return json.dumps({"error": "Perplexity API request timed out (60s limit)"})
+    except Exception as e:
+        return json.dumps({"error": f"Perplexity research failed: {str(e)}"})
+
+
+def _read_ai_news(limit: int = 10, source: str = None, hours: int = 24) -> str:
+    """Fetch AI news from RSS feeds. Returns article titles, summaries, and links."""
+    import re
+    from datetime import timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    feeds_to_check = {}
+
+    if source and source.lower() in RSS_FEEDS:
+        feeds_to_check[source.lower()] = RSS_FEEDS[source.lower()]
+    else:
+        feeds_to_check = dict(RSS_FEEDS)
+
+    all_articles = []
+
+    for src_name, feed_url in feeds_to_check.items():
+        try:
+            with httpx.Client(timeout=10, follow_redirects=True) as client:
+                resp = client.get(feed_url, headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; OpenClaw/2.0)"
+                })
+                if resp.status_code != 200:
+                    continue
+
+                xml = resp.text
+
+                # Simple XML parsing for RSS/Atom items
+                items = re.findall(r'<item[^>]*>(.*?)</item>', xml, re.DOTALL)
+                if not items:
+                    items = re.findall(r'<entry[^>]*>(.*?)</entry>', xml, re.DOTALL)
+
+                for item_xml in items[:20]:  # Check up to 20 per feed
+                    title = ""
+                    link = ""
+                    description = ""
+                    pub_date = ""
+
+                    # Title
+                    t = re.search(r'<title[^>]*>(.*?)</title>', item_xml, re.DOTALL)
+                    if t:
+                        title = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', t.group(1)).strip()
+                        title = re.sub(r'<[^>]+>', '', title).strip()
+
+                    # Link (RSS uses <link>, Atom uses <link href="..."/>)
+                    l = re.search(r'<link[^>]*href="([^"]+)"', item_xml)
+                    if l:
+                        link = l.group(1)
+                    else:
+                        l = re.search(r'<link[^>]*>(.*?)</link>', item_xml, re.DOTALL)
+                        if l:
+                            link = l.group(1).strip()
+
+                    # Description/summary
+                    d = re.search(r'<description[^>]*>(.*?)</description>', item_xml, re.DOTALL)
+                    if not d:
+                        d = re.search(r'<summary[^>]*>(.*?)</summary>', item_xml, re.DOTALL)
+                    if d:
+                        description = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', d.group(1), flags=re.DOTALL).strip()
+                        description = re.sub(r'<[^>]+>', '', description).strip()
+                        description = description[:200]
+
+                    # Published date
+                    p = re.search(r'<pubDate[^>]*>(.*?)</pubDate>', item_xml, re.DOTALL)
+                    if not p:
+                        p = re.search(r'<published[^>]*>(.*?)</published>', item_xml, re.DOTALL)
+                    if not p:
+                        p = re.search(r'<updated[^>]*>(.*?)</updated>', item_xml, re.DOTALL)
+                    if p:
+                        pub_date = p.group(1).strip()
+
+                    # Try to parse date and filter by cutoff
+                    article_time = None
+                    if pub_date:
+                        try:
+                            from email.utils import parsedate_to_datetime
+                            article_time = parsedate_to_datetime(pub_date)
+                        except Exception:
+                            try:
+                                # Try ISO format
+                                article_time = datetime.fromisoformat(pub_date.replace("Z", "+00:00"))
+                            except Exception:
+                                pass
+
+                    if article_time and article_time.tzinfo and article_time < cutoff:
+                        continue
+
+                    if title:
+                        all_articles.append({
+                            "source": src_name,
+                            "title": title,
+                            "link": link,
+                            "summary": description,
+                            "published": pub_date,
+                            "parsed_time": article_time,
+                        })
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch RSS from {src_name}: {e}")
+            continue
+
+    # Sort by date (newest first), articles without dates go last
+    def sort_key(a):
+        if a.get("parsed_time"):
+            return a["parsed_time"].timestamp()
+        return 0
+
+    all_articles.sort(key=sort_key, reverse=True)
+
+    # Limit results
+    all_articles = all_articles[:limit]
+
+    if not all_articles:
+        return json.dumps({"articles": [], "message": f"No AI news found in the last {hours} hours"})
+
+    # Clean up for output (remove parsed_time which isn't serializable)
+    output = []
+    for a in all_articles:
+        output.append({
+            "source": a["source"],
+            "title": a["title"],
+            "link": a["link"],
+            "summary": a["summary"],
+            "published": a["published"],
+        })
+
+    return json.dumps({"articles": output, "count": len(output)}, indent=2)
+
+
+def _read_tweets(account: str = None, limit: int = 5) -> str:
+    """Read recent tweets from AI accounts via Nitter instances."""
+    import re
+
+    accounts = [account] if account else AI_TWITTER_ACCOUNTS
+    all_tweets = []
+
+    for nitter_url in NITTER_INSTANCES:
+        if all_tweets:
+            break  # Got results from one instance, stop trying
+
+        for acct in accounts:
+            try:
+                url = f"{nitter_url}/{acct}/rss"
+                with httpx.Client(timeout=10, follow_redirects=True) as client:
+                    resp = client.get(url, headers={
+                        "User-Agent": "Mozilla/5.0 (compatible; OpenClaw/2.0)"
+                    })
+                    if resp.status_code != 200:
+                        continue
+
+                    xml = resp.text
+
+                    items = re.findall(r'<item[^>]*>(.*?)</item>', xml, re.DOTALL)
+                    for item_xml in items[:limit]:
+                        title = ""
+                        link = ""
+                        pub_date = ""
+                        description = ""
+
+                        t = re.search(r'<title[^>]*>(.*?)</title>', item_xml, re.DOTALL)
+                        if t:
+                            title = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', t.group(1)).strip()
+                            title = re.sub(r'<[^>]+>', '', title).strip()
+
+                        l = re.search(r'<link[^>]*>(.*?)</link>', item_xml, re.DOTALL)
+                        if l:
+                            link = l.group(1).strip()
+
+                        p = re.search(r'<pubDate[^>]*>(.*?)</pubDate>', item_xml, re.DOTALL)
+                        if p:
+                            pub_date = p.group(1).strip()
+
+                        d = re.search(r'<description[^>]*>(.*?)</description>', item_xml, re.DOTALL)
+                        if d:
+                            description = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', d.group(1), flags=re.DOTALL).strip()
+                            description = re.sub(r'<[^>]+>', '', description).strip()
+                            description = description[:280]
+
+                        if title or description:
+                            all_tweets.append({
+                                "account": acct,
+                                "text": description or title,
+                                "link": link,
+                                "published": pub_date,
+                            })
+
+            except Exception as e:
+                logger.warning(f"Failed to fetch tweets for @{acct} from {nitter_url}: {e}")
+                continue
+
+    if not all_tweets:
+        # Fallback: try web search for recent tweets
+        try:
+            search_accounts = account or "AnthropicAI OR OpenAI OR GoogleDeepMind"
+            search_result = _web_search(f"site:twitter.com {search_accounts} AI latest")
+            return json.dumps({
+                "tweets": [],
+                "fallback_search": search_result,
+                "message": "Nitter instances unavailable. Used web search fallback."
+            }, indent=2)
+        except Exception:
+            pass
+        return json.dumps({"tweets": [], "message": "All Nitter instances unavailable and web search fallback failed"})
+
+    return json.dumps({"tweets": all_tweets, "count": len(all_tweets)}, indent=2)
+

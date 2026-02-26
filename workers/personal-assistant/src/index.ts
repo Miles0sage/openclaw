@@ -46,6 +46,9 @@ interface Env {
   RATE_LIMIT_PER_MINUTE: string;
   GEMINI_API_KEY: string;
   GEMINI_MODEL: string;
+  TELEGRAM_BOT_TOKEN: string;
+  TELEGRAM_OWNER_ID: string;
+  TELEGRAM_WEBHOOK_SECRET?: string;
   DB: D1Database;
   KV_CACHE: KVNamespace;
   KV_SESSIONS: KVNamespace;
@@ -109,7 +112,7 @@ function checkRateLimit(ip: string, maxPerMinute: number): boolean {
 }
 
 // Paths that are exempt from auth and rate limiting
-const PUBLIC_PATHS = new Set(["/", "/health", "/ws"]);
+const PUBLIC_PATHS = new Set(["/", "/health", "/ws", "/webhook/telegram"]);
 
 // ---------------------------------------------------------------------------
 // Gemini Function Declarations — OpenClaw tools
@@ -887,7 +890,7 @@ const OPENCLAW_TOOLS = [
       {
         name: "plan_my_day",
         description:
-          "Plan the user's day: fetches calendar events, pending jobs, agency status, and emails to create a prioritized daily plan. Call this when the user asks to plan their day or wants a morning briefing.",
+          "Plan the user's day: fetches calendar events, pending jobs, agency status, emails, and AI news highlights to create a prioritized daily plan. Call this when the user asks to plan their day or wants a morning briefing.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -895,6 +898,60 @@ const OPENCLAW_TOOLS = [
               type: "STRING",
               description: "Optional focus area: work, personal, or all (default: all)",
             },
+          },
+        },
+      },
+      // --- Perplexity Deep Research ---
+      {
+        name: "perplexity_research",
+        description:
+          "Deep research using Perplexity Sonar — returns AI-synthesized answers with web citations. Better than web_search for complex questions requiring synthesis.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: { type: "STRING", description: "Research question" },
+            model: {
+              type: "STRING",
+              description: "Model: sonar (fast, cheap) or sonar-pro (deeper). Default: sonar",
+            },
+            focus: {
+              type: "STRING",
+              description: "Search focus: web, academic, or news. Default: web",
+            },
+          },
+          required: ["query"],
+        },
+      },
+      // --- AI News & Social Media ---
+      {
+        name: "read_ai_news",
+        description:
+          "Fetch latest AI news from RSS feeds (Anthropic, OpenAI, DeepMind, HuggingFace, arXiv, The Verge, Ars Technica, TechCrunch). Returns article titles, summaries, and links.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            limit: { type: "NUMBER", description: "Max articles to return (default: 10)" },
+            source: {
+              type: "STRING",
+              description:
+                "Filter to specific source: anthropic, openai, deepmind, huggingface, arxiv, verge, arstechnica, techcrunch",
+            },
+            hours: {
+              type: "NUMBER",
+              description: "Only return articles from last N hours (default: 24)",
+            },
+          },
+        },
+      },
+      {
+        name: "read_tweets",
+        description:
+          "Read recent tweets from AI thought leaders and companies via Nitter. Accounts: @AnthropicAI, @OpenAI, @GoogleDeepMind, @ylecun, @sama",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            account: { type: "STRING", description: "Twitter username to read (without @)" },
+            limit: { type: "NUMBER", description: "Max tweets per account (default: 5)" },
           },
         },
       },
@@ -1338,8 +1395,32 @@ async function executeTool(
           }),
         })
       ).json();
+    // --- Perplexity Deep Research ---
+    case "perplexity_research": {
+      const pParams = new URLSearchParams();
+      pParams.set("query", String(args.query || ""));
+      if (args.model) pParams.set("model", String(args.model));
+      if (args.focus) pParams.set("focus", String(args.focus));
+      return (await gatewayFetch(env, `/api/perplexity-research?${pParams.toString()}`)).json();
+    }
+    // --- AI News & Social Media ---
+    case "read_ai_news": {
+      const params = new URLSearchParams();
+      if (args.limit) params.set("limit", String(args.limit));
+      if (args.source) params.set("source", String(args.source));
+      if (args.hours) params.set("hours", String(args.hours));
+      const qs = params.toString();
+      return (await gatewayFetch(env, `/api/ai-news${qs ? `?${qs}` : ""}`)).json();
+    }
+    case "read_tweets": {
+      const tParams = new URLSearchParams();
+      if (args.account) tParams.set("account", String(args.account));
+      if (args.limit) tParams.set("limit", String(args.limit));
+      const tqs = tParams.toString();
+      return (await gatewayFetch(env, `/api/tweets${tqs ? `?${tqs}` : ""}`)).json();
+    }
     case "plan_my_day": {
-      const [calRes, jobsRes, statusRes, emailRes] = await Promise.all([
+      const [calRes, jobsRes, statusRes, emailRes, newsRes] = await Promise.all([
         gatewayFetch(env, "/api/calendar/today")
           .then((r) => r.json())
           .catch(() => ({ events: [] })),
@@ -1352,6 +1433,9 @@ async function executeTool(
         gatewayFetch(env, "/api/gmail/inbox?max_results=10")
           .then((r) => r.json())
           .catch(() => ({ messages: [] })),
+        gatewayFetch(env, "/api/ai-news?limit=5&hours=24")
+          .then((r) => r.json())
+          .catch(() => ({ articles: [] })),
       ]);
       return {
         calendar: calRes,
@@ -1364,6 +1448,7 @@ async function executeTool(
         recent_completed: (jobsRes.jobs || []).filter((j: any) => j.status === "done").slice(0, 5),
         agency_status: statusRes,
         unread_emails: emailRes.messages || emailRes.emails || [],
+        ai_news_highlights: newsRes.articles || [],
         focus: args.focus || "all",
         generated_at: new Date().toISOString(),
       };
@@ -1458,10 +1543,11 @@ app.get("/health", async (c) => {
 
 const SYSTEM_PROMPT = `You are Overseer — Miles's personal AI agency assistant, running on Gemini 2.5 Flash at the Cloudflare edge.
 
-CAPABILITIES: You have live access to the OpenClaw agency via 47 function calls. You can:
+CAPABILITIES: You have live access to the OpenClaw agency via 59 function calls. You can:
 - **Jobs & Proposals**: Create, list, kill, approve, and monitor autonomous jobs and proposals
 - **GitHub**: Get repo info (issues, PRs, commits), create issues
 - **Web Research**: Search the web, fetch/scrape URLs, deep research topics
+- **AI News & Social**: Read AI news from RSS feeds (Anthropic, OpenAI, DeepMind, etc.), read tweets from AI accounts
 - **File Operations**: Read, write, edit files; glob search; grep across codebases
 - **Shell & System**: Execute commands, manage processes, check ports, install packages
 - **Git**: Full git operations (status, commit, push, pull, branch, diff, clone, checkout)
@@ -1495,6 +1581,7 @@ ROUTING:
 - When Miles asks about events/activity, call get_events.
 - When Miles asks about a GitHub repo, call github_repo_info.
 - When Miles asks to search the web or look something up, call web_search or research_task.
+- When Miles asks for deep research, analysis, or "look into X thoroughly", use perplexity_research for high-quality synthesized answers with citations. Use web_search for quick lookups.
 - When Miles asks to read/edit/write a file, use file_read/file_edit/file_write.
 - When Miles asks to run a command, use shell_execute.
 - When Miles asks about git status/commits/push, use git_operations.
@@ -1503,7 +1590,230 @@ ROUTING:
 - When Miles asks about predictions/markets, use prediction_market.
 - When Miles asks to send a Slack message, use send_slack_message.
 - When Miles asks about security scanning, use security_scan.
+- When Miles asks about AI news, latest developments, or what's happening in AI, call read_ai_news.
+- When Miles asks about tweets or what AI accounts are posting, call read_tweets.
 - For complex coding/security/database questions, use send_chat_to_gateway to delegate to a specialist.`;
+
+// ---------------------------------------------------------------------------
+// POST /webhook/telegram — Telegram bot webhook handler
+// ---------------------------------------------------------------------------
+app.post("/webhook/telegram", async (c) => {
+  const env = c.env;
+
+  // Parse Telegram update
+  let update: Record<string, unknown>;
+  try {
+    update = await c.req.json();
+  } catch {
+    return c.json({ ok: false }, 400);
+  }
+
+  const message = update.message as Record<string, unknown> | undefined;
+  if (!message || !message.text) {
+    return c.json({ ok: true }); // ignore non-text updates
+  }
+
+  const chat = message.chat as Record<string, unknown>;
+  const chatId = String(chat.id);
+  const text = String(message.text);
+
+  // Owner-only check
+  if (env.TELEGRAM_OWNER_ID && chatId !== env.TELEGRAM_OWNER_ID) {
+    return c.json({ ok: true }); // silently ignore non-owner messages
+  }
+
+  // Send "typing" indicator
+  const tgApi = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
+  c.executionCtx.waitUntil(
+    fetch(`${tgApi}/sendChatAction`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, action: "typing" }),
+    }).catch(() => {}),
+  );
+
+  // Load session from KV (keyed by telegram chat)
+  const sessionKey = `telegram:${chatId}`;
+  let session: SessionData | null = null;
+  try {
+    const raw = await env.KV_SESSIONS.get(sessionKey);
+    if (raw) session = JSON.parse(raw);
+  } catch {
+    // start fresh
+  }
+
+  if (!session) {
+    session = {
+      messages: [],
+      created: new Date().toISOString(),
+      updated: new Date().toISOString(),
+      messageCount: 0,
+    };
+  }
+
+  // Append user message
+  session.messages.push({
+    role: "user",
+    content: text,
+    timestamp: new Date().toISOString(),
+  });
+
+  // Build Gemini conversation (last 20 messages)
+  const recentMessages = session.messages.slice(-20);
+  const geminiContents: Array<Record<string, unknown>> = recentMessages.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }));
+
+  const geminiModel = env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${env.GEMINI_API_KEY}`;
+
+  let reply = "";
+  const MAX_TOOL_ITERATIONS = 3;
+
+  try {
+    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+      const requestBody: Record<string, unknown> = {
+        contents: geminiContents,
+        systemInstruction: {
+          parts: [
+            {
+              text:
+                SYSTEM_PROMPT +
+                "\n\nYou are responding via Telegram. Keep responses concise and mobile-friendly. Use short paragraphs, not walls of text.",
+            },
+          ],
+        },
+        generationConfig: {
+          maxOutputTokens: 2048,
+          temperature: 0.7,
+          thinkingConfig: { thinkingBudget: 0 },
+        },
+        tools: OPENCLAW_TOOLS,
+      };
+
+      const geminiResp = await fetch(geminiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!geminiResp.ok) {
+        reply = "Gemini API error. Try again in a moment.";
+        break;
+      }
+
+      const geminiData = (await geminiResp.json()) as Record<string, unknown>;
+      const candidates = geminiData.candidates as Array<Record<string, unknown>> | undefined;
+
+      if (!candidates || candidates.length === 0) {
+        reply = "No response from Gemini.";
+        break;
+      }
+
+      const content = candidates[0].content as Record<string, unknown> | undefined;
+      const parts = content?.parts as Array<Record<string, unknown>> | undefined;
+
+      if (!parts || parts.length === 0) {
+        reply = "No response from Gemini.";
+        break;
+      }
+
+      // Check for function call
+      const functionCallPart = parts.find((p) => p.functionCall);
+
+      if (functionCallPart) {
+        const functionCall = functionCallPart.functionCall as {
+          name: string;
+          args: Record<string, unknown>;
+        };
+
+        let toolResult: unknown;
+        try {
+          toolResult = await executeTool(env, functionCall.name, functionCall.args || {});
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          toolResult = { error: errMsg };
+        }
+
+        geminiContents.push({
+          role: "model",
+          parts: [{ functionCall: { name: functionCall.name, args: functionCall.args || {} } }],
+        });
+
+        const responsePayload =
+          typeof toolResult === "object" && toolResult !== null
+            ? toolResult
+            : { result: toolResult };
+        geminiContents.push({
+          role: "function",
+          parts: [{ functionResponse: { name: functionCall.name, response: responsePayload } }],
+        });
+
+        continue;
+      }
+
+      // Extract text reply
+      for (const p of parts) {
+        if (p.text) {
+          reply = p.text as string;
+          break;
+        }
+      }
+      break;
+    }
+
+    if (!reply) {
+      reply = "Tool executed but no summary generated.";
+    }
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    reply = `Error: ${errMsg}`;
+  }
+
+  // Save session
+  session.messages.push({
+    role: "assistant",
+    content: reply,
+    timestamp: new Date().toISOString(),
+  });
+  session.updated = new Date().toISOString();
+  session.messageCount = session.messages.length;
+
+  c.executionCtx.waitUntil(
+    env.KV_SESSIONS.put(sessionKey, JSON.stringify(session), {
+      expirationTtl: 86400,
+    }).catch(() => {}),
+  );
+
+  // Send reply via Telegram (split if > 4096 chars)
+  const maxLen = 4096;
+  const chunks: string[] = [];
+  for (let i = 0; i < reply.length; i += maxLen) {
+    chunks.push(reply.slice(i, i + maxLen));
+  }
+
+  for (const chunk of chunks) {
+    await fetch(`${tgApi}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: chunk,
+        parse_mode: "Markdown",
+      }),
+    }).catch(() => {
+      // Retry without Markdown if parse fails
+      return fetch(`${tgApi}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: chunk }),
+      });
+    });
+  }
+
+  return c.json({ ok: true });
+});
 
 // ---------------------------------------------------------------------------
 // POST /api/chat — Gemini-powered chat with tool calling + KV sessions
@@ -2323,7 +2633,7 @@ const TOOL_CATEGORIES={
   search_memory:'memory',save_memory:'memory',get_reflections:'memory',
   list_proposals:'jobs',create_proposal:'jobs',
   github_repo_info:'github',github_create_issue:'github',
-  web_search:'system',web_fetch:'system',web_scrape:'system',research_task:'system',
+  web_search:'system',web_fetch:'system',web_scrape:'system',research_task:'system',perplexity_research:'system',
   send_chat_to_gateway:'agents',
   get_gmail_inbox:'system',get_calendar_today:'system',create_calendar_event:'system',get_calendar_upcoming:'system',list_calendars:'system',trash_emails:'system',label_emails:'system',send_email:'system',get_gmail_labels:'system',
   shell_execute:'system',git_operations:'github',
@@ -2349,7 +2659,7 @@ const TOOL_LABELS={
   get_reflections:'REFLECT',list_proposals:'PROPOSALS',create_proposal:'PROPOSAL',
   github_repo_info:'GITHUB',github_create_issue:'NEW ISSUE',
   web_search:'SEARCH',web_fetch:'FETCH',web_scrape:'SCRAPE',
-  research_task:'RESEARCH',send_chat_to_gateway:'DELEGATE',
+  research_task:'RESEARCH',perplexity_research:'PERPLEXITY',send_chat_to_gateway:'DELEGATE',
   get_gmail_inbox:'GMAIL',get_calendar_today:'CALENDAR',create_calendar_event:'CALENDAR',get_calendar_upcoming:'CALENDAR',list_calendars:'CALENDAR',trash_emails:'GMAIL',label_emails:'GMAIL',send_email:'GMAIL',get_gmail_labels:'GMAIL',
   shell_execute:'SHELL',git_operations:'GIT',vercel_deploy:'DEPLOY',
   file_read:'FILE',file_write:'WRITE',file_edit:'EDIT',

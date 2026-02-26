@@ -5,21 +5,31 @@ Provides:
 - API Key Management (per-client authentication)
 - Plan-based usage limits (free, starter, pro, enterprise)
 - Usage tracking and billing
-- Stripe integration (stubbed, ready for live keys)
+- Stripe integration with Price IDs, overage metering, and customer portal
 - Admin endpoints for client management
 
-Storage: /tmp/openclaw_clients.json (persistent JSON)
+Storage: /root/openclaw/data/clients/clients.json (persistent JSON)
 Endpoints:
   - POST   /api/intake                    (requires X-Client-Key)
   - GET    /api/jobs                      (requires X-Client-Key)
   - GET    /api/billing/usage             (requires X-Client-Key)
   - GET    /api/billing/plans             (no auth required)
   - POST   /api/billing/checkout          (requires X-Client-Key)
+  - POST   /api/billing/portal            (requires X-Client-Key)
   - POST   /api/billing/webhook           (no auth required, Stripe signature verified)
   - POST   /api/admin/clients             (requires X-Auth-Token)
   - GET    /api/admin/clients             (requires X-Auth-Token)
   - PUT    /api/admin/clients/{id}/credits (requires X-Auth-Token)
   - DELETE /api/admin/clients/{id}        (requires X-Auth-Token)
+
+Env vars for Stripe:
+  - STRIPE_SECRET_KEY          — Stripe secret key (sk_live_... or sk_test_...)
+  - STRIPE_PUBLIC_KEY          — Stripe publishable key
+  - STRIPE_WEBHOOK_SECRET      — Webhook endpoint signing secret
+  - STRIPE_PRICE_STARTER       — Stripe Price ID for Starter plan
+  - STRIPE_PRICE_PRO           — Stripe Price ID for Pro plan
+  - STRIPE_PRICE_OVERAGE       — Stripe Price ID for usage-based overage
+  - STRIPE_METER_EVENT_NAME    — Stripe Billing Meter event name (default: openclaw_job_completed)
 """
 
 from fastapi import APIRouter, HTTPException, Request, Header, Query
@@ -86,10 +96,25 @@ STRIPE_PUBLIC_KEY = os.getenv("STRIPE_PUBLIC_KEY", "pk_test_stub")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "whsec_test_stub")
 
+# Stripe Price IDs — pre-created in Stripe Dashboard for each plan
+# These replace inline price_data so Stripe handles product catalog centrally
+STRIPE_PRICE_STARTER = os.getenv("STRIPE_PRICE_STARTER", "")
+STRIPE_PRICE_PRO = os.getenv("STRIPE_PRICE_PRO", "")
+STRIPE_PRICE_OVERAGE = os.getenv("STRIPE_PRICE_OVERAGE", "")
+
+# Stripe Billing Meter event name for usage-based overage billing
+STRIPE_METER_EVENT_NAME = os.getenv("STRIPE_METER_EVENT_NAME", "openclaw_job_completed")
+
 # Configure stripe SDK
 stripe.api_key = STRIPE_SECRET_KEY
 
-# Stripe price IDs (in cents) for checkout sessions
+# Map plan IDs to their Stripe Price IDs
+PLAN_STRIPE_PRICES = {
+    "starter": STRIPE_PRICE_STARTER,
+    "pro": STRIPE_PRICE_PRO,
+}
+
+# Fallback: in-line price amounts in cents (used only when Price IDs are not set)
 PLAN_PRICES_CENTS = {
     "starter": 4900,   # $49.00/month
     "pro": 19900,      # $199.00/month
@@ -131,6 +156,46 @@ def _generate_api_key() -> str:
     """Generate a unique API key (format: oc_live_<32 hex chars>)."""
     random_part = secrets.token_hex(16)  # 32 hex chars
     return f"oc_live_{random_part}"
+
+
+def _find_client_by_stripe_customer(clients: Dict[str, Any], stripe_customer_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Look up a client record by their Stripe customer ID.
+    Returns the client dict (mutable reference from the clients dict) or None.
+    """
+    for client in clients.values():
+        if client.get("stripe_customer_id") == stripe_customer_id:
+            return client
+    return None
+
+
+def _report_overage_meter_event(stripe_customer_id: str) -> bool:
+    """
+    Report a usage-based meter event to Stripe for overage billing.
+    Called when a paid-plan client exhausts their included credits.
+    Returns True if the event was reported successfully, False otherwise.
+    """
+    if not stripe.api_key or stripe.api_key.startswith("sk_test_stub"):
+        logger.info(f"[STUB] Would report meter event for {stripe_customer_id} (Stripe not configured)")
+        return False
+
+    if not STRIPE_PRICE_OVERAGE:
+        logger.debug("STRIPE_PRICE_OVERAGE not set, skipping overage meter event")
+        return False
+
+    try:
+        stripe.billing.MeterEvent.create(
+            event_name=STRIPE_METER_EVENT_NAME,
+            payload={
+                "stripe_customer_id": stripe_customer_id,
+                "value": "1",
+            },
+        )
+        logger.info(f"Reported overage meter event for customer {stripe_customer_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to report overage meter event for {stripe_customer_id}: {e}")
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -251,6 +316,7 @@ def check_job_limit(client: Dict[str, Any]) -> tuple[bool, str]:
 def deduct_credit(client_id: str, reason: str = "job submission") -> bool:
     """
     Deduct one job credit from a client's account.
+    When credits hit 0 on a paid plan, reports a Stripe meter event for overage billing.
     Returns True if successful, False if client not found.
     """
     clients = _load_clients()
@@ -261,7 +327,17 @@ def deduct_credit(client_id: str, reason: str = "job submission") -> bool:
     plan = client.get("plan", "free")
 
     if plan != "enterprise":
-        client["credits_remaining"] = max(0, client.get("credits_remaining", 0) - 1)
+        credits_before = client.get("credits_remaining", 0)
+        client["credits_remaining"] = max(0, credits_before - 1)
+        credits_remaining = client["credits_remaining"]
+
+        # Report overage meter event to Stripe when credits are exhausted on a paid plan
+        if credits_remaining <= 0 and plan in ("starter", "pro"):
+            stripe_cid = client.get("stripe_customer_id")
+            if stripe_cid:
+                _report_overage_meter_event(stripe_cid)
+            else:
+                logger.warning(f"Client {client_id[:8]} exhausted credits but has no stripe_customer_id for overage metering")
 
     client["updated_at"] = _now_iso()
     _save_clients(clients)
@@ -411,16 +487,22 @@ async def create_checkout_session(
         raise HTTPException(status_code=400, detail="Enterprise plans require contacting sales")
 
     plan_name = plan["name"]
+    stripe_price_id = PLAN_STRIPE_PRICES.get(plan_id, "")
     plan_price_cents = PLAN_PRICES_CENTS.get(plan_id)
-    if plan_price_cents is None:
+
+    if not stripe_price_id and plan_price_cents is None:
         raise HTTPException(status_code=400, detail=f"No price configured for plan: {plan_id}")
 
     # Use real Stripe checkout if STRIPE_SECRET_KEY is configured, otherwise return a mock URL
     if stripe.api_key and not stripe.api_key.startswith("sk_test_stub"):
         try:
-            session = stripe.checkout.Session.create(
-                payment_method_types=["card"],
-                line_items=[{
+            # Build line items — prefer pre-created Price IDs over inline price_data
+            if stripe_price_id:
+                # Production path: use pre-created Stripe Price ID
+                line_items = [{"price": stripe_price_id, "quantity": 1}]
+            else:
+                # Fallback path: inline price_data (for dev/test when Price IDs aren't set)
+                line_items = [{
                     "price_data": {
                         "currency": "usd",
                         "product_data": {"name": f"Overseer AI Agency - {plan_name} Plan"},
@@ -428,13 +510,26 @@ async def create_checkout_session(
                         "recurring": {"interval": "month"},
                     },
                     "quantity": 1,
-                }],
-                mode="subscription",
-                client_reference_id=client["client_id"],
-                customer_email=client.get("email"),
-                success_url=os.environ.get("STRIPE_SUCCESS_URL", "https://overseerclaw.uk/success"),
-                cancel_url=os.environ.get("STRIPE_CANCEL_URL", "https://overseerclaw.uk/cancel"),
-            )
+                }]
+
+            # If client already has a Stripe customer ID, attach to existing customer
+            checkout_kwargs = {
+                "payment_method_types": ["card"],
+                "line_items": line_items,
+                "mode": "subscription",
+                "client_reference_id": client["client_id"],
+                "success_url": os.environ.get("STRIPE_SUCCESS_URL", "https://overseerclaw.uk/success"),
+                "cancel_url": os.environ.get("STRIPE_CANCEL_URL", "https://overseerclaw.uk/cancel"),
+                "metadata": {"plan_id": plan_id},
+            }
+
+            # Attach to existing Stripe customer if available, otherwise use email
+            if client.get("stripe_customer_id"):
+                checkout_kwargs["customer"] = client["stripe_customer_id"]
+            else:
+                checkout_kwargs["customer_email"] = client.get("email")
+
+            session = stripe.checkout.Session.create(**checkout_kwargs)
             logger.info(f"Stripe checkout session created for {client['client_id']}: {plan_id} ({session.id})")
             return CheckoutResponse(
                 session_id=session.id,
@@ -496,7 +591,8 @@ async def handle_stripe_webhook(request: Request) -> Dict[str, str]:
             client_id = session_obj.get("client_reference_id")
             subscription_id = session_obj.get("subscription")
             customer_id = session_obj.get("customer")
-            logger.info(f"Checkout complete: client={client_id}, subscription={subscription_id}")
+            plan_id = (session_obj.get("metadata") or {}).get("plan_id")
+            logger.info(f"Checkout complete: client={client_id}, subscription={subscription_id}, plan={plan_id}")
 
             if client_id:
                 clients = _load_clients()
@@ -505,17 +601,114 @@ async def handle_stripe_webhook(request: Request) -> Dict[str, str]:
                         clients[client_id]["stripe_subscription_id"] = subscription_id
                     if customer_id:
                         clients[client_id]["stripe_customer_id"] = customer_id
+                    # Upgrade plan if metadata included the plan_id
+                    if plan_id and plan_id in PLANS:
+                        old_plan = clients[client_id].get("plan", "free")
+                        clients[client_id]["plan"] = plan_id
+                        # Reset credits to the new plan's limit
+                        new_limit = PLANS[plan_id]["job_limit"]
+                        clients[client_id]["credits_remaining"] = new_limit if new_limit else 0
+                        # Reset billing cycle
+                        now = datetime.now(timezone.utc)
+                        clients[client_id]["billing_cycle_start"] = now.isoformat()
+                        clients[client_id]["billing_cycle_end"] = (now + timedelta(days=30)).isoformat()
+                        logger.info(f"Upgraded client {client_id[:8]} from {old_plan} to {plan_id}")
                     clients[client_id]["updated_at"] = _now_iso()
                     _save_clients(clients)
                     logger.info(f"Updated Stripe IDs for client {client_id[:8]}")
 
+        elif event_type == "invoice.paid":
+            # Invoice paid — reset credits for the new billing period on renewal
+            invoice_obj = event.get("data", {}).get("object", {})
+            customer_id = invoice_obj.get("customer")
+            subscription_id = invoice_obj.get("subscription")
+            billing_reason = invoice_obj.get("billing_reason", "")
+            logger.info(f"Invoice paid: customer={customer_id}, reason={billing_reason}")
+
+            if customer_id and billing_reason == "subscription_cycle":
+                # Renewal invoice — reset credits for the new billing period
+                clients = _load_clients()
+                client = _find_client_by_stripe_customer(clients, customer_id)
+                if client:
+                    plan = client.get("plan", "free")
+                    plan_limit = PLANS.get(plan, {}).get("job_limit")
+                    if plan_limit:
+                        client["credits_remaining"] = plan_limit
+                    now = datetime.now(timezone.utc)
+                    client["billing_cycle_start"] = now.isoformat()
+                    client["billing_cycle_end"] = (now + timedelta(days=30)).isoformat()
+                    client["updated_at"] = _now_iso()
+                    # Clear any payment_failed flags from previous issues
+                    if client.get("metadata") and client["metadata"].get("payment_failed"):
+                        del client["metadata"]["payment_failed"]
+                    _save_clients(clients)
+                    logger.info(f"Reset credits for {client['client_id'][:8]}: {plan_limit} jobs (invoice renewal)")
+
+        elif event_type == "invoice.payment_failed":
+            # Payment failed — flag client, deactivate after 3 failed attempts
+            invoice_obj = event.get("data", {}).get("object", {})
+            customer_id = invoice_obj.get("customer")
+            attempt_count = invoice_obj.get("attempt_count", 0)
+            logger.warning(f"Invoice payment failed: customer={customer_id}, attempt={attempt_count}")
+
+            if customer_id:
+                clients = _load_clients()
+                client = _find_client_by_stripe_customer(clients, customer_id)
+                if client:
+                    if not client.get("metadata"):
+                        client["metadata"] = {}
+                    client["metadata"]["payment_failed"] = {
+                        "timestamp": _now_iso(),
+                        "attempt_count": attempt_count,
+                    }
+                    # After 3 failed attempts, pause access by deactivating
+                    if attempt_count >= 3:
+                        client["active"] = False
+                        logger.warning(
+                            f"Deactivated client {client['client_id'][:8]} after {attempt_count} failed payment attempts"
+                        )
+                    client["updated_at"] = _now_iso()
+                    _save_clients(clients)
+                    logger.info(f"Flagged payment failure for {client['client_id'][:8]} (attempt {attempt_count})")
+
         elif event_type == "customer.subscription.updated":
             subscription = event.get("data", {}).get("object", {})
-            logger.info(f"Subscription updated: {subscription.get('id')} status={subscription.get('status')}")
+            sub_status = subscription.get("status")
+            logger.info(f"Subscription updated: {subscription.get('id')} status={sub_status}")
+
+            # If subscription moves to past_due or unpaid, flag the client
+            if sub_status in ("past_due", "unpaid"):
+                customer_id = subscription.get("customer")
+                if customer_id:
+                    clients = _load_clients()
+                    client = _find_client_by_stripe_customer(clients, customer_id)
+                    if client:
+                        if not client.get("metadata"):
+                            client["metadata"] = {}
+                        client["metadata"]["subscription_status"] = sub_status
+                        client["updated_at"] = _now_iso()
+                        _save_clients(clients)
 
         elif event_type == "customer.subscription.deleted":
             subscription = event.get("data", {}).get("object", {})
+            customer_id = subscription.get("customer")
             logger.info(f"Subscription cancelled: {subscription.get('id')}")
+
+            # Downgrade client to free plan when subscription is cancelled
+            if customer_id:
+                clients = _load_clients()
+                client = _find_client_by_stripe_customer(clients, customer_id)
+                if client:
+                    old_plan = client.get("plan")
+                    client["plan"] = "free"
+                    client["credits_remaining"] = PLANS["free"]["job_limit"]
+                    client["stripe_subscription_id"] = None
+                    client["updated_at"] = _now_iso()
+                    if client.get("metadata"):
+                        client["metadata"].pop("subscription_status", None)
+                        client["metadata"].pop("payment_failed", None)
+                    _save_clients(clients)
+                    logger.info(f"Downgraded client {client['client_id'][:8]} from {old_plan} to free (subscription cancelled)")
 
         return {"status": "received"}
     except HTTPException:
@@ -523,6 +716,58 @@ async def handle_stripe_webhook(request: Request) -> Dict[str, str]:
     except Exception as e:
         logger.error(f"Stripe webhook error: {e}")
         raise HTTPException(status_code=400, detail=f"Webhook processing failed: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# ENDPOINTS — STRIPE CUSTOMER PORTAL
+# ═══════════════════════════════════════════════════════════════════════
+
+
+@router.post("/api/billing/portal")
+async def billing_portal(
+    x_client_key: Optional[str] = Header(None, alias="X-Client-Key"),
+) -> Dict[str, str]:
+    """
+    Create a Stripe Customer Portal session for the authenticated client.
+
+    The portal allows clients to manage their subscription, update payment
+    methods, view invoices, and cancel their plan — all hosted by Stripe.
+
+    Requires: X-Client-Key header
+    Returns: {"url": "<portal_session_url>"}
+    """
+    if not x_client_key:
+        raise HTTPException(status_code=401, detail="Missing X-Client-Key header")
+
+    client = authenticate_client(x_client_key)
+    if not client:
+        raise HTTPException(status_code=401, detail="Invalid or inactive API key")
+
+    stripe_customer_id = client.get("stripe_customer_id")
+    if not stripe_customer_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No Stripe customer linked to this account. Complete a checkout first.",
+        )
+
+    if not stripe.api_key or stripe.api_key.startswith("sk_test_stub"):
+        # Return a mock portal URL when Stripe is not configured
+        mock_url = f"https://billing.stripe.com/mock/portal?customer={stripe_customer_id}"
+        return {
+            "url": mock_url,
+            "message": "Mock portal URL. Set STRIPE_SECRET_KEY to enable live Stripe portal.",
+        }
+
+    try:
+        portal_session = stripe.billing_portal.Session.create(
+            customer=stripe_customer_id,
+            return_url=os.environ.get("STRIPE_PORTAL_RETURN_URL", "https://dashboard.overseerclaw.uk"),
+        )
+        logger.info(f"Created billing portal session for customer {stripe_customer_id}")
+        return {"url": portal_session.url}
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe portal error for customer {stripe_customer_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"Stripe error: {str(e)}")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -542,7 +787,7 @@ async def create_client(
 
     Requires: X-Auth-Token header
     """
-    if not x_auth_token or x_auth_token != os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"):
+    if not x_auth_token or x_auth_token != os.getenv("GATEWAY_AUTH_TOKEN", ""):
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
     if req.plan not in PLANS:
@@ -602,7 +847,7 @@ async def list_clients(
 
     Requires: X-Auth-Token header
     """
-    if not x_auth_token or x_auth_token != os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"):
+    if not x_auth_token or x_auth_token != os.getenv("GATEWAY_AUTH_TOKEN", ""):
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
     clients = _load_clients()
@@ -634,7 +879,7 @@ async def add_credits_to_client(
 
     Requires: X-Auth-Token header
     """
-    if not x_auth_token or x_auth_token != os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"):
+    if not x_auth_token or x_auth_token != os.getenv("GATEWAY_AUTH_TOKEN", ""):
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
     clients = _load_clients()
@@ -686,7 +931,7 @@ async def deactivate_client(
 
     Requires: X-Auth-Token header
     """
-    if not x_auth_token or x_auth_token != os.getenv("GATEWAY_AUTH_TOKEN", "f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"):
+    if not x_auth_token or x_auth_token != os.getenv("GATEWAY_AUTH_TOKEN", ""):
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
     clients = _load_clients()

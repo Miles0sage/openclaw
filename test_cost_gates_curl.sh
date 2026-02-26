@@ -5,7 +5,7 @@
 set -e
 
 GATEWAY_URL="http://localhost:8000"
-AUTH_TOKEN="f981afbc4a94f50a87cd0184cf560ec646e8f8a65a7234f603b980e43775f1a3"
+AUTH_TOKEN="${GATEWAY_AUTH_TOKEN:?GATEWAY_AUTH_TOKEN must be set}"
 
 echo "=== Cost Gates Curl Tests ==="
 echo ""

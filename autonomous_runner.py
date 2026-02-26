@@ -2045,6 +2045,16 @@ class AutonomousRunner:
         except Exception as ref_err:
             logger.warning(f"Failed to save reflexion: {ref_err}")
 
+        # Auto-skill extraction from successful jobs
+        try:
+            if result.get("success"):
+                from auto_skills import try_extract_and_save
+                skill_name = try_extract_and_save(job_id, job, result)
+                if skill_name:
+                    logger.info(f"Job {job_id}: Auto-skill extracted: {skill_name}")
+        except Exception as skill_err:
+            logger.warning(f"Failed to extract auto-skill: {skill_err}")
+
         return result
 
     async def _run_phase_with_retry(self, phase_name: str, phase_fn, progress: JobProgress):
