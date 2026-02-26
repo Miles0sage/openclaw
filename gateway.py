@@ -597,7 +597,7 @@ async def auth_middleware(request: Request, call_next):
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
-                 path.startswith(("/telegram/", "/slack/", "/api/audit", "/static/")) or
+                 path.startswith(("/telegram/", "/slack/", "/api/audit", "/static/", "/control/")) or
                  any(path.startswith(prefix) for prefix in dashboard_exempt_prefixes))
     logger.debug(f"AUTH_CHECK: path={path}, is_exempt={is_exempt}")
 
@@ -3846,6 +3846,12 @@ async def api_get_policy():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/control/avatar/{name}")
+async def api_control_avatar(name: str, meta: Optional[str] = None):
+    """Return a placeholder for dashboard avatar requests."""
+    return {"name": name, "avatar": None}
+
+
 @app.get("/api/events")
 async def api_get_events(limit: int = 50, event_type: Optional[str] = None, since: Optional[str] = None):
     """Get recent events. Optional ?since= ISO timestamp filter."""
@@ -3891,6 +3897,22 @@ async def api_get_events(limit: int = 50, event_type: Optional[str] = None, sinc
         events.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
         events = events[:limit]
         return {"events": events, "total": len(events)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/events")
+async def api_post_event(request: Request):
+    """Create a new event."""
+    try:
+        body = await request.json()
+        event_type = body.get("event_type", "custom")
+        data = body.get("data", body)
+        engine = get_event_engine()
+        if not engine:
+            return JSONResponse({"error": "Event engine not available"}, status_code=503)
+        event_id = engine.emit(event_type, data)
+        return {"ok": True, "event_id": event_id}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
