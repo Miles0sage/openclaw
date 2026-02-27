@@ -520,24 +520,11 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
 
             else:
                 # Anthropic tool-use path (original)
-                # Cache the FIRST user message only (iteration 1) — avoids
-                # accumulating >4 cache_control blocks across tool-loop iterations.
-                # Anthropic allows max 4 cache_control blocks total.
-                if iterations == 1 and messages:
-                    # Count existing cache blocks (system + tools = up to 2)
-                    _cache_count = sum(1 for b in (cached_system or []) if isinstance(b, dict) and "cache_control" in b)
-                    _cache_count += sum(1 for t in (cached_tools or []) if isinstance(t, dict) and "cache_control" in t)
-                    if _cache_count < 4:
-                        for i in range(len(messages) - 1, -1, -1):
-                            if messages[i]["role"] == "user":
-                                content = messages[i]["content"]
-                                if isinstance(content, str):
-                                    messages[i]["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
-                                elif isinstance(content, list):
-                                    last_block = content[-1]
-                                    if isinstance(last_block, dict) and "cache_control" not in last_block:
-                                        content[-1] = {**last_block, "cache_control": {"type": "ephemeral"}}
-                                break
+                # NOTE: We do NOT add cache_control to user messages.
+                # System prompt + tools already use 2 cache blocks. Adding
+                # user-message blocks risks exceeding Anthropic's max of 4
+                # cache_control blocks, which causes API errors and job failures.
+                # System + tools caching alone provides most of the benefit.
 
                 # Snapshot current messages list length to avoid lambda closure mutation issues
                 _current_messages = list(messages)
@@ -928,10 +915,18 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                 }
                 break
 
-            except (BudgetExceededError, GuardrailViolation):
-                raise  # Don't retry budget/guardrail failures
+            except (BudgetExceededError, GuardrailViolation, CreditExhaustedError):
+                raise  # Don't retry budget/guardrail/credit failures
 
             except Exception as e:
+                # Circuit breaker: credit balance / billing errors are non-retryable
+                err_lower = str(e).lower()
+                if "credit balance" in err_lower or "billing" in err_lower or "insufficient_quota" in err_lower:
+                    logger.error(f"Credit/billing error for {job['id']}: {e} — stopping immediately")
+                    raise CreditExhaustedError(
+                        f"API credit/billing error (non-retryable): {e}"
+                    ) from e
+
                 # Record error for circuit breaker
                 if guardrails:
                     guardrails.record_error(str(e))
@@ -1404,6 +1399,13 @@ class BudgetExceededError(Exception):
     pass
 
 
+class CreditExhaustedError(Exception):
+    """Raised when the API provider reports insufficient credits or billing issues.
+    This is a non-retryable, queue-stopping error — no point retrying if the
+    account has no funds."""
+    pass
+
+
 class GuardrailViolation(Exception):
     """Raised when any guardrail limit is breached."""
     def __init__(self, job_id: str, reason: str, kill_status: str):
@@ -1460,8 +1462,8 @@ class JobGuardrails:
     GuardrailViolation if any limit is breached.
 
     Defaults:
-        max_cost_usd      = priority-based (P0=$5, P1=$3, P2=$2, P3=$1) + 10% grace
-        max_iterations     = 80      (total agent calls across all phases)
+        max_cost_usd      = priority-based (P0=$5, P1=$3, P2=$3, P3=$1) + 10% grace
+        max_iterations     = 120     (total agent calls across all phases)
         max_duration_secs  = 1800    (30 minutes wall-clock)
         circuit_breaker_n  = 3       (same error 3x in a row → kill)
 
@@ -1479,7 +1481,7 @@ class JobGuardrails:
     PHASE_ITERATION_LIMITS = {
         "research": 15,
         "plan":     10,
-        "execute":  40,
+        "execute":  60,
         "verify":   10,
         "deliver":  5,
     }
@@ -1488,7 +1490,7 @@ class JobGuardrails:
         self,
         job_id: str,
         max_cost_usd: float = 2.0,
-        max_iterations: int = 80,
+        max_iterations: int = 120,
         max_duration_secs: int = 1800,
         circuit_breaker_n: int = 3,
     ):
@@ -1896,9 +1898,9 @@ class AutonomousRunner:
         # --- Initialize guardrails for this job ---
         # Priority-based cost caps: P0 gets most headroom, P3 is cheapest
         job_priority = job.get("priority", "P2")
-        budget_map = {"P0": 5.0, "P1": 3.0, "P2": 2.0, "P3": 1.0}
+        budget_map = {"P0": 5.0, "P1": 3.0, "P2": 3.0, "P3": 1.0}
         job_max_cost = float(job.get("max_cost_usd", budget_map.get(job_priority, 2.0)))
-        job_max_iter = job.get("max_iterations", 80)
+        job_max_iter = job.get("max_iterations", 120)
         job_max_dur  = job.get("max_duration_seconds", 1800)
         guardrails = JobGuardrails(
             job_id=job_id,
@@ -2058,6 +2060,27 @@ class AutonomousRunner:
             except Exception:
                 pass
 
+        except CreditExhaustedError as e:
+            result["error"] = str(e)
+            result["cost_usd"] = progress.cost_usd
+            result["kill_status"] = "credit_exhausted"
+            progress.error = str(e)
+            progress.phase_status = "failed"
+            _save_progress(progress)
+            update_job_status(job_id, "credit_exhausted", error=str(e))
+            logger.critical(f"Job {job_id} CREDIT EXHAUSTED: {e} — stopping queue")
+            try:
+                await send_telegram(
+                    f"🚨 *Credit Exhausted — Queue Stopped*\n{job_id}\n{e}\n"
+                    f"All pending jobs paused. Top up credits and restart."
+                )
+            except Exception:
+                pass
+            # Stop the runner — no point processing more jobs with no credits
+            if hasattr(self, '_running'):
+                self._running = False
+                logger.critical("Runner stopped due to credit exhaustion")
+
         except GuardrailViolation as e:
             result["error"] = str(e)
             result["cost_usd"] = progress.cost_usd
@@ -2184,9 +2207,15 @@ class AutonomousRunner:
         for attempt in range(DEFAULT_MAX_RETRIES):
             try:
                 return await phase_fn()
-            except (BudgetExceededError, GuardrailViolation):
-                raise  # Never retry budget/guardrail failures
+            except (BudgetExceededError, GuardrailViolation, CreditExhaustedError):
+                raise  # Never retry budget/guardrail/credit failures
             except Exception as e:
+                # Circuit breaker: credit/billing errors are non-retryable
+                err_lower = str(e).lower()
+                if "credit balance" in err_lower or "billing" in err_lower or "insufficient_quota" in err_lower:
+                    raise CreditExhaustedError(
+                        f"API credit/billing error (non-retryable): {e}"
+                    ) from e
                 last_error = e
                 progress.retries += 1
                 backoff = (2 ** attempt) * 3  # 3s, 6s, 12s

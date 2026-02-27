@@ -2904,6 +2904,16 @@ AI_TWITTER_ACCOUNTS = [
     "ylecun",
     "sama",
     "kaboragora",
+    "karpathy",
+    "hardmaru",
+    "_akhaliq",
+    "svpino",
+    "ClementDelangue",
+    "jackclarkSF",
+    "HuggingFace",
+    "LangChainAI",
+    "DrJimFan",
+    "bindureddy",
 ]
 
 # Bluesky AT Protocol — free public API, no auth needed
@@ -2914,6 +2924,8 @@ BLUESKY_ACCOUNTS = [
     "jimfan.bsky.social",
     "huggingface.bsky.social",
     "deepmind.bsky.social",
+    "langchain.bsky.social",
+    "openai.bsky.social",
 ]
 
 # Map Twitter handles to Bluesky handles where available
@@ -2928,6 +2940,8 @@ REDDIT_AI_FEEDS = [
     "https://www.reddit.com/r/MachineLearning/hot/.rss",
     "https://www.reddit.com/r/artificial/hot/.rss",
     "https://www.reddit.com/r/LocalLLaMA/hot/.rss",
+    "https://www.reddit.com/r/singularity/hot/.rss",
+    "https://www.reddit.com/r/ChatGPT/hot/.rss",
 ]
 
 

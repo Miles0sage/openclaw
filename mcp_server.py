@@ -9,6 +9,10 @@ import os
 import json
 import asyncio
 
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv("/root/openclaw/.env")
+
 # Add openclaw to path so we can import agent_tools
 sys.path.insert(0, "/root/openclaw")
 from agent_tools import execute_tool, AGENT_TOOLS
