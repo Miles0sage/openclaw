@@ -2034,6 +2034,10 @@ app.get("/health", async (c) => {
 // System prompt for the personal assistant
 // ---------------------------------------------------------------------------
 
+function getTodayMST(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Phoenix" });
+}
+
 const SYSTEM_PROMPT = `You are Overseer — Miles's personal AI agency assistant, running on Gemini 2.5 Flash at the Cloudflare edge.
 
 CAPABILITIES: You have live access to the OpenClaw agency via 73 function calls. You can:
@@ -2416,7 +2420,7 @@ app.post("/webhook/telegram", async (c) => {
             {
               text:
                 SYSTEM_PROMPT +
-                `\n\nYou are responding via Telegram. Keep responses SHORT (2-3 sentences max). Tables are auto-formatted by the system — just summarize the key insight briefly. Use HTML: <b>bold</b>, <i>italic</i>. Do NOT use Markdown (* _ # []). Do NOT try to format tables yourself.` +
+                `\n\nTODAY'S DATE: ${getTodayMST()} (Arizona MST, UTC-7). The year is 2026. Use this for all relative dates ("tomorrow", "next Sunday", etc.).\n\nYou are responding via Telegram. Keep responses SHORT (2-3 sentences max). Tables are auto-formatted by the system — just summarize the key insight briefly. Use HTML: <b>bold</b>, <i>italic</i>. Do NOT use Markdown (* _ # []). Do NOT try to format tables yourself.` +
                 reminderContext,
             },
           ],
@@ -2637,7 +2641,13 @@ app.post("/api/chat", async (c) => {
       const requestBody: Record<string, unknown> = {
         contents: geminiContents,
         systemInstruction: {
-          parts: [{ text: SYSTEM_PROMPT }],
+          parts: [
+            {
+              text:
+                SYSTEM_PROMPT +
+                `\n\nTODAY'S DATE: ${getTodayMST()} (Arizona MST, UTC-7). The year is 2026.`,
+            },
+          ],
         },
         generationConfig: {
           maxOutputTokens: 4096,
