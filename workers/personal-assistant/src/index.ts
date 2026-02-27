@@ -2319,22 +2319,33 @@ app.post("/webhook/telegram", async (c) => {
   }
 
   for (const chunk of chunks) {
-    await fetch(`${tgApi}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: chunk,
-        parse_mode: "Markdown",
-      }),
-    }).catch(() => {
-      // Retry without Markdown if parse fails
-      return fetch(`${tgApi}/sendMessage`, {
+    try {
+      const sendResp = await fetch(`${tgApi}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: chunk,
+          parse_mode: "Markdown",
+        }),
+      });
+      const sendResult = (await sendResp.json()) as Record<string, unknown>;
+      if (!sendResult.ok) {
+        // Markdown parse failed — retry without parse_mode
+        await fetch(`${tgApi}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, text: chunk }),
+        });
+      }
+    } catch {
+      // Network error fallback — send without Markdown
+      await fetch(`${tgApi}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_id: chatId, text: chunk }),
-      });
-    });
+      }).catch(() => {});
+    }
   }
 
   return c.json({ ok: true });
