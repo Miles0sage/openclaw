@@ -2205,7 +2205,19 @@ app.post("/webhook/telegram", async (c) => {
             {
               text:
                 SYSTEM_PROMPT +
-                "\n\nYou are responding via Telegram. Keep responses concise and mobile-friendly. Use short paragraphs, not walls of text.",
+                `\n\nYou are responding via Telegram. Format rules:
+- Keep responses concise and mobile-friendly.
+- Use HTML formatting: <b>bold</b>, <i>italic</i>, <code>inline code</code>.
+- Do NOT use Markdown (* or _ or # or []). Telegram uses HTML mode.
+- When showing betting picks, odds, comparisons, or any tabular data, ALWAYS format as a monospace table inside <pre> tags. Example:
+<pre>
+Game          | Bet    | Book     | Size
+Mavs vs Griz | Mavs   | FanDuel  | $18
+Celts vs Nets| Celtics| Betfair  | $23
+</pre>
+- Keep table columns short (abbreviate team names, book names).
+- After the table, add a one-line summary like "Total: $60 wagered, $15 expected profit"
+- For simple answers (not tables), just use plain text with <b> for emphasis.`,
             },
           ],
         },
@@ -2326,24 +2338,26 @@ app.post("/webhook/telegram", async (c) => {
         body: JSON.stringify({
           chat_id: chatId,
           text: chunk,
-          parse_mode: "Markdown",
+          parse_mode: "HTML",
         }),
       });
       const sendResult = (await sendResp.json()) as Record<string, unknown>;
       if (!sendResult.ok) {
-        // Markdown parse failed — retry without parse_mode
+        // HTML parse failed — strip tags and retry as plain text
+        const plain = chunk.replace(/<[^>]+>/g, "");
         await fetch(`${tgApi}/sendMessage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, text: chunk }),
+          body: JSON.stringify({ chat_id: chatId, text: plain }),
         });
       }
     } catch {
-      // Network error fallback — send without Markdown
+      // Network error fallback — send plain text
+      const plain = chunk.replace(/<[^>]+>/g, "");
       await fetch(`${tgApi}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, text: chunk }),
+        body: JSON.stringify({ chat_id: chatId, text: plain }),
       }).catch(() => {});
     }
   }
