@@ -725,7 +725,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -3973,6 +3973,86 @@ async def api_tweets(account: Optional[str] = None, limit: int = 5):
         from agent_tools import _read_tweets
         result = _read_tweets(account=account, limit=limit)
         return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# POLYMARKET TRADING ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/polymarket/prices")
+async def api_polymarket_prices(request: Request):
+    """Real-time Polymarket price data — snapshot, spread, midpoint, book, last trade, history."""
+    try:
+        body = await request.json()
+        from polymarket_trading import polymarket_prices
+        result = polymarket_prices(
+            action=body.get("action", "snapshot"),
+            market_id=body.get("market_id", ""),
+            token_id=body.get("token_id", ""),
+            interval=body.get("interval", "1d"),
+            fidelity=body.get("fidelity", 0),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/polymarket/monitor")
+async def api_polymarket_monitor(request: Request):
+    """Monitor markets — mispricing detector, open interest, volume, holders, leaderboard, health."""
+    try:
+        body = await request.json()
+        from polymarket_trading import polymarket_monitor
+        result = polymarket_monitor(
+            action=body.get("action", "health"),
+            market_id=body.get("market_id", ""),
+            condition_id=body.get("condition_id", ""),
+            event_id=body.get("event_id", ""),
+            period=body.get("period", "week"),
+            order_by=body.get("order_by", "pnl"),
+            limit=body.get("limit", 10),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/polymarket/portfolio")
+async def api_polymarket_portfolio(request: Request):
+    """View any wallet's Polymarket positions, trades, activity (read-only)."""
+    try:
+        body = await request.json()
+        from polymarket_trading import polymarket_portfolio
+        result = polymarket_portfolio(
+            action=body.get("action", "positions"),
+            address=body.get("address", ""),
+            limit=body.get("limit", 25),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/prediction")
+async def api_prediction(request: Request):
+    """Prediction market queries — PA worker calls this endpoint."""
+    try:
+        body = await request.json()
+        from agent_tools import _prediction_market
+        result = _prediction_market(
+            action=body.get("action", "list_markets"),
+            query=body.get("query", ""),
+            market_id=body.get("market_id", ""),
+            tag=body.get("tag", ""),
+            limit=body.get("limit", 10),
+        )
+        # Result may be raw JSON string or plain text from CLI
+        try:
+            return json.loads(result)
+        except (json.JSONDecodeError, TypeError):
+            return {"result": result}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

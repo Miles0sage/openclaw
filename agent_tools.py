@@ -738,6 +738,66 @@ AGENT_TOOLS = [
         }
     },
     {
+        "name": "polymarket_prices",
+        "description": "Get real-time Polymarket price data. Snapshot gives midpoint+spread+last trade for YES and NO with mispricing flag. Granular: spread, midpoint, book, last_trade, history.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["snapshot", "spread", "midpoint", "book", "last_trade", "history"],
+                    "description": "Action: snapshot (full overview), spread, midpoint, book (order book), last_trade, history (price chart)"
+                },
+                "market_id": {"type": "string", "description": "Market slug or numeric ID (e.g. 'will-trump-win-2024' or '12345')"},
+                "token_id": {"type": "string", "description": "CLOB token ID (0x...) for granular queries — if omitted, auto-resolved from market_id"},
+                "interval": {"type": "string", "description": "Price history interval: 1m, 1h, 6h, 1d, 1w, max (default: 1d)"},
+                "fidelity": {"type": "integer", "description": "Number of data points for history (default: auto)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "polymarket_monitor",
+        "description": "Monitor Polymarket markets and detect arbitrage. Mispricing detector checks if YES+NO sum deviates from $1.00. Also: open interest, volume, top holders, trader leaderboard, API health.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["mispricing", "open_interest", "volume", "holders", "leaderboard", "health"],
+                    "description": "Action: mispricing (arb detector), open_interest, volume, holders, leaderboard, health"
+                },
+                "market_id": {"type": "string", "description": "Market slug or numeric ID"},
+                "condition_id": {"type": "string", "description": "Market condition ID (0x...) for on-chain queries"},
+                "event_id": {"type": "string", "description": "Event ID for volume queries"},
+                "period": {"type": "string", "description": "Leaderboard period: day, week, month, all (default: week)"},
+                "order_by": {"type": "string", "description": "Leaderboard order: pnl or vol (default: pnl)"},
+                "limit": {"type": "integer", "description": "Max results (default: 10)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "polymarket_portfolio",
+        "description": "View any Polymarket wallet's positions, trades, and on-chain activity (read-only). No wallet connection needed — works with any public address.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["positions", "closed", "trades", "value", "activity", "profile"],
+                    "description": "Action: positions (open), closed, trades (history), value (total), activity (on-chain), profile"
+                },
+                "address": {"type": "string", "description": "Wallet address (0x...)"},
+                "limit": {"type": "integer", "description": "Max results (default: 25)"}
+            },
+            "required": ["action", "address"],
+            "additionalProperties": False
+        }
+    },
+    {
         "name": "get_reflections",
         "description": "Get past job reflections (learnings from completed/failed jobs). Returns stats, recent reflections, or searches for reflections relevant to a task. Use to learn from past experience before starting work.",
         "input_schema": {
@@ -956,6 +1016,21 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             return _prediction_market(tool_input["action"], tool_input.get("query", ""),
                                       tool_input.get("market_id", ""), tool_input.get("tag", ""),
                                       tool_input.get("limit", 10))
+        elif tool_name == "polymarket_prices":
+            from polymarket_trading import polymarket_prices
+            return polymarket_prices(tool_input["action"], tool_input.get("market_id", ""),
+                                     tool_input.get("token_id", ""), tool_input.get("interval", "1d"),
+                                     tool_input.get("fidelity", 0))
+        elif tool_name == "polymarket_monitor":
+            from polymarket_trading import polymarket_monitor
+            return polymarket_monitor(tool_input["action"], tool_input.get("market_id", ""),
+                                      tool_input.get("condition_id", ""), tool_input.get("event_id", ""),
+                                      tool_input.get("period", "week"), tool_input.get("order_by", "pnl"),
+                                      tool_input.get("limit", 10))
+        elif tool_name == "polymarket_portfolio":
+            from polymarket_trading import polymarket_portfolio
+            return polymarket_portfolio(tool_input["action"], tool_input.get("address", ""),
+                                        tool_input.get("limit", 25))
         elif tool_name == "get_reflections":
             return _get_reflections(tool_input["action"], tool_input.get("task", ""),
                                     tool_input.get("project"), tool_input.get("limit", 5))

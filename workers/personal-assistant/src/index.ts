@@ -813,6 +813,73 @@ const OPENCLAW_TOOLS = [
           required: ["action"],
         },
       },
+      // --- Polymarket Trading (Phase 1: read-only intelligence) ---
+      {
+        name: "polymarket_prices",
+        description:
+          "Real-time Polymarket prices. 'snapshot' gives midpoint+spread+last trade for YES/NO with mispricing flag. Granular: spread, midpoint, book (order book), last_trade, history.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description:
+                "Action: snapshot (full overview), spread, midpoint, book, last_trade, history",
+            },
+            market_id: { type: "STRING", description: "Market slug or numeric ID" },
+            token_id: {
+              type: "STRING",
+              description: "CLOB token ID (0x...) — auto-resolved from market_id if omitted",
+            },
+            interval: {
+              type: "STRING",
+              description: "Price history interval: 1m, 1h, 6h, 1d, 1w, max",
+            },
+            fidelity: { type: "NUMBER", description: "Number of data points for history" },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "polymarket_monitor",
+        description:
+          "Monitor Polymarket markets. Mispricing detector checks YES+NO sum vs $1.00. Also: open_interest, volume, holders, leaderboard (top traders), health.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description:
+                "Action: mispricing (arb detector), open_interest, volume, holders, leaderboard, health",
+            },
+            market_id: { type: "STRING", description: "Market slug or numeric ID" },
+            condition_id: { type: "STRING", description: "Market condition ID (0x...)" },
+            event_id: { type: "STRING", description: "Event ID for volume queries" },
+            period: { type: "STRING", description: "Leaderboard period: day, week, month, all" },
+            order_by: { type: "STRING", description: "Leaderboard order: pnl or vol" },
+            limit: { type: "NUMBER", description: "Max results" },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "polymarket_portfolio",
+        description:
+          "View any Polymarket wallet's positions, trades, on-chain activity (read-only). Works with any public address.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description:
+                "Action: positions (open), closed, trades, value (total), activity (on-chain), profile",
+            },
+            address: { type: "STRING", description: "Wallet address (0x...)" },
+            limit: { type: "NUMBER", description: "Max results" },
+          },
+          required: ["action", "address"],
+        },
+      },
       // --- Environment ---
       {
         name: "env_manage",
@@ -1353,6 +1420,45 @@ async function executeTool(
           }),
         })
       ).json();
+    case "polymarket_prices":
+      return (
+        await gatewayFetch(env, "/api/polymarket/prices", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            market_id: args.market_id,
+            token_id: args.token_id,
+            interval: args.interval,
+            fidelity: args.fidelity,
+          }),
+        })
+      ).json();
+    case "polymarket_monitor":
+      return (
+        await gatewayFetch(env, "/api/polymarket/monitor", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            market_id: args.market_id,
+            condition_id: args.condition_id,
+            event_id: args.event_id,
+            period: args.period,
+            order_by: args.order_by,
+            limit: args.limit,
+          }),
+        })
+      ).json();
+    case "polymarket_portfolio":
+      return (
+        await gatewayFetch(env, "/api/polymarket/portfolio", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            address: args.address,
+            limit: args.limit,
+          }),
+        })
+      ).json();
     // --- Environment ---
     case "env_manage":
       return (
@@ -1548,7 +1654,7 @@ app.get("/health", async (c) => {
 
 const SYSTEM_PROMPT = `You are Overseer — Miles's personal AI agency assistant, running on Gemini 2.5 Flash at the Cloudflare edge.
 
-CAPABILITIES: You have live access to the OpenClaw agency via 59 function calls. You can:
+CAPABILITIES: You have live access to the OpenClaw agency via 62 function calls. You can:
 - **Jobs & Proposals**: Create, list, kill, approve, and monitor autonomous jobs and proposals
 - **GitHub**: Get repo info (issues, PRs, commits), create issues
 - **Web Research**: Search the web, fetch/scrape URLs, deep research topics
@@ -1560,7 +1666,8 @@ CAPABILITIES: You have live access to the OpenClaw agency via 59 function calls.
 - **Compute**: Math expressions, statistics, sorting, search, matrix ops, primes, hashing, unit conversion
 - **Communication**: Send Slack messages, manage auto-reaction rules
 - **Security**: Run OXO security scans (Nmap, Nuclei, ZAP)
-- **Predictions**: Query Polymarket prediction markets
+- **Predictions**: Search/list Polymarket markets (prediction_market)
+- **Polymarket Intelligence**: Real-time prices & snapshots (polymarket_prices), arbitrage/mispricing detection (polymarket_monitor), wallet portfolio viewer (polymarket_portfolio)
 - **Environment**: Manage env vars and .env files
 - **Memory**: Search and save persistent memory
 - **Agents**: List, spawn, and monitor agents
@@ -1600,7 +1707,11 @@ ROUTING:
 - When Miles asks about git status/commits/push, use git_operations.
 - When Miles asks to deploy, use vercel_deploy.
 - When Miles asks to calculate something, use compute_math or compute_stats.
-- When Miles asks about predictions/markets, use prediction_market.
+- When Miles asks about predictions/markets, use prediction_market to search/list. For REAL-TIME PRICES, use polymarket_prices with action=snapshot. For arbitrage/mispricing checks, use polymarket_monitor with action=mispricing. For viewing a trader's portfolio, use polymarket_portfolio.
+- When Miles asks "what's the price on [market]?", use polymarket_prices(action=snapshot, market_id=slug).
+- When Miles asks about arbitrage or mispricing, use polymarket_monitor(action=mispricing, market_id=slug).
+- When Miles asks about top traders or the leaderboard, use polymarket_monitor(action=leaderboard).
+- When Miles asks to check a wallet or portfolio, use polymarket_portfolio(action=positions, address=0x...).
 - When Miles asks to send a Slack message, use send_slack_message.
 - When Miles asks about security scanning, use security_scan.
 - When Miles asks about AI news, latest developments, or what's happening in AI, call read_ai_news. Use hours=72 for a broader view since some blogs post infrequently.
@@ -2660,7 +2771,7 @@ const TOOL_CATEGORIES={
   compute_search:'system',compute_matrix:'system',compute_prime:'system',
   compute_hash:'system',compute_convert:'system',
   send_slack_message:'system',security_scan:'system',
-  prediction_market:'system',env_manage:'system',
+  prediction_market:'system',polymarket_prices:'system',polymarket_monitor:'system',polymarket_portfolio:'system',env_manage:'system',
   process_manage:'system',install_package:'system',
 };
 const TOOL_ICONS={
@@ -2681,7 +2792,7 @@ const TOOL_LABELS={
   file_read:'FILE',file_write:'WRITE',file_edit:'EDIT',
   glob_files:'GLOB',grep_search:'GREP',
   send_slack_message:'SLACK',security_scan:'SECURITY',
-  prediction_market:'MARKETS',env_manage:'ENV',
+  prediction_market:'MARKETS',polymarket_prices:'PRICES',polymarket_monitor:'MONITOR',polymarket_portfolio:'PORTFOLIO',env_manage:'ENV',
   process_manage:'PROCESS',install_package:'INSTALL',
 };
 
