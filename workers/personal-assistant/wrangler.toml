@@ -55,5 +55,15 @@ database_id = "9cf10366-f49c-4532-89c2-8859e1ed9673"
 name = "personal-assistant-dev"
 vars = { ENVIRONMENT = "development" }
 
+# Cron triggers — check reminders + morning briefing
+# 14:00 UTC = 7am MST (morning briefing before Miles' day starts)
+# 00:00 UTC = 5pm MST (start of Miles' work shift)
+# Every 15 min for time-based reminder checks
+[triggers]
+crons = ["0 14 * * *", "0 0 * * *", "*/15 * * * *"]
+
+[env.production.triggers]
+crons = ["0 14 * * *", "0 0 * * *", "*/15 * * * *"]
+
 [limits]
 cpu_ms = 50000

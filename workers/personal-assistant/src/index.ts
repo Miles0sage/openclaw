@@ -207,27 +207,35 @@ const OPENCLAW_TOOLS = [
       },
       {
         name: "search_memory",
-        description: "Search persistent memories for relevant context",
+        description:
+          "Search persistent memories for relevant context. Use this to check for pending reminders or recall past decisions.",
         parameters: {
           type: "OBJECT",
           properties: {
-            tag: { type: "STRING", description: "Tag to filter by" },
+            tag: { type: "STRING", description: "Tag to filter by (e.g. 'reminder')" },
+            query: { type: "STRING", description: "Text to search for in memory content" },
             limit: { type: "NUMBER", description: "Max results (default 10)" },
           },
         },
       },
       {
         name: "save_memory",
-        description: "Save an important fact or decision to long-term memory",
+        description:
+          "Save an important fact, decision, or REMINDER to long-term memory. When Miles says 'remind me about X tomorrow/later/at 5pm', set remind_at to the ISO timestamp when the reminder should fire. The system will automatically send it via Telegram at that time.",
         parameters: {
           type: "OBJECT",
           properties: {
-            content: { type: "STRING", description: "The fact to remember" },
+            content: { type: "STRING", description: "The fact to remember or reminder text" },
             importance: { type: "NUMBER", description: "1-10 scale" },
             tags: {
               type: "ARRAY",
               items: { type: "STRING" },
-              description: "Tags for categorization",
+              description: "Tags for categorization. Use 'reminder' tag for reminders.",
+            },
+            remind_at: {
+              type: "STRING",
+              description:
+                "ISO 8601 timestamp for when to send a Telegram reminder (e.g. '2026-02-28T17:00:00-07:00' for 5pm MST). Only set for time-based reminders. Miles is in MST (Arizona, no DST, UTC-7).",
             },
           },
           required: ["content"],
@@ -1305,7 +1313,7 @@ async function executeTool(
       return (
         await gatewayFetch(
           env,
-          `/api/memories?limit=${args.limit || 10}${args.tag ? `&tag=${args.tag}` : ""}`,
+          `/api/memories?limit=${args.limit || 10}${args.tag ? `&tag=${args.tag}` : ""}${args.query ? `&query=${encodeURIComponent(args.query)}` : ""}`,
         )
       ).json();
     case "save_memory":
@@ -2028,7 +2036,7 @@ app.get("/health", async (c) => {
 
 const SYSTEM_PROMPT = `You are Overseer — Miles's personal AI agency assistant, running on Gemini 2.5 Flash at the Cloudflare edge.
 
-CAPABILITIES: You have live access to the OpenClaw agency via 69 function calls. You can:
+CAPABILITIES: You have live access to the OpenClaw agency via 73 function calls. You can:
 - **Jobs & Proposals**: Create, list, kill, approve, and monitor autonomous jobs and proposals
 - **GitHub**: Get repo info (issues, PRs, commits), create issues
 - **Web Research**: Search the web, fetch/scrape URLs, deep research topics
@@ -2116,6 +2124,9 @@ ROUTING:
 - When Miles asks about tweets, social posts, or what the AI community is discussing, call read_tweets. This pulls from Reddit AI subs (primary), Bluesky, and Twitter.
 - When Miles says "plan my day", call plan_my_day. Use the schedule context to suggest time-blocked todos. Be specific about what to do and when.
 - When Miles mentions assignments, deadlines, or homework, save them to memory so plan_my_day can reference them later.
+- REMINDERS: When Miles says "remind me to X" or "don't let me forget Y", ALWAYS call save_memory with the 'reminder' tag AND a remind_at timestamp. Convert relative times to ISO 8601 in MST (UTC-7). Examples: "remind me tomorrow" → next day 9am MST, "remind me at 5pm" → today 5pm MST, "remind me in 2 hours" → current time + 2h. The cron system checks every 15 minutes and sends via Telegram automatically.
+- When Miles asks "what did I tell you?" or "do I have any reminders?", call search_memory with tag='reminder' to find all saved reminders.
+- If PENDING REMINDERS are injected in context, proactively mention them to Miles at the START of your response before addressing his question.
 - For complex coding/security/database questions, use send_chat_to_gateway to delegate to a specialist.`;
 
 // ---------------------------------------------------------------------------
@@ -2156,7 +2167,8 @@ function formatBettingTable(toolName: string, data: Record<string, unknown> | nu
           .pop() || "";
       const book = String(r.book || "").slice(0, 9);
       const size = "$" + Number(r.bet_size || 0).toFixed(0);
-      const ev = "+" + Number(r.ev_pct || 0).toFixed(1) + "%";
+      const rawEv = Number(r.ev_pct || 0);
+      const ev = rawEv > 999 ? ">999%" : "+" + rawEv.toFixed(1) + "%";
       t +=
         pad(game, 16) +
         " " +
@@ -2210,7 +2222,8 @@ function formatBettingTable(toolName: string, data: Record<string, unknown> | nu
           .pop() || "";
       const book = String(o.book || "").slice(0, 9);
       const odds = Number(o.decimal_odds || 0).toFixed(2);
-      const ev = "+" + Number(o.ev_pct || 0).toFixed(1) + "%";
+      const rawEv = Number(o.ev_pct || 0);
+      const ev = rawEv > 999 ? ">999%" : "+" + rawEv.toFixed(1) + "%";
       t +=
         pad(game, 16) +
         " " +
@@ -2348,6 +2361,37 @@ app.post("/webhook/telegram", async (c) => {
     timestamp: new Date().toISOString(),
   });
 
+  // Pre-fetch pending reminders and recent memories to inject as context
+  let reminderContext = "";
+  try {
+    const [remindersResp, recentMemResp] = await Promise.all([
+      gatewayFetch(env, "/api/reminders/due"),
+      gatewayFetch(env, "/api/memories?tag=reminder&limit=5"),
+    ]);
+    const dueReminders: string[] = [];
+    if (remindersResp.ok) {
+      const data = (await remindersResp.json()) as { reminders?: Array<{ content: string }> };
+      for (const r of data.reminders || []) {
+        dueReminders.push(`[DUE NOW] ${r.content}`);
+      }
+    }
+    if (recentMemResp.ok) {
+      const data = (await recentMemResp.json()) as {
+        memories?: Array<{ content: string; remind_at?: string; reminded?: boolean }>;
+      };
+      for (const m of data.memories || []) {
+        if (m.remind_at && !m.reminded && !dueReminders.some((d) => d.includes(m.content))) {
+          dueReminders.push(`[UPCOMING] ${m.content} (due: ${m.remind_at})`);
+        }
+      }
+    }
+    if (dueReminders.length > 0) {
+      reminderContext = `\n\nPENDING REMINDERS FOR MILES:\n${dueReminders.join("\n")}\nIMPORTANT: Proactively mention any due reminders to Miles at the start of your response.`;
+    }
+  } catch {
+    // Don't block the conversation if reminder fetch fails
+  }
+
   // Build Gemini conversation (last 20 messages)
   const recentMessages = session.messages.slice(-20);
   const geminiContents: Array<Record<string, unknown>> = recentMessages.map((m) => ({
@@ -2372,7 +2416,8 @@ app.post("/webhook/telegram", async (c) => {
             {
               text:
                 SYSTEM_PROMPT +
-                `\n\nYou are responding via Telegram. Keep responses SHORT (2-3 sentences max). Tables are auto-formatted by the system — just summarize the key insight briefly. Use HTML: <b>bold</b>, <i>italic</i>. Do NOT use Markdown (* _ # []). Do NOT try to format tables yourself.`,
+                `\n\nYou are responding via Telegram. Keep responses SHORT (2-3 sentences max). Tables are auto-formatted by the system — just summarize the key insight briefly. Use HTML: <b>bold</b>, <i>italic</i>. Do NOT use Markdown (* _ # []). Do NOT try to format tables yourself.` +
+                reminderContext,
             },
           ],
         },
@@ -3569,7 +3614,140 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
 }
 
 // ---------------------------------------------------------------------------
-// Export — use object syntax so we can intercept WebSocket upgrades
+// Scheduled handler — cron-triggered reminder checks + morning briefing
+// ---------------------------------------------------------------------------
+
+async function sendTelegramMessage(env: Env, text: string) {
+  const tgApi = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
+  const chatId = (env.TELEGRAM_OWNER_ID || "").trim();
+  if (!chatId) return;
+
+  const resp = await fetch(`${tgApi}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+    }),
+  });
+
+  // If HTML parsing fails, retry without formatting
+  if (!resp.ok) {
+    await fetch(`${tgApi}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+  }
+}
+
+async function handleScheduled(env: Env, scheduledTime: number) {
+  const hour = new Date(scheduledTime).getUTCHours();
+
+  // 1. Check for due reminders (runs every 15 min)
+  try {
+    const remindersResp = await gatewayFetch(env, "/api/reminders/due");
+    if (remindersResp.ok) {
+      const data = (await remindersResp.json()) as {
+        reminders?: Array<{ id: string; content: string; tags?: string[] }>;
+      };
+      const reminders = data.reminders || [];
+      for (const reminder of reminders) {
+        await sendTelegramMessage(env, `<b>Reminder</b>\n${reminder.content}`);
+        // Mark as reminded so it doesn't fire again
+        await gatewayFetch(env, "/api/reminders/mark", {
+          method: "POST",
+          body: JSON.stringify({ memory_id: reminder.id }),
+        });
+      }
+    }
+  } catch {
+    // Don't crash the cron if reminders fail
+  }
+
+  // 2. Morning briefing at 14:00 UTC (7am MST) — Tue-Sun only (Miles is OFF Monday)
+  if (hour === 14) {
+    const day = new Date(scheduledTime).getUTCDay(); // 0=Sun, 1=Mon
+    if (day === 1) return; // Monday OFF — skip briefing
+
+    try {
+      // Call plan_my_day via gateway
+      const planResp = await gatewayFetch(env, "/api/sports/betting", {
+        method: "POST",
+        body: JSON.stringify({ action: "dashboard" }),
+      });
+
+      // Also get the actual day plan
+      const dayPlanResp = await gatewayFetch(env, "/api/plan-my-day", {
+        method: "POST",
+        body: JSON.stringify({ focus: "all" }),
+      });
+
+      let briefing = "<b>Good morning Miles</b>\n\n";
+
+      if (dayPlanResp.ok) {
+        const plan = (await dayPlanResp.json()) as { plan?: string; todos?: string[] };
+        if (plan.plan) {
+          briefing += plan.plan.substring(0, 1500);
+        }
+      }
+
+      // Check for pending reminders today
+      const memResp = await gatewayFetch(env, "/api/memories?tag=reminder&limit=5");
+      if (memResp.ok) {
+        const memData = (await memResp.json()) as {
+          memories?: Array<{ content: string; remind_at?: string; reminded?: boolean }>;
+        };
+        const pending = (memData.memories || []).filter((m) => m.remind_at && !m.reminded);
+        if (pending.length > 0) {
+          briefing += "\n\n<b>Upcoming reminders:</b>\n";
+          for (const p of pending) {
+            briefing += `- ${p.content}\n`;
+          }
+        }
+      }
+
+      await sendTelegramMessage(env, briefing);
+    } catch {
+      // Don't crash the cron
+    }
+  }
+
+  // 3. Work shift start at 00:00 UTC (5pm MST) — quick status check
+  if (hour === 0) {
+    const day = new Date(scheduledTime).getUTCDay();
+    if (day === 1) return; // Monday OFF
+
+    try {
+      const statusResp = await gatewayFetch(env, "/api/agency/status");
+      if (statusResp.ok) {
+        const status = (await statusResp.json()) as {
+          active_jobs?: number;
+          pending_jobs?: number;
+          alerts?: string[];
+        };
+        const active = status.active_jobs || 0;
+        const pending = status.pending_jobs || 0;
+        const alerts = status.alerts || [];
+
+        // Only send if there's something worth mentioning
+        if (active > 0 || pending > 0 || alerts.length > 0) {
+          let msg = "<b>Work shift starting</b>\n";
+          if (active > 0) msg += `${active} active job(s)\n`;
+          if (pending > 0) msg += `${pending} pending job(s)\n`;
+          if (alerts.length > 0) msg += `\nAlerts: ${alerts.join(", ")}`;
+          await sendTelegramMessage(env, msg);
+        }
+      }
+    } catch {
+      // Don't crash
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Export — use object syntax so we can intercept WebSocket upgrades + cron
 // ---------------------------------------------------------------------------
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -3582,5 +3760,9 @@ export default {
 
     // Everything else goes through Hono
     return app.fetch(request, env, ctx);
+  },
+
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(handleScheduled(env, event.scheduledTime));
   },
 };

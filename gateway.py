@@ -115,7 +115,7 @@ class _MemoryManagerStub:
     def get_by_tag(self, tag: str) -> list:
         return [m for m in self.get_recent(limit=100) if tag in m.get("tags", [])]
 
-    def add_memory(self, content: str, tags: list = None, source: str = "manual", importance: int = 5) -> str:
+    def add_memory(self, content: str, tags: list = None, source: str = "manual", importance: int = 5, remind_at: str = None) -> str:
         import uuid
         mem_id = str(uuid.uuid4())[:8]
         record = {
@@ -123,9 +123,42 @@ class _MemoryManagerStub:
             "source": source, "importance": importance,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+        if remind_at:
+            record["remind_at"] = remind_at
+            record["reminded"] = False
         with open(self._file, "a") as f:
             f.write(json.dumps(record) + "\n")
         return mem_id
+
+    def get_due_reminders(self) -> list:
+        """Get memories with remind_at in the past that haven't been reminded yet."""
+        now = datetime.now(timezone.utc).isoformat()
+        due = []
+        for m in self.get_recent(limit=200):
+            if m.get("remind_at") and not m.get("reminded", True):
+                if m["remind_at"] <= now:
+                    due.append(m)
+        return due
+
+    def mark_reminded(self, mem_id: str):
+        """Mark a reminder as sent by rewriting the JSONL file."""
+        if not os.path.exists(self._file):
+            return
+        lines = []
+        with open(self._file) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    if record.get("id") == mem_id:
+                        record["reminded"] = True
+                    lines.append(json.dumps(record))
+                except:
+                    lines.append(line)
+        with open(self._file, "w") as f:
+            f.write("\n".join(lines) + "\n")
 
 _memory_manager_instance = None
 
@@ -729,7 +762,7 @@ async def auth_middleware(request: Request, call_next):
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
-                 path.startswith(("/telegram/", "/slack/", "/api/audit", "/static/", "/control/")) or
+                 path.startswith(("/telegram/", "/slack/", "/api/audit", "/static/", "/control/", "/prestress/")) or
                  any(path.startswith(prefix) for prefix in dashboard_exempt_prefixes))
     logger.debug(f"AUTH_CHECK: path={path}, is_exempt={is_exempt}")
 
@@ -1506,6 +1539,17 @@ async def dashboard(request: Request):
             content=f"<h1>Error loading dashboard</h1><p>{str(e)}</p>",
             status_code=500
         )
+
+
+@app.get("/prestress/{page}")
+async def prestress_course(page: str):
+    """Serve prestress course pages (no auth)"""
+    try:
+        path = f"/root/prestress-course/{page}.html"
+        with open(path, 'r') as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content=f"<h1>Page '{page}' not found</h1>", status_code=404)
 
 
 @app.get("/monitoring")
@@ -4261,14 +4305,19 @@ async def api_prediction(request: Request):
 # ═══════════════════════════════════════════════════════════════════════
 
 @app.get("/api/memories")
-async def api_list_memories(tag: Optional[str] = None, limit: int = 20):
-    """List memories, optionally filtered by tag"""
+async def api_list_memories(tag: Optional[str] = None, query: Optional[str] = None, limit: int = 20):
+    """List memories, optionally filtered by tag or text query"""
     try:
         mm = get_memory_manager()
         if not mm:
             return {"memories": [], "total": 0}
         if tag:
             memories = mm.get_by_tag(tag)
+        elif query:
+            # Simple text search across memory content
+            all_mems = mm.get_recent(limit=200)
+            q = query.lower()
+            memories = [m for m in all_mems if q in m.get("content", "").lower()][:limit]
         else:
             memories = mm.get_recent(limit=limit)
         return {"memories": memories, "total": len(memories)}
@@ -4287,9 +4336,38 @@ async def api_add_memory(request: Request):
             content=data.get("content", ""),
             tags=data.get("tags", []),
             source=data.get("source", "manual"),
-            importance=data.get("importance", 5)
+            importance=data.get("importance", 5),
+            remind_at=data.get("remind_at")
         )
         return {"memory_id": mem_id, "status": "saved"}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/reminders/due")
+async def api_reminders_due():
+    """Get reminders that are due (remind_at in the past, not yet reminded)"""
+    try:
+        mm = get_memory_manager()
+        if not mm:
+            return {"reminders": [], "total": 0}
+        due = mm.get_due_reminders()
+        return {"reminders": due, "total": len(due)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/reminders/mark")
+async def api_reminders_mark(request: Request):
+    """Mark a reminder as sent"""
+    try:
+        data = await request.json()
+        mem_id = data.get("memory_id")
+        if not mem_id:
+            return JSONResponse({"error": "memory_id required"}, status_code=400)
+        mm = get_memory_manager()
+        if not mm:
+            return JSONResponse({"error": "memory manager not initialized"}, status_code=500)
+        mm.mark_reminded(mem_id)
+        return {"status": "marked", "memory_id": mem_id}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

@@ -125,7 +125,9 @@ def _find_best_odds(bookmakers: list, outcome_name: str) -> dict:
             for outcome in market.get("outcomes", []):
                 if outcome.get("name", "").lower() == outcome_name.lower():
                     price = outcome.get("price", 0)
-                    if isinstance(price, (int, float)) and price > best["price"]:
+                    # Validate decimal odds are in sane range (1.01 to 50.0)
+                    # Anything above 50 is likely a data error or exchange glitch
+                    if isinstance(price, (int, float)) and 1.01 <= price <= 50.0 and price > best["price"]:
                         best = {
                             "price": price,
                             "book": bm.get("key", "unknown"),
