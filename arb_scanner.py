@@ -12,19 +12,10 @@ from typing import Optional
 
 
 def _get_polymarket_markets(query: str = "", limit: int = 20) -> list:
-    """Fetch Polymarket markets via CLI."""
+    """Fetch Polymarket markets via proxy API."""
     try:
-        from polymarket_trading import _run_cli
-        if query:
-            result = _run_cli(["markets", "search", query, "--limit", str(limit)], timeout=20)
-        else:
-            result = _run_cli(["markets", "list", "--limit", str(limit)], timeout=20)
-
-        if isinstance(result, list):
-            return result
-        if isinstance(result, dict) and "error" not in result:
-            return result.get("markets", result.get("data", [result]))
-        return []
+        from polymarket_trading import _search_markets
+        return _search_markets(query=query, limit=limit, active=True, closed=False)
     except Exception:
         return []
 

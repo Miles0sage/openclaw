@@ -1,58 +1,121 @@
 """
 Polymarket Trading Module — Phase 2: Full Trading Engine
 
-Wraps the `polymarket` CLI (Rust binary) for real-time prices,
-arbitrage detection, portfolio watching, AND order placement.
+Uses Cloudflare Worker proxy (polymarket-proxy) to access Polymarket APIs
+from the US VPS. All requests route through the edge proxy to bypass geoblock.
 
-Trading can be routed through a Cloudflare Worker proxy (POLYMARKET_PROXY_URL)
-to bypass US geoblock, or falls back to direct CLI.
+APIs:
+  - Gamma API (gamma-api.polymarket.com) — market search, data, profiles
+  - CLOB API (clob.polymarket.com) — order book, midpoints, trading
+
+Proxy URL: https://polymarket-proxy.amit-shah-5201.workers.dev
 """
 
 import json
 import os
-import subprocess
 import urllib.request
 import urllib.parse
 from typing import Optional
 
+# API base URLs — direct calls work from VPS for reads
+GAMMA_BASE = "https://gamma-api.polymarket.com"
+CLOB_BASE = "https://clob.polymarket.com"
 
-def _run_cli(args: list[str], timeout: int = 15, max_chars: int = 50000) -> dict:
-    """Run a polymarket CLI command and return parsed JSON output."""
-    cmd = ["polymarket", "-o", "json"] + args
+# Proxy URL for trading (may need proxy for write operations if geoblocked)
+PROXY_URL = os.environ.get("POLYMARKET_PROXY_URL", "")
+
+API_BASES = {"gamma": GAMMA_BASE, "clob": CLOB_BASE}
+
+
+def _api_get(api: str, path: str, params: dict = None, timeout: int = 15) -> dict:
+    """Direct GET request to Polymarket API."""
+    base = API_BASES.get(api, GAMMA_BASE)
+    url = f"{base}{path}"
+    if params:
+        qs = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
+        url += f"?{qs}"
+
+    req = urllib.request.Request(url, headers={
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; OpenClaw/1.0)",
+    })
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout
-        )
-        output = result.stdout.strip()
-        if result.returncode != 0:
-            err = result.stderr.strip() or output
-            return {"error": f"CLI error (exit {result.returncode}): {err[:2000]}"}
-        if not output:
-            return {"error": "Empty response from CLI"}
-        # Truncate before parsing if huge
-        if len(output) > max_chars:
-            output = output[:max_chars]
-        return json.loads(output)
-    except subprocess.TimeoutExpired:
-        return {"error": f"CLI timed out after {timeout}s"}
-    except json.JSONDecodeError as e:
-        return {"error": f"Invalid JSON from CLI: {str(e)[:200]}"}
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()[:500] if e.fp else ""
+        return {"error": f"Polymarket API {e.code}: {body}"}
     except Exception as e:
-        return {"error": f"CLI failed: {str(e)[:500]}"}
+        return {"error": f"API request failed: {str(e)[:500]}"}
+
+
+def _api_post(api: str, path: str, body: dict = None, extra_headers: dict = None,
+              timeout: int = 15) -> dict:
+    """POST request to Polymarket API. Uses proxy if configured (for geoblock bypass)."""
+    # Use proxy for write operations if available
+    if PROXY_URL and api == "clob":
+        base = f"{PROXY_URL}/clob"
+    else:
+        base = API_BASES.get(api, GAMMA_BASE)
+
+    url = f"{base}{path}"
+    data = json.dumps(body or {}).encode()
+    hdrs = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; OpenClaw/1.0)",
+    }
+    if extra_headers:
+        hdrs.update(extra_headers)
+
+    req = urllib.request.Request(url, data=data, headers=hdrs, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        body_text = e.read().decode()[:500] if e.fp else ""
+        return {"error": f"Polymarket API {e.code}: {body_text}"}
+    except Exception as e:
+        return {"error": f"API request failed: {str(e)[:500]}"}
+
+
+def _search_markets(query: str = "", limit: int = 20, active: bool = True,
+                    closed: bool = False) -> list:
+    """Search Polymarket markets via Gamma API. Returns list of market dicts."""
+    params = {"limit": limit, "active": str(active).lower(), "closed": str(closed).lower()}
+    if query:
+        params["_q"] = query
+    result = _api_get("gamma", "/markets", params=params)
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict) and "error" not in result:
+        return result.get("markets", result.get("data", []))
+    return []
+
+
+def _get_market(slug_or_id: str) -> dict:
+    """Get a single market by slug or condition_id from Gamma API."""
+    # Try slug first
+    result = _api_get("gamma", f"/markets/{slug_or_id}")
+    if isinstance(result, dict) and "error" not in result and result.get("question"):
+        return result
+    # Try as search
+    markets = _search_markets(query=slug_or_id, limit=5)
+    for m in markets:
+        if m.get("slug") == slug_or_id or m.get("conditionId") == slug_or_id:
+            return m
+    if markets:
+        return markets[0]
+    return {"error": f"Market '{slug_or_id}' not found"}
 
 
 def _resolve_token_ids(market_id: str) -> dict:
-    """Resolve a market slug/ID to YES and NO CLOB token IDs.
+    """Resolve a market slug/ID to YES and NO CLOB token IDs."""
+    market = _get_market(market_id)
+    if "error" in market:
+        return market
 
-    Returns: {"yes_token": "0x...", "no_token": "0x...", "question": "...", "condition_id": "0x..."}
-    or {"error": "..."} on failure.
-    """
-    data = _run_cli(["markets", "get", market_id])
-    if "error" in data:
-        return data
-
-    # clobTokenIds is a JSON string within JSON: "[\"0xabc\",\"0xdef\"]"
-    raw_tokens = data.get("clobTokenIds", "")
+    raw_tokens = market.get("clobTokenIds", "")
     if isinstance(raw_tokens, str):
         try:
             tokens = json.loads(raw_tokens)
@@ -62,19 +125,40 @@ def _resolve_token_ids(market_id: str) -> dict:
         tokens = raw_tokens or []
 
     if len(tokens) < 2:
-        return {"error": f"Market '{market_id}' has no CLOB token IDs — may not have an order book"}
+        return {"error": f"Market '{market_id}' has no CLOB token IDs"}
 
     return {
         "yes_token": tokens[0],
         "no_token": tokens[1],
-        "question": data.get("question", ""),
-        "condition_id": data.get("conditionId", ""),
-        "slug": data.get("slug", market_id),
-        "market_id": data.get("id", ""),
-        "outcomes": data.get("outcomes", ""),
-        "active": data.get("active", False),
-        "closed": data.get("closed", False),
+        "question": market.get("question", ""),
+        "condition_id": market.get("conditionId", ""),
+        "slug": market.get("slug", market_id),
+        "market_id": market.get("id", ""),
+        "outcomes": market.get("outcomes", ""),
+        "active": market.get("active", False),
+        "closed": market.get("closed", False),
     }
+
+
+def _extract_price(data) -> Optional[float]:
+    """Extract a numeric price from API response."""
+    if isinstance(data, (int, float)):
+        return float(data)
+    if isinstance(data, str):
+        try:
+            return float(data)
+        except ValueError:
+            return None
+    if isinstance(data, dict):
+        if "error" in data:
+            return None
+        for key in ("mid", "midpoint", "price", "value", "mid_price"):
+            if key in data:
+                try:
+                    return float(data[key])
+                except (ValueError, TypeError):
+                    pass
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -87,41 +171,46 @@ def polymarket_prices(action: str, market_id: str = "",
     """Get real-time price data for Polymarket markets.
 
     Actions:
-        snapshot  — Full price snapshot (midpoint, spread, last trade, mispricing flag)
-        spread    — Bid-ask spread for a token
-        midpoint  — Midpoint price for a token
-        book      — Full order book for a token
+        snapshot   — Full price snapshot (midpoint, spread, last trade, mispricing flag)
+        spread     — Bid-ask spread for a token
+        midpoint   — Midpoint price for a token
+        book       — Full order book for a token
         last_trade — Last trade price for a token
-        history   — Price history for a token (requires interval)
+        history    — Price history for a token (requires interval)
     """
     try:
         if action == "snapshot":
             return _snapshot(market_id)
 
-        # For granular actions, resolve token_id if only market_id given
+        # Resolve token_id if only market_id given
         tid = token_id
         if not tid and market_id:
             resolved = _resolve_token_ids(market_id)
             if "error" in resolved:
                 return json.dumps(resolved)
-            tid = resolved["yes_token"]  # Default to YES token
+            tid = resolved["yes_token"]
 
         if not tid:
             return json.dumps({"error": "Provide market_id (slug/ID) or token_id"})
 
         if action == "spread":
-            return json.dumps(_run_cli(["clob", "spread", tid]))
+            result = _api_get("clob", f"/spread", params={"token_id": tid})
+            return json.dumps(result)
         elif action == "midpoint":
-            return json.dumps(_run_cli(["clob", "midpoint", tid]))
+            result = _api_get("clob", f"/midpoint", params={"token_id": tid})
+            return json.dumps(result)
         elif action == "book":
-            return json.dumps(_run_cli(["clob", "book", tid]))
+            result = _api_get("clob", f"/book", params={"token_id": tid})
+            return json.dumps(result)
         elif action == "last_trade":
-            return json.dumps(_run_cli(["clob", "last-trade", tid]))
+            result = _api_get("clob", f"/last-trade-price", params={"token_id": tid})
+            return json.dumps(result)
         elif action == "history":
-            args = ["clob", "price-history", "--interval", interval, tid]
+            params = {"token_id": tid, "interval": interval}
             if fidelity > 0:
-                args.extend(["--fidelity", str(fidelity)])
-            return json.dumps(_run_cli(args, timeout=20))
+                params["fidelity"] = fidelity
+            result = _api_get("clob", "/prices-history", params=params, timeout=20)
+            return json.dumps(result)
         else:
             return json.dumps({"error": f"Unknown action '{action}'. Use: snapshot, spread, midpoint, book, last_trade, history"})
     except Exception as e:
@@ -129,7 +218,7 @@ def polymarket_prices(action: str, market_id: str = "",
 
 
 def _snapshot(market_id: str) -> str:
-    """Full price snapshot for a market — resolves tokens, gets midpoint+spread+last for both YES and NO."""
+    """Full price snapshot — resolves tokens, gets midpoint+spread+last for both YES and NO."""
     if not market_id:
         return json.dumps({"error": "market_id required for snapshot"})
 
@@ -140,21 +229,15 @@ def _snapshot(market_id: str) -> str:
     yes_token = resolved["yes_token"]
     no_token = resolved["no_token"]
 
-    # Fetch midpoint for both sides
-    yes_mid = _run_cli(["clob", "midpoint", yes_token])
-    no_mid = _run_cli(["clob", "midpoint", no_token])
+    # Fetch prices via CLOB API
+    yes_mid = _api_get("clob", "/midpoint", params={"token_id": yes_token})
+    no_mid = _api_get("clob", "/midpoint", params={"token_id": no_token})
+    yes_spread = _api_get("clob", "/spread", params={"token_id": yes_token})
+    yes_last = _api_get("clob", "/last-trade-price", params={"token_id": yes_token})
 
-    # Fetch spread for YES
-    yes_spread = _run_cli(["clob", "spread", yes_token])
-
-    # Fetch last trade for YES
-    yes_last = _run_cli(["clob", "last-trade", yes_token])
-
-    # Extract midpoint values
     yes_price = _extract_price(yes_mid)
     no_price = _extract_price(no_mid)
 
-    # Mispricing detection: YES + NO should sum to ~1.00
     mispricing = None
     if yes_price is not None and no_price is not None:
         total = yes_price + no_price
@@ -162,8 +245,8 @@ def _snapshot(market_id: str) -> str:
         mispricing = {
             "yes_plus_no": round(total, 6),
             "deviation_from_1": round(deviation, 6),
-            "is_mispriced": deviation > 0.02,  # >2 cents = notable
-            "arb_opportunity": deviation > 0.05,  # >5 cents = actionable arb
+            "is_mispriced": deviation > 0.02,
+            "arb_opportunity": deviation > 0.05,
         }
 
     return json.dumps({
@@ -174,35 +257,10 @@ def _snapshot(market_id: str) -> str:
             "active": resolved["active"],
             "closed": resolved["closed"],
         },
-        "yes": {
-            "token_id": yes_token,
-            "midpoint": yes_mid,
-            "spread": yes_spread,
-            "last_trade": yes_last,
-        },
-        "no": {
-            "token_id": no_token,
-            "midpoint": no_mid,
-        },
+        "yes": {"token_id": yes_token, "midpoint": yes_mid, "spread": yes_spread, "last_trade": yes_last},
+        "no": {"token_id": no_token, "midpoint": no_mid},
         "mispricing": mispricing,
     })
-
-
-def _extract_price(data: dict) -> Optional[float]:
-    """Extract a numeric price from CLI output. Handles various response formats."""
-    if "error" in data:
-        return None
-    # midpoint response is usually {"mid": "0.55"} or {"midpoint": 0.55} or just a number
-    for key in ("mid", "midpoint", "price", "value"):
-        if key in data:
-            try:
-                return float(data[key])
-            except (ValueError, TypeError):
-                pass
-    # If the response is a flat number
-    if isinstance(data, (int, float)):
-        return float(data)
-    return None
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -216,9 +274,9 @@ def polymarket_monitor(action: str, market_id: str = "",
     """Monitor markets, detect mispricings, view on-chain data.
 
     Actions:
-        mispricing    — Check if YES+NO prices deviate from $1.00 (arb detector)
-        open_interest — Open interest for a market (needs condition_id or market_id)
-        volume        — Live volume for an event (needs event_id)
+        mispricing    — Check if YES+NO prices deviate from $1.00
+        open_interest — Open interest for a market
+        volume        — Live volume for an event
         holders       — Top token holders for a market
         leaderboard   — Top traders by PnL or volume
         health        — CLOB API health status
@@ -236,12 +294,15 @@ def polymarket_monitor(action: str, market_id: str = "",
                 cid = resolved["condition_id"]
             if not cid:
                 return json.dumps({"error": "Provide condition_id or market_id"})
-            return json.dumps(_run_cli(["data", "open-interest", cid]))
+            result = _api_get("gamma", f"/markets/{cid}")
+            oi = result.get("openInterest", result.get("open_interest", "unknown"))
+            return json.dumps({"condition_id": cid, "open_interest": oi})
 
         elif action == "volume":
             if not event_id:
                 return json.dumps({"error": "event_id required for volume"})
-            return json.dumps(_run_cli(["data", "volume", event_id]))
+            result = _api_get("gamma", f"/events/{event_id}")
+            return json.dumps({"event_id": event_id, "volume": result.get("volume", "unknown")})
 
         elif action == "holders":
             cid = condition_id
@@ -252,15 +313,20 @@ def polymarket_monitor(action: str, market_id: str = "",
                 cid = resolved["condition_id"]
             if not cid:
                 return json.dumps({"error": "Provide condition_id or market_id"})
-            return json.dumps(_run_cli(["data", "holders", cid, "--limit", str(limit)]))
+            # Gamma API doesn't have a direct holders endpoint; use CLOB
+            result = _api_get("gamma", f"/markets/{cid}")
+            return json.dumps({"condition_id": cid, "data": result})
 
         elif action == "leaderboard":
-            args = ["data", "leaderboard", "--period", period,
-                    "--order-by", order_by, "--limit", str(limit)]
-            return json.dumps(_run_cli(args))
+            # Gamma leaderboard
+            result = _api_get("gamma", "/leaderboard", params={
+                "period": period, "order_by": order_by, "limit": limit
+            })
+            return json.dumps(result)
 
         elif action == "health":
-            return json.dumps(_run_cli(["clob", "ok"]))
+            result = _api_get("clob", "/")
+            return json.dumps(result)
 
         else:
             return json.dumps({"error": f"Unknown action '{action}'. Use: mispricing, open_interest, volume, holders, leaderboard, health"})
@@ -277,8 +343,8 @@ def _check_mispricing(market_id: str) -> str:
     if "error" in resolved:
         return json.dumps(resolved)
 
-    yes_mid = _run_cli(["clob", "midpoint", resolved["yes_token"]])
-    no_mid = _run_cli(["clob", "midpoint", resolved["no_token"]])
+    yes_mid = _api_get("clob", "/midpoint", params={"token_id": resolved["yes_token"]})
+    no_mid = _api_get("clob", "/midpoint", params={"token_id": resolved["no_token"]})
 
     yes_price = _extract_price(yes_mid)
     no_price = _extract_price(no_mid)
@@ -288,8 +354,7 @@ def _check_mispricing(market_id: str) -> str:
             "market": resolved["question"],
             "slug": resolved["slug"],
             "error": "Could not get midpoint prices",
-            "yes_raw": yes_mid,
-            "no_raw": no_mid,
+            "yes_raw": yes_mid, "no_raw": no_mid,
         })
 
     total = yes_price + no_price
@@ -335,17 +400,23 @@ def polymarket_portfolio(action: str, address: str = "",
             return json.dumps({"error": "address (0x...) required for portfolio queries"})
 
         if action == "positions":
-            return json.dumps(_run_cli(["data", "positions", address, "--limit", str(limit)]))
+            result = _api_get("gamma", f"/positions", params={"user": address, "limit": limit})
+            return json.dumps(result)
         elif action == "closed":
-            return json.dumps(_run_cli(["data", "closed-positions", address, "--limit", str(limit)]))
+            result = _api_get("gamma", f"/positions", params={"user": address, "redeemed": "true", "limit": limit})
+            return json.dumps(result)
         elif action == "trades":
-            return json.dumps(_run_cli(["data", "trades", address, "--limit", str(limit)]))
+            result = _api_get("gamma", f"/trades", params={"maker": address, "limit": limit})
+            return json.dumps(result)
         elif action == "value":
-            return json.dumps(_run_cli(["data", "value", address]))
+            result = _api_get("gamma", f"/positions", params={"user": address})
+            return json.dumps({"address": address, "positions": result})
         elif action == "activity":
-            return json.dumps(_run_cli(["data", "activity", address, "--limit", str(limit)]))
+            result = _api_get("gamma", f"/activity", params={"address": address, "limit": limit})
+            return json.dumps(result)
         elif action == "profile":
-            return json.dumps(_run_cli(["profiles", "get", address]))
+            result = _api_get("gamma", f"/profiles/{address}")
+            return json.dumps(result)
         else:
             return json.dumps({"error": f"Unknown action '{action}'. Use: positions, closed, trades, value, activity, profile"})
     except Exception as e:
@@ -361,16 +432,7 @@ def polymarket_trade(action: str, market_id: str = "", side: str = "yes",
                      order_id: str = "", dry_run: Optional[bool] = None) -> str:
     """Place, cancel, and manage Polymarket orders.
 
-    Actions:
-        buy         — Limit order to buy YES or NO tokens
-        sell        — Limit order to sell
-        market_buy  — Market order (takes best available)
-        market_sell — Market sell
-        cancel      — Cancel a specific order
-        cancel_all  — Cancel all open orders
-        list_orders — List current open orders
-
-    Routes through Cloudflare proxy if POLYMARKET_PROXY_URL is set (bypasses geoblock).
+    Routes through Cloudflare proxy to bypass US geoblock.
     All orders pass through safety checks. dry_run=True (default) simulates.
     """
     try:
@@ -382,7 +444,6 @@ def polymarket_trade(action: str, market_id: str = "", side: str = "yes",
             if not market_id:
                 return json.dumps({"error": "market_id required for trading"})
 
-            # Convert to cents for safety check
             price_cents = int(price * 100) if price else 50
             count = max(int(size), 1)
 
@@ -395,7 +456,6 @@ def polymarket_trade(action: str, market_id: str = "", side: str = "yes",
                 return json.dumps({"blocked": True, "reason": safety["reason"]})
 
             if is_dry:
-                # Resolve token to show what would happen
                 resolved = _resolve_token_ids(market_id)
                 token_info = {}
                 if "error" not in resolved:
@@ -405,12 +465,8 @@ def polymarket_trade(action: str, market_id: str = "", side: str = "yes",
                     }
 
                 result = {
-                    "simulated": True,
-                    "action": action,
-                    "market_id": market_id,
-                    "side": side,
-                    "price": price,
-                    "size": size,
+                    "simulated": True, "action": action, "market_id": market_id,
+                    "side": side, "price": price, "size": size,
                     "order_value_usd": f"${price * size:.2f}" if price and size else "market price",
                     **token_info,
                     "message": "DRY RUN — no real order placed. Set dry_run=false to go live.",
@@ -418,7 +474,7 @@ def polymarket_trade(action: str, market_id: str = "", side: str = "yes",
                 log_trade("polymarket", action, {**result, "dry_run": True})
                 return json.dumps(result)
 
-            # Real order
+            # Real order via CLOB API through proxy
             return _execute_polymarket_order(action, market_id, side, price, size)
 
         elif action == "cancel":
@@ -428,17 +484,20 @@ def polymarket_trade(action: str, market_id: str = "", side: str = "yes",
                 result = {"simulated": True, "action": "cancel", "order_id": order_id}
                 log_trade("polymarket", "cancel", {**result, "dry_run": True})
                 return json.dumps(result)
-            return json.dumps(_run_cli(["clob", "cancel", order_id]))
+            result = _api_post("clob", f"/cancel", body={"orderID": order_id})
+            return json.dumps(result)
 
         elif action == "cancel_all":
             if is_dry:
                 result = {"simulated": True, "action": "cancel_all"}
                 log_trade("polymarket", "cancel_all", {**result, "dry_run": True})
                 return json.dumps(result)
-            return json.dumps(_run_cli(["clob", "cancel-all"]))
+            result = _api_post("clob", "/cancel-all")
+            return json.dumps(result)
 
         elif action == "list_orders":
-            return json.dumps(_run_cli(["clob", "orders"]))
+            result = _api_get("clob", "/orders")
+            return json.dumps(result)
 
         else:
             return json.dumps({"error": f"Unknown action '{action}'. Use: buy, sell, market_buy, market_sell, cancel, cancel_all, list_orders"})
@@ -449,38 +508,9 @@ def polymarket_trade(action: str, market_id: str = "", side: str = "yes",
 
 def _execute_polymarket_order(action: str, market_id: str, side: str,
                               price: float, size: float) -> str:
-    """Execute a real Polymarket order — tries proxy first, then direct CLI."""
+    """Execute a real Polymarket order via CLOB API through proxy."""
     from trading_safety import log_trade
 
-    proxy_url = os.environ.get("POLYMARKET_PROXY_URL", "")
-
-    # Try Cloudflare Worker proxy first (bypasses US geoblock)
-    if proxy_url:
-        try:
-            payload = json.dumps({
-                "action": action,
-                "market_id": market_id,
-                "side": side,
-                "price": price,
-                "size": size,
-            }).encode()
-            req = urllib.request.Request(
-                f"{proxy_url}/trade",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                result = json.loads(resp.read().decode())
-                log_trade("polymarket", action, {
-                    "market_id": market_id, "side": side, "price": price, "size": size,
-                    "via": "proxy", "dry_run": False, "response": str(result)[:500],
-                })
-                return json.dumps(result)
-        except Exception as e:
-            logger_msg = f"Proxy failed, trying direct CLI: {e}"
-
-    # Fallback: direct CLI
     resolved = _resolve_token_ids(market_id)
     if "error" in resolved:
         return json.dumps(resolved)
@@ -488,25 +518,24 @@ def _execute_polymarket_order(action: str, market_id: str, side: str,
     token_id = resolved["yes_token"] if side.lower() == "yes" else resolved["no_token"]
 
     if action in ("market_buy", "market_sell"):
-        cli_args = ["clob", "market-order", "--token", token_id, "--amount", str(size)]
-        if action == "market_sell":
-            cli_args.append("--sell")
+        body = {
+            "tokenID": token_id,
+            "amount": size,
+            "side": "BUY" if action == "market_buy" else "SELL",
+        }
+        result = _api_post("clob", "/market-order", body=body, timeout=30)
     else:
-        cli_args = ["clob", "create-order", "--token", token_id,
-                     "--price", str(price), "--size", str(size)]
-        if action == "sell":
-            cli_args.append("--sell")
-
-    result = _run_cli(cli_args, timeout=30)
-
-    # Check for geoblock
-    err = result.get("error", "")
-    if "403" in err or "geoblock" in err.lower() or "forbidden" in err.lower():
-        result["geoblock_note"] = "US VPS is geoblocked. Set POLYMARKET_PROXY_URL to route through Cloudflare Worker."
+        body = {
+            "tokenID": token_id,
+            "price": price,
+            "size": size,
+            "side": "BUY" if action == "buy" else "SELL",
+        }
+        result = _api_post("clob", "/order", body=body, timeout=30)
 
     log_trade("polymarket", action, {
         "market_id": market_id, "side": side, "price": price, "size": size,
-        "via": "cli", "dry_run": False, "response": str(result)[:500],
+        "via": "proxy", "dry_run": False, "response": str(result)[:500],
     })
 
     return json.dumps(result)
@@ -517,23 +546,15 @@ def _execute_polymarket_order(action: str, market_id: str, side: str,
 # ═══════════════════════════════════════════════════════════════════
 
 def polymarket_balance(action: str = "balance") -> str:
-    """Check Polymarket wallet balance and approval status.
-
-    Actions:
-        balance  — USDC balance on Polygon
-        approval — Check if CLOB contract is approved for trading
-    """
+    """Check Polymarket wallet balance and approval status."""
     try:
         if action == "balance":
-            result = _run_cli(["clob", "balance"])
+            result = _api_get("clob", "/balance")
             return json.dumps(result)
-
         elif action == "approval":
-            result = _run_cli(["clob", "check-approval"])
+            result = _api_get("clob", "/check-approval")
             return json.dumps(result)
-
         else:
             return json.dumps({"error": f"Unknown action '{action}'. Use: balance, approval"})
-
     except Exception as e:
         return json.dumps({"error": str(e)})

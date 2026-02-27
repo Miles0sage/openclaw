@@ -140,16 +140,9 @@ def _strategy_trending(params: dict) -> str:
             })
 
         # Polymarket trending
-        from polymarket_trading import _run_cli
-        poly_result = _run_cli(["markets", "list", "--limit", "15"], timeout=20)
-        if isinstance(poly_result, list):
-            poly_markets = poly_result
-        elif isinstance(poly_result, dict) and "error" not in poly_result:
-            poly_markets = poly_result.get("markets", poly_result.get("data", []))
-        else:
-            poly_markets = []
-
-        poly_markets.sort(key=lambda m: float(m.get("volume", 0) or 0), reverse=True)
+        from polymarket_trading import _search_markets
+        poly_markets = _search_markets(limit=15, active=True, closed=False)
+        poly_markets.sort(key=lambda m: float(m.get("volumeNum", 0) or m.get("volume", 0) or 0), reverse=True)
         for m in poly_markets[:params.get("limit", 10)]:
             trending.append({
                 "platform": "polymarket",

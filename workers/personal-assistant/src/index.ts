@@ -1948,7 +1948,7 @@ ROUTING:
 - When Miles asks to calculate something, use compute_math or compute_stats.
 - When Miles asks about predictions/markets, use prediction_market to search/list. For REAL-TIME PRICES, use polymarket_prices with action=snapshot. For arbitrage/mispricing checks, use polymarket_monitor with action=mispricing. For viewing a trader's portfolio, use polymarket_portfolio.
 - When Miles asks "what's the price on [market]?", use polymarket_prices(action=snapshot, market_id=slug).
-- When Miles asks about arbitrage or mispricing, use arb_scanner(action=scan) for cross-platform arb, or polymarket_monitor(action=mispricing, market_id=slug) for single-market.
+- When Miles asks about arbitrage, opportunities, or "scan for arb", use trading_strategies(action=summary) for a comprehensive scan across both platforms. For specific cross-platform arb only, use arb_scanner(action=scan). For bond-like safe bets, use arb_scanner(action=bonds). For single-market mispricing, use polymarket_monitor(action=mispricing, market_id=slug).
 - When Miles asks about top traders or the leaderboard, use polymarket_monitor(action=leaderboard).
 - When Miles asks to check a wallet or portfolio, use polymarket_portfolio(action=positions, address=0x...).
 - When Miles asks about Kalshi markets, use kalshi_markets(action=search, query=...) to find markets or kalshi_markets(action=get, ticker=...) for details.
