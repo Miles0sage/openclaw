@@ -2119,6 +2119,171 @@ ROUTING:
 - For complex coding/security/database questions, use send_chat_to_gateway to delegate to a specialist.`;
 
 // ---------------------------------------------------------------------------
+// Telegram table formatter — builds pixel-perfect monospace tables in code
+// ---------------------------------------------------------------------------
+function formatBettingTable(toolName: string, data: Record<string, unknown> | null): string | null {
+  if (!data) return null;
+
+  // sports_betting recommend/bankroll
+  if (toolName === "sports_betting" && Array.isArray(data.recommendations)) {
+    const recs = data.recommendations as Array<Record<string, unknown>>;
+    if (recs.length === 0) return "No +EV bets found right now.";
+
+    const pad = (s: string, n: number) => (s.length > n ? s.slice(0, n) : s.padEnd(n));
+    const rpad = (s: string, n: number) => (s.length > n ? s.slice(0, n) : s.padStart(n));
+
+    let t = "<b>Tonight's Picks</b>\n<pre>\n";
+    t +=
+      pad("Game", 16) +
+      " " +
+      pad("Bet", 10) +
+      " " +
+      pad("Book", 9) +
+      " " +
+      rpad("Size", 6) +
+      " " +
+      rpad("EV%", 7) +
+      "\n";
+    t += "─".repeat(52) + "\n";
+
+    for (const r of recs.slice(0, 8)) {
+      const game = String(r.game || "")
+        .replace(/ @ /g, " v ")
+        .slice(0, 16);
+      const bet =
+        String(r.bet_on || "")
+          .split(" ")
+          .pop() || "";
+      const book = String(r.book || "").slice(0, 9);
+      const size = "$" + Number(r.bet_size || 0).toFixed(0);
+      const ev = "+" + Number(r.ev_pct || 0).toFixed(1) + "%";
+      t +=
+        pad(game, 16) +
+        " " +
+        pad(bet, 10) +
+        " " +
+        pad(book, 9) +
+        " " +
+        rpad(size, 6) +
+        " " +
+        rpad(ev, 7) +
+        "\n";
+    }
+    t += "</pre>";
+
+    const summary = data.summary as Record<string, unknown> | undefined;
+    if (summary) {
+      t += `\n<b>$${Number(summary.total_wagered || 0).toFixed(0)} wagered</b> · <b>$${Number(summary.total_expected_profit || 0).toFixed(0)} expected profit</b>`;
+    }
+    return t;
+  }
+
+  // sportsbook_arb ev_scan
+  if (toolName === "sportsbook_arb" && Array.isArray(data.ev_opportunities)) {
+    const opps = data.ev_opportunities as Array<Record<string, unknown>>;
+    if (opps.length === 0) return "No +EV bets found vs Pinnacle right now. Markets are efficient.";
+
+    const pad = (s: string, n: number) => (s.length > n ? s.slice(0, n) : s.padEnd(n));
+    const rpad = (s: string, n: number) => (s.length > n ? s.slice(0, n) : s.padStart(n));
+
+    let t = "<b>+EV vs Pinnacle Sharp Line</b>\n<pre>\n";
+    t +=
+      pad("Game", 16) +
+      " " +
+      pad("Bet", 10) +
+      " " +
+      pad("Book", 9) +
+      " " +
+      rpad("Odds", 5) +
+      " " +
+      rpad("EV%", 7) +
+      "\n";
+    t += "─".repeat(51) + "\n";
+
+    for (const o of opps.slice(0, 8)) {
+      const game = String(o.game || "")
+        .replace(/ @ /g, " v ")
+        .slice(0, 16);
+      const bet =
+        String(o.bet || "")
+          .split(" ")
+          .pop() || "";
+      const book = String(o.book || "").slice(0, 9);
+      const odds = Number(o.decimal_odds || 0).toFixed(2);
+      const ev = "+" + Number(o.ev_pct || 0).toFixed(1) + "%";
+      t +=
+        pad(game, 16) +
+        " " +
+        pad(bet, 10) +
+        " " +
+        pad(book, 9) +
+        " " +
+        rpad(odds, 5) +
+        " " +
+        rpad(ev, 7) +
+        "\n";
+    }
+    t += "</pre>";
+    t += `\n<b>${opps.length} +EV bets</b> found · ${Number((data.quota as Record<string, unknown>)?.remaining ?? "?")} API calls left`;
+    return t;
+  }
+
+  // sports_predict predictions
+  if (toolName === "sports_predict" && Array.isArray(data.predictions)) {
+    const preds = data.predictions as Array<Record<string, unknown>>;
+    if (preds.length === 0) return "No NBA games scheduled today.";
+
+    const pad = (s: string, n: number) => (s.length > n ? s.slice(0, n) : s.padEnd(n));
+    const rpad = (s: string, n: number) => (s.length > n ? s.slice(0, n) : s.padStart(n));
+
+    let t = "<b>NBA Predictions</b>\n<pre>\n";
+    t += pad("Game", 20) + " " + pad("Pick", 10) + " " + rpad("Prob", 5) + "\n";
+    t += "─".repeat(38) + "\n";
+
+    for (const p of preds.slice(0, 10)) {
+      const home = String(p.home_abbrev || "").padEnd(3);
+      const away = String(p.away_abbrev || "").padEnd(3);
+      const game = `${away} @ ${home}`;
+      const winner =
+        String(p.predicted_winner || "")
+          .split(" ")
+          .pop() || "";
+      const conf = (Number(p.confidence || 0) * 100).toFixed(0) + "%";
+      t += pad(game, 20) + " " + pad(winner, 10) + " " + rpad(conf, 5) + "\n";
+    }
+    t += "</pre>";
+    return t;
+  }
+
+  // sportsbook_odds compare
+  if (toolName === "sportsbook_odds" && Array.isArray(data.comparisons)) {
+    const comps = data.comparisons as Array<Record<string, unknown>>;
+    if (comps.length === 0) return "No odds data available.";
+
+    let t = "<b>Odds Comparison</b>\n";
+    for (const c of comps.slice(0, 5)) {
+      t += `\n<b>${c.game}</b>\n<pre>`;
+      const books = c.odds_by_book as Record<string, Record<string, number>> | undefined;
+      if (books) {
+        for (const [bookName, odds] of Object.entries(books)) {
+          const line = Object.entries(odds)
+            .map(([team, price]) => {
+              const short = team.split(" ").pop() || team;
+              return `${short} ${Number(price).toFixed(2)}`;
+            })
+            .join(" | ");
+          t += `${bookName.slice(0, 12).padEnd(12)} ${line}\n`;
+        }
+      }
+      t += "</pre>";
+    }
+    return t;
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // POST /webhook/telegram — Telegram bot webhook handler
 // ---------------------------------------------------------------------------
 app.post("/webhook/telegram", async (c) => {
@@ -2194,6 +2359,8 @@ app.post("/webhook/telegram", async (c) => {
   const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${env.GEMINI_API_KEY}`;
 
   let reply = "";
+  let lastToolName = "";
+  let lastToolResult: Record<string, unknown> | null = null;
   const MAX_TOOL_ITERATIONS = 3;
 
   try {
@@ -2205,19 +2372,7 @@ app.post("/webhook/telegram", async (c) => {
             {
               text:
                 SYSTEM_PROMPT +
-                `\n\nYou are responding via Telegram. Format rules:
-- Keep responses concise and mobile-friendly.
-- Use HTML formatting: <b>bold</b>, <i>italic</i>, <code>inline code</code>.
-- Do NOT use Markdown (* or _ or # or []). Telegram uses HTML mode.
-- When showing betting picks, odds, comparisons, or any tabular data, ALWAYS format as a monospace table inside <pre> tags. Example:
-<pre>
-Game          | Bet    | Book     | Size
-Mavs vs Griz | Mavs   | FanDuel  | $18
-Celts vs Nets| Celtics| Betfair  | $23
-</pre>
-- Keep table columns short (abbreviate team names, book names).
-- After the table, add a one-line summary like "Total: $60 wagered, $15 expected profit"
-- For simple answers (not tables), just use plain text with <b> for emphasis.`,
+                `\n\nYou are responding via Telegram. Keep responses SHORT (2-3 sentences max). Tables are auto-formatted by the system — just summarize the key insight briefly. Use HTML: <b>bold</b>, <i>italic</i>. Do NOT use Markdown (* _ # []). Do NOT try to format tables yourself.`,
             },
           ],
         },
@@ -2273,6 +2428,13 @@ Celts vs Nets| Celtics| Betfair  | $23
           toolResult = { error: errMsg };
         }
 
+        // Track for table formatting
+        lastToolName = functionCall.name;
+        lastToolResult =
+          typeof toolResult === "object" && toolResult !== null
+            ? (toolResult as Record<string, unknown>)
+            : null;
+
         geminiContents.push({
           role: "model",
           parts: [{ functionCall: { name: functionCall.name, args: functionCall.args || {} } }],
@@ -2302,6 +2464,12 @@ Celts vs Nets| Celtics| Betfair  | $23
 
     if (!reply) {
       reply = "Tool executed but no summary generated.";
+    }
+
+    // Override with code-formatted table for betting tools
+    const table = formatBettingTable(lastToolName, lastToolResult);
+    if (table) {
+      reply = table;
     }
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
