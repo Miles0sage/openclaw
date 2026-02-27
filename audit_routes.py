@@ -53,7 +53,7 @@ async def get_logs(
 
 @router.get("/logs/{date}")
 async def get_daily_summary(
-    date: str = Path(..., regex=r"^\d{4}-\d{2}-\d{2}$")
+    date: str = Path(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
 ) -> Dict[str, Any]:
     """
     Get daily summary for a specific date
