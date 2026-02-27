@@ -890,6 +890,116 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    # ═══════════════════════════════════════════════════════════════
+    # TRADING ENGINE — Phase 2 (Kalshi + Polymarket + Arb + Safety)
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "kalshi_markets",
+        "description": "Search and view Kalshi prediction market data. Read-only — no auth needed. Actions: search (by keyword), get (specific ticker), orderbook, trades, candlesticks (price history), events (categories).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["search", "get", "orderbook", "trades", "candlesticks", "events"], "description": "Action to perform"},
+                "ticker": {"type": "string", "description": "Market ticker (for get, orderbook, trades, candlesticks)"},
+                "query": {"type": "string", "description": "Search keyword (for search action)"},
+                "event_ticker": {"type": "string", "description": "Event ticker to filter markets"},
+                "status": {"type": "string", "description": "Market status filter: open, closed, settled"},
+                "limit": {"type": "integer", "description": "Max results (default: 20)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "kalshi_trade",
+        "description": "Place, cancel, and manage Kalshi orders. Safety-checked with dry-run default. Actions: buy, sell, market_buy, market_sell, cancel, cancel_all, list_orders. All amounts in cents.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["buy", "sell", "market_buy", "market_sell", "cancel", "cancel_all", "list_orders"], "description": "Trading action"},
+                "ticker": {"type": "string", "description": "Market ticker"},
+                "side": {"type": "string", "enum": ["yes", "no"], "description": "Side: yes or no"},
+                "price": {"type": "integer", "description": "Price in cents (1-99)"},
+                "count": {"type": "integer", "description": "Number of contracts"},
+                "order_id": {"type": "string", "description": "Order ID (for cancel)"},
+                "dry_run": {"type": "boolean", "description": "Simulate without placing real order (default: true)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "kalshi_portfolio",
+        "description": "View Kalshi portfolio — balance, positions, fills, settlements. Requires API credentials. Actions: balance, positions, fills, settlements, summary.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["balance", "positions", "fills", "settlements", "summary"], "description": "Portfolio action"},
+                "limit": {"type": "integer", "description": "Max results (default: 50)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "polymarket_trade",
+        "description": "Place, cancel, and manage Polymarket orders. Routes through Cloudflare proxy to bypass US geoblock. Safety-checked with dry-run default. Actions: buy, sell, market_buy, market_sell, cancel, cancel_all, list_orders.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["buy", "sell", "market_buy", "market_sell", "cancel", "cancel_all", "list_orders"], "description": "Trading action"},
+                "market_id": {"type": "string", "description": "Market slug or ID"},
+                "side": {"type": "string", "enum": ["yes", "no"], "description": "Side: yes or no"},
+                "price": {"type": "number", "description": "Price (0.01-0.99)"},
+                "size": {"type": "number", "description": "Number of shares"},
+                "order_id": {"type": "string", "description": "Order ID (for cancel)"},
+                "dry_run": {"type": "boolean", "description": "Simulate without placing real order (default: true)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "arb_scanner",
+        "description": "Cross-platform arbitrage scanner for Polymarket + Kalshi. Actions: scan (auto-find matching events, compare prices), compare (specific keyword), bonds (high-probability >90% contracts), mispricing (YES+NO != $1.00).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["scan", "compare", "bonds", "mispricing"], "description": "Scanner action"},
+                "query": {"type": "string", "description": "Search keyword to filter markets"},
+                "min_edge": {"type": "number", "description": "Minimum price edge to report (default: 0.02 = 2 cents)"},
+                "max_results": {"type": "integer", "description": "Max results (default: 10)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "trading_strategies",
+        "description": "Automated trading opportunity scanners across Polymarket and Kalshi. Actions: bonds (>90% contracts), mispricing (price gaps), whale_alerts (top wallet moves), trending (volume spikes), expiring (closing soon), summary (run all).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["bonds", "mispricing", "whale_alerts", "trending", "expiring", "summary"], "description": "Strategy action"},
+                "params": {"type": "object", "description": "Strategy-specific parameters (query, limit, min_edge, hours, etc.)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "trading_safety",
+        "description": "Manage trading safety configuration — dry-run toggle, kill switch, position limits, trade audit log. Actions: status, get_config, set_config, trade_log, kill_switch, reset.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["status", "get_config", "set_config", "trade_log", "kill_switch", "reset"], "description": "Safety action"},
+                "config": {"type": "object", "description": "Config fields to update (for set_config). Keys: dry_run, kill_switch, confirm_threshold_cents, max_per_market_cents, max_total_exposure_cents"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -1047,6 +1157,37 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             return _read_ai_news(tool_input.get("limit", 10), tool_input.get("source"), tool_input.get("hours", 24))
         elif tool_name == "read_tweets":
             return _read_tweets(tool_input.get("account"), tool_input.get("limit", 5))
+        # ═ Trading Engine (Phase 2)
+        elif tool_name == "kalshi_markets":
+            from kalshi_trading import kalshi_markets
+            return kalshi_markets(tool_input["action"], tool_input.get("ticker", ""),
+                                  tool_input.get("query", ""), tool_input.get("event_ticker", ""),
+                                  tool_input.get("status", ""), tool_input.get("limit", 20))
+        elif tool_name == "kalshi_trade":
+            from kalshi_trading import kalshi_trade
+            return kalshi_trade(tool_input["action"], tool_input.get("ticker", ""),
+                                tool_input.get("side", "yes"), tool_input.get("price", 0),
+                                tool_input.get("count", 1), tool_input.get("order_id", ""),
+                                tool_input.get("dry_run"))
+        elif tool_name == "kalshi_portfolio":
+            from kalshi_trading import kalshi_portfolio
+            return kalshi_portfolio(tool_input["action"], tool_input.get("limit", 50))
+        elif tool_name == "polymarket_trade":
+            from polymarket_trading import polymarket_trade
+            return polymarket_trade(tool_input["action"], tool_input.get("market_id", ""),
+                                    tool_input.get("side", "yes"), tool_input.get("price", 0.0),
+                                    tool_input.get("size", 0.0), tool_input.get("order_id", ""),
+                                    tool_input.get("dry_run"))
+        elif tool_name == "arb_scanner":
+            from arb_scanner import arb_scan
+            return arb_scan(tool_input["action"], tool_input.get("query", ""),
+                            tool_input.get("min_edge", 0.02), tool_input.get("max_results", 10))
+        elif tool_name == "trading_strategies":
+            from trading_strategies import trading_strategies
+            return trading_strategies(tool_input["action"], tool_input.get("params"))
+        elif tool_name == "trading_safety":
+            from trading_safety import manage_safety
+            return manage_safety(tool_input["action"], tool_input.get("config"))
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:

@@ -725,7 +725,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -4029,6 +4029,127 @@ async def api_polymarket_portfolio(request: Request):
             action=body.get("action", "positions"),
             address=body.get("address", ""),
             limit=body.get("limit", 25),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/polymarket/trade")
+async def api_polymarket_trade(request: Request):
+    """Place, cancel, manage Polymarket orders — safety-checked, dry-run default."""
+    try:
+        body = await request.json()
+        from polymarket_trading import polymarket_trade
+        result = polymarket_trade(
+            action=body.get("action", "buy"),
+            market_id=body.get("market_id", ""),
+            side=body.get("side", "yes"),
+            price=body.get("price", 0.0),
+            size=body.get("size", 0.0),
+            order_id=body.get("order_id", ""),
+            dry_run=body.get("dry_run"),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/kalshi/markets")
+async def api_kalshi_markets(request: Request):
+    """Search and view Kalshi market data — read-only, no auth needed."""
+    try:
+        body = await request.json()
+        from kalshi_trading import kalshi_markets
+        result = kalshi_markets(
+            action=body.get("action", "search"),
+            ticker=body.get("ticker", ""),
+            query=body.get("query", ""),
+            event_ticker=body.get("event_ticker", ""),
+            status=body.get("status", ""),
+            limit=body.get("limit", 20),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/kalshi/trade")
+async def api_kalshi_trade(request: Request):
+    """Place, cancel, manage Kalshi orders — safety-checked, dry-run default."""
+    try:
+        body = await request.json()
+        from kalshi_trading import kalshi_trade
+        result = kalshi_trade(
+            action=body.get("action", "buy"),
+            ticker=body.get("ticker", ""),
+            side=body.get("side", "yes"),
+            price=body.get("price", 0),
+            count=body.get("count", 1),
+            order_id=body.get("order_id", ""),
+            dry_run=body.get("dry_run"),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/kalshi/portfolio")
+async def api_kalshi_portfolio(request: Request):
+    """View Kalshi portfolio — balance, positions, fills, settlements."""
+    try:
+        body = await request.json()
+        from kalshi_trading import kalshi_portfolio
+        result = kalshi_portfolio(
+            action=body.get("action", "balance"),
+            limit=body.get("limit", 50),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/arb/scan")
+async def api_arb_scan(request: Request):
+    """Cross-platform arbitrage scanner — Polymarket + Kalshi."""
+    try:
+        body = await request.json()
+        from arb_scanner import arb_scan
+        result = arb_scan(
+            action=body.get("action", "scan"),
+            query=body.get("query", ""),
+            min_edge=body.get("min_edge", 0.02),
+            max_results=body.get("max_results", 10),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/trading/strategies")
+async def api_trading_strategies(request: Request):
+    """Automated trading opportunity scanners — bonds, mispricing, whale alerts, trending, expiring."""
+    try:
+        body = await request.json()
+        from trading_strategies import trading_strategies
+        result = trading_strategies(
+            action=body.get("action", "summary"),
+            params=body.get("params"),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/trading/safety")
+async def api_trading_safety(request: Request):
+    """Trading safety configuration — dry-run, kill switch, limits, audit log."""
+    try:
+        body = await request.json()
+        from trading_safety import manage_safety
+        result = manage_safety(
+            action=body.get("action", "status"),
+            config=body.get("config"),
         )
         return json.loads(result)
     except Exception as e:

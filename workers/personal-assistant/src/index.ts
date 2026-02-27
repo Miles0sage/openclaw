@@ -880,6 +880,152 @@ const OPENCLAW_TOOLS = [
           required: ["action", "address"],
         },
       },
+      // --- Trading Engine Phase 2 ---
+      {
+        name: "kalshi_markets",
+        description:
+          "Search and view Kalshi prediction market data (read-only, no auth needed). Actions: search, get, orderbook, trades, candlesticks, events.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: search, get, orderbook, trades, candlesticks, events",
+            },
+            ticker: { type: "STRING", description: "Market ticker" },
+            query: { type: "STRING", description: "Search keyword" },
+            event_ticker: { type: "STRING", description: "Event ticker filter" },
+            status: { type: "STRING", description: "Market status: open, closed, settled" },
+            limit: { type: "NUMBER", description: "Max results (default: 20)" },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "kalshi_trade",
+        description:
+          "Place/cancel Kalshi orders. Safety-checked, dry-run by default. Actions: buy, sell, market_buy, market_sell, cancel, cancel_all, list_orders. Amounts in cents.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description:
+                "Action: buy, sell, market_buy, market_sell, cancel, cancel_all, list_orders",
+            },
+            ticker: { type: "STRING", description: "Market ticker" },
+            side: { type: "STRING", description: "Side: yes or no" },
+            price: { type: "NUMBER", description: "Price in cents (1-99)" },
+            count: { type: "NUMBER", description: "Number of contracts" },
+            order_id: { type: "STRING", description: "Order ID (for cancel)" },
+            dry_run: {
+              type: "BOOLEAN",
+              description: "Simulate without real order (default: true)",
+            },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "kalshi_portfolio",
+        description:
+          "View Kalshi portfolio: balance, positions, fills, settlements. Requires API credentials.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: balance, positions, fills, settlements, summary",
+            },
+            limit: { type: "NUMBER", description: "Max results (default: 50)" },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "polymarket_trade",
+        description:
+          "Place/cancel Polymarket orders. Routes through proxy to bypass US geoblock. Safety-checked, dry-run default. Actions: buy, sell, market_buy, market_sell, cancel, cancel_all, list_orders.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description:
+                "Action: buy, sell, market_buy, market_sell, cancel, cancel_all, list_orders",
+            },
+            market_id: { type: "STRING", description: "Market slug or ID" },
+            side: { type: "STRING", description: "Side: yes or no" },
+            price: { type: "NUMBER", description: "Price (0.01-0.99)" },
+            size: { type: "NUMBER", description: "Number of shares" },
+            order_id: { type: "STRING", description: "Order ID (for cancel)" },
+            dry_run: {
+              type: "BOOLEAN",
+              description: "Simulate without real order (default: true)",
+            },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "arb_scanner",
+        description:
+          "Cross-platform arbitrage scanner for Polymarket + Kalshi. Actions: scan (auto-match events), compare (keyword), bonds (>90% contracts), mispricing (YES+NO != $1.00).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: scan, compare, bonds, mispricing",
+            },
+            query: { type: "STRING", description: "Search keyword to filter markets" },
+            min_edge: { type: "NUMBER", description: "Minimum price edge (default: 0.02)" },
+            max_results: { type: "NUMBER", description: "Max results (default: 10)" },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "trading_strategies",
+        description:
+          "Automated opportunity scanners. Actions: bonds (>90%), mispricing (gaps), whale_alerts (top wallets), trending (volume), expiring (closing soon), summary (all scanners).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: bonds, mispricing, whale_alerts, trending, expiring, summary",
+            },
+            params: {
+              type: "OBJECT",
+              description: "Strategy params (query, limit, min_edge, hours, etc.)",
+              properties: {},
+            },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "trading_safety",
+        description:
+          "Manage trading safety: dry-run toggle, kill switch, limits, audit log. Actions: status, get_config, set_config, trade_log, kill_switch, reset.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: status, get_config, set_config, trade_log, kill_switch, reset",
+            },
+            config: {
+              type: "OBJECT",
+              description:
+                "Config fields to update (for set_config): dry_run, kill_switch, confirm_threshold_cents, max_per_market_cents, max_total_exposure_cents",
+              properties: {},
+            },
+          },
+          required: ["action"],
+        },
+      },
       // --- Environment ---
       {
         name: "env_manage",
@@ -1459,6 +1605,93 @@ async function executeTool(
           }),
         })
       ).json();
+    // --- Trading Engine Phase 2 ---
+    case "kalshi_markets":
+      return (
+        await gatewayFetch(env, "/api/kalshi/markets", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            ticker: args.ticker,
+            query: args.query,
+            event_ticker: args.event_ticker,
+            status: args.status,
+            limit: args.limit,
+          }),
+        })
+      ).json();
+    case "kalshi_trade":
+      return (
+        await gatewayFetch(env, "/api/kalshi/trade", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            ticker: args.ticker,
+            side: args.side,
+            price: args.price,
+            count: args.count,
+            order_id: args.order_id,
+            dry_run: args.dry_run,
+          }),
+        })
+      ).json();
+    case "kalshi_portfolio":
+      return (
+        await gatewayFetch(env, "/api/kalshi/portfolio", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            limit: args.limit,
+          }),
+        })
+      ).json();
+    case "polymarket_trade":
+      return (
+        await gatewayFetch(env, "/api/polymarket/trade", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            market_id: args.market_id,
+            side: args.side,
+            price: args.price,
+            size: args.size,
+            order_id: args.order_id,
+            dry_run: args.dry_run,
+          }),
+        })
+      ).json();
+    case "arb_scanner":
+      return (
+        await gatewayFetch(env, "/api/arb/scan", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            query: args.query,
+            min_edge: args.min_edge,
+            max_results: args.max_results,
+          }),
+        })
+      ).json();
+    case "trading_strategies":
+      return (
+        await gatewayFetch(env, "/api/trading/strategies", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            params: args.params,
+          }),
+        })
+      ).json();
+    case "trading_safety":
+      return (
+        await gatewayFetch(env, "/api/trading/safety", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            config: args.config,
+          }),
+        })
+      ).json();
     // --- Environment ---
     case "env_manage":
       return (
@@ -1654,7 +1887,7 @@ app.get("/health", async (c) => {
 
 const SYSTEM_PROMPT = `You are Overseer — Miles's personal AI agency assistant, running on Gemini 2.5 Flash at the Cloudflare edge.
 
-CAPABILITIES: You have live access to the OpenClaw agency via 62 function calls. You can:
+CAPABILITIES: You have live access to the OpenClaw agency via 69 function calls. You can:
 - **Jobs & Proposals**: Create, list, kill, approve, and monitor autonomous jobs and proposals
 - **GitHub**: Get repo info (issues, PRs, commits), create issues
 - **Web Research**: Search the web, fetch/scrape URLs, deep research topics
@@ -1668,6 +1901,12 @@ CAPABILITIES: You have live access to the OpenClaw agency via 62 function calls.
 - **Security**: Run OXO security scans (Nmap, Nuclei, ZAP)
 - **Predictions**: Search/list Polymarket markets (prediction_market)
 - **Polymarket Intelligence**: Real-time prices & snapshots (polymarket_prices), arbitrage/mispricing detection (polymarket_monitor), wallet portfolio viewer (polymarket_portfolio)
+- **Polymarket Trading**: Place/cancel orders via proxy (polymarket_trade) — dry-run default, safety-checked
+- **Kalshi Markets**: Search, get, orderbook, trades, candlesticks (kalshi_markets) — no auth for read-only
+- **Kalshi Trading**: Place/cancel orders (kalshi_trade) — dry-run default, safety-checked. Portfolio/balance (kalshi_portfolio)
+- **Arbitrage Scanner**: Cross-platform arb detection (arb_scanner) — scan, bonds, mispricing
+- **Trading Strategies**: Automated scanners (trading_strategies) — bonds, mispricing, whale alerts, trending, expiring
+- **Trading Safety**: Dry-run toggle, kill switch, position limits, trade audit log (trading_safety)
 - **Environment**: Manage env vars and .env files
 - **Memory**: Search and save persistent memory
 - **Agents**: List, spawn, and monitor agents
@@ -1709,9 +1948,14 @@ ROUTING:
 - When Miles asks to calculate something, use compute_math or compute_stats.
 - When Miles asks about predictions/markets, use prediction_market to search/list. For REAL-TIME PRICES, use polymarket_prices with action=snapshot. For arbitrage/mispricing checks, use polymarket_monitor with action=mispricing. For viewing a trader's portfolio, use polymarket_portfolio.
 - When Miles asks "what's the price on [market]?", use polymarket_prices(action=snapshot, market_id=slug).
-- When Miles asks about arbitrage or mispricing, use polymarket_monitor(action=mispricing, market_id=slug).
+- When Miles asks about arbitrage or mispricing, use arb_scanner(action=scan) for cross-platform arb, or polymarket_monitor(action=mispricing, market_id=slug) for single-market.
 - When Miles asks about top traders or the leaderboard, use polymarket_monitor(action=leaderboard).
 - When Miles asks to check a wallet or portfolio, use polymarket_portfolio(action=positions, address=0x...).
+- When Miles asks about Kalshi markets, use kalshi_markets(action=search, query=...) to find markets or kalshi_markets(action=get, ticker=...) for details.
+- When Miles says "buy" or "trade" on Polymarket, use polymarket_trade. On Kalshi, use kalshi_trade. ALL TRADES ARE DRY-RUN BY DEFAULT — remind Miles to disable dry_run for real trades.
+- When Miles asks for trading opportunities or "what should I trade?", use trading_strategies(action=summary) for a full scan, or specific: bonds, mispricing, trending, expiring.
+- When Miles asks about trading safety, limits, or kill switch, use trading_safety(action=status). To toggle kill switch: trading_safety(action=kill_switch). To view trade log: trading_safety(action=trade_log).
+- CRITICAL: Never place a real trade (dry_run=false) without Miles explicitly confirming. When in doubt, use dry_run=true.
 - When Miles asks to send a Slack message, use send_slack_message.
 - When Miles asks about security scanning, use security_scan.
 - When Miles asks about AI news, latest developments, or what's happening in AI, call read_ai_news. Use hours=72 for a broader view since some blogs post infrequently.

@@ -1,12 +1,18 @@
 """
-Polymarket Trading Module — Phase 1: Market Intelligence (read-only)
+Polymarket Trading Module — Phase 2: Full Trading Engine
 
 Wraps the `polymarket` CLI (Rust binary) for real-time prices,
-arbitrage detection, and portfolio watching. No wallet needed.
+arbitrage detection, portfolio watching, AND order placement.
+
+Trading can be routed through a Cloudflare Worker proxy (POLYMARKET_PROXY_URL)
+to bypass US geoblock, or falls back to direct CLI.
 """
 
 import json
+import os
 import subprocess
+import urllib.request
+import urllib.parse
 from typing import Optional
 
 
@@ -342,5 +348,192 @@ def polymarket_portfolio(action: str, address: str = "",
             return json.dumps(_run_cli(["profiles", "get", address]))
         else:
             return json.dumps({"error": f"Unknown action '{action}'. Use: positions, closed, trades, value, activity, profile"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# ═══════════════════════════════════════════════════════════════════
+# TOOL 4: polymarket_trade — Order placement (safety-checked)
+# ═══════════════════════════════════════════════════════════════════
+
+def polymarket_trade(action: str, market_id: str = "", side: str = "yes",
+                     price: float = 0.0, size: float = 0.0,
+                     order_id: str = "", dry_run: Optional[bool] = None) -> str:
+    """Place, cancel, and manage Polymarket orders.
+
+    Actions:
+        buy         — Limit order to buy YES or NO tokens
+        sell        — Limit order to sell
+        market_buy  — Market order (takes best available)
+        market_sell — Market sell
+        cancel      — Cancel a specific order
+        cancel_all  — Cancel all open orders
+        list_orders — List current open orders
+
+    Routes through Cloudflare proxy if POLYMARKET_PROXY_URL is set (bypasses geoblock).
+    All orders pass through safety checks. dry_run=True (default) simulates.
+    """
+    try:
+        from trading_safety import check_order_safety, log_trade, _load_config
+        cfg = _load_config()
+        is_dry = dry_run if dry_run is not None else cfg.dry_run
+
+        if action in ("buy", "sell", "market_buy", "market_sell"):
+            if not market_id:
+                return json.dumps({"error": "market_id required for trading"})
+
+            # Convert to cents for safety check
+            price_cents = int(price * 100) if price else 50
+            count = max(int(size), 1)
+
+            safety = check_order_safety("polymarket", market_id, side, price_cents, count)
+            if not safety["ok"]:
+                log_trade("polymarket", action, {
+                    "market_id": market_id, "side": side, "price": price, "size": size,
+                    "blocked": True, "reason": safety["reason"], "dry_run": is_dry,
+                })
+                return json.dumps({"blocked": True, "reason": safety["reason"]})
+
+            if is_dry:
+                # Resolve token to show what would happen
+                resolved = _resolve_token_ids(market_id)
+                token_info = {}
+                if "error" not in resolved:
+                    token_info = {
+                        "token_id": resolved["yes_token"] if side.lower() == "yes" else resolved["no_token"],
+                        "question": resolved["question"],
+                    }
+
+                result = {
+                    "simulated": True,
+                    "action": action,
+                    "market_id": market_id,
+                    "side": side,
+                    "price": price,
+                    "size": size,
+                    "order_value_usd": f"${price * size:.2f}" if price and size else "market price",
+                    **token_info,
+                    "message": "DRY RUN — no real order placed. Set dry_run=false to go live.",
+                }
+                log_trade("polymarket", action, {**result, "dry_run": True})
+                return json.dumps(result)
+
+            # Real order
+            return _execute_polymarket_order(action, market_id, side, price, size)
+
+        elif action == "cancel":
+            if not order_id:
+                return json.dumps({"error": "order_id required for cancel"})
+            if is_dry:
+                result = {"simulated": True, "action": "cancel", "order_id": order_id}
+                log_trade("polymarket", "cancel", {**result, "dry_run": True})
+                return json.dumps(result)
+            return json.dumps(_run_cli(["clob", "cancel", order_id]))
+
+        elif action == "cancel_all":
+            if is_dry:
+                result = {"simulated": True, "action": "cancel_all"}
+                log_trade("polymarket", "cancel_all", {**result, "dry_run": True})
+                return json.dumps(result)
+            return json.dumps(_run_cli(["clob", "cancel-all"]))
+
+        elif action == "list_orders":
+            return json.dumps(_run_cli(["clob", "orders"]))
+
+        else:
+            return json.dumps({"error": f"Unknown action '{action}'. Use: buy, sell, market_buy, market_sell, cancel, cancel_all, list_orders"})
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def _execute_polymarket_order(action: str, market_id: str, side: str,
+                              price: float, size: float) -> str:
+    """Execute a real Polymarket order — tries proxy first, then direct CLI."""
+    from trading_safety import log_trade
+
+    proxy_url = os.environ.get("POLYMARKET_PROXY_URL", "")
+
+    # Try Cloudflare Worker proxy first (bypasses US geoblock)
+    if proxy_url:
+        try:
+            payload = json.dumps({
+                "action": action,
+                "market_id": market_id,
+                "side": side,
+                "price": price,
+                "size": size,
+            }).encode()
+            req = urllib.request.Request(
+                f"{proxy_url}/trade",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read().decode())
+                log_trade("polymarket", action, {
+                    "market_id": market_id, "side": side, "price": price, "size": size,
+                    "via": "proxy", "dry_run": False, "response": str(result)[:500],
+                })
+                return json.dumps(result)
+        except Exception as e:
+            logger_msg = f"Proxy failed, trying direct CLI: {e}"
+
+    # Fallback: direct CLI
+    resolved = _resolve_token_ids(market_id)
+    if "error" in resolved:
+        return json.dumps(resolved)
+
+    token_id = resolved["yes_token"] if side.lower() == "yes" else resolved["no_token"]
+
+    if action in ("market_buy", "market_sell"):
+        cli_args = ["clob", "market-order", "--token", token_id, "--amount", str(size)]
+        if action == "market_sell":
+            cli_args.append("--sell")
+    else:
+        cli_args = ["clob", "create-order", "--token", token_id,
+                     "--price", str(price), "--size", str(size)]
+        if action == "sell":
+            cli_args.append("--sell")
+
+    result = _run_cli(cli_args, timeout=30)
+
+    # Check for geoblock
+    err = result.get("error", "")
+    if "403" in err or "geoblock" in err.lower() or "forbidden" in err.lower():
+        result["geoblock_note"] = "US VPS is geoblocked. Set POLYMARKET_PROXY_URL to route through Cloudflare Worker."
+
+    log_trade("polymarket", action, {
+        "market_id": market_id, "side": side, "price": price, "size": size,
+        "via": "cli", "dry_run": False, "response": str(result)[:500],
+    })
+
+    return json.dumps(result)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# TOOL 5: polymarket_balance — Wallet balance and approval status
+# ═══════════════════════════════════════════════════════════════════
+
+def polymarket_balance(action: str = "balance") -> str:
+    """Check Polymarket wallet balance and approval status.
+
+    Actions:
+        balance  — USDC balance on Polygon
+        approval — Check if CLOB contract is approved for trading
+    """
+    try:
+        if action == "balance":
+            result = _run_cli(["clob", "balance"])
+            return json.dumps(result)
+
+        elif action == "approval":
+            result = _run_cli(["clob", "check-approval"])
+            return json.dumps(result)
+
+        else:
+            return json.dumps({"error": f"Unknown action '{action}'. Use: balance, approval"})
+
     except Exception as e:
         return json.dumps({"error": str(e)})
