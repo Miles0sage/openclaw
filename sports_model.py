@@ -40,14 +40,15 @@ def _cached_set(key: str, data):
 # ═══════════════════════════════════════════════════════════════
 
 def _get_nba_features(team_id: int, season: str, games_back: int = 10) -> dict:
-    """Pull team stats from nba_api — rolling averages over last N games.
+    """Pull pre-game features from nba_api — rolling averages over last N games.
 
-    Features: FG_PCT, FG3_PCT, REB, AST, TOV, PTS, rest_days, win_pct
+    All features are knowable BEFORE tip-off (no data leakage).
+    Matches the v2 training feature set.
     """
     from nba_api.stats.endpoints import teamgamelog
     import pandas as pd
 
-    cache_key = f"team_{team_id}_{season}_{games_back}"
+    cache_key = f"team_v2_{team_id}_{season}_{games_back}"
     cached = _cached_get(cache_key)
     if cached is not None:
         return cached
@@ -57,34 +58,58 @@ def _get_nba_features(team_id: int, season: str, games_back: int = 10) -> dict:
         log = teamgamelog.TeamGameLog(team_id=team_id, season=season, timeout=15)
         df = log.get_data_frames()[0]
 
-        if df.empty:
-            return {"error": f"No games found for team {team_id} in {season}"}
+        if df.empty or len(df) < 3:
+            return {"error": f"Not enough games for team {team_id} in {season}"}
 
-        # Take last N games
-        recent = df.head(games_back)
+        # Sort oldest first for proper rolling calc
+        df = df.sort_values("GAME_DATE").reset_index(drop=True)
+        df["WIN"] = (df["WL"] == "W").astype(int)
+        df["IS_HOME"] = df["MATCHUP"].str.contains("vs.", na=False).astype(int)
+        df["GAME_DATE_DT"] = pd.to_datetime(df["GAME_DATE"])
+
+        # Rolling averages from the LAST N games (the most recent data)
+        recent = df.tail(games_back)
 
         features = {
-            "fg_pct": round(recent["FG_PCT"].mean(), 4),
-            "fg3_pct": round(recent["FG3_PCT"].mean(), 4),
-            "reb": round(recent["REB"].mean(), 1),
-            "ast": round(recent["AST"].mean(), 1),
-            "tov": round(recent["TOV"].mean(), 1),
-            "pts": round(recent["PTS"].mean(), 1),
-            "win_pct": round(recent["WL"].apply(lambda x: 1 if x == "W" else 0).mean(), 3),
+            "roll_fg_pct": round(recent["FG_PCT"].mean(), 4),
+            "roll_fg3_pct": round(recent["FG3_PCT"].mean(), 4),
+            "roll_reb": round(recent["REB"].mean(), 1),
+            "roll_ast": round(recent["AST"].mean(), 1),
+            "roll_tov": round(recent["TOV"].mean(), 1),
+            "roll_pts": round(recent["PTS"].mean(), 1),
+            "win_pct": round(df["WIN"].mean(), 3),  # Season-to-date
+            "win_streak": _compute_win_streak(df["WIN"].values),
         }
 
-        # Rest days (days since last game)
-        if len(df) >= 2:
-            dates = pd.to_datetime(df["GAME_DATE"])
-            features["rest_days"] = (dates.iloc[0] - dates.iloc[1]).days
+        # Rest days
+        dates = df["GAME_DATE_DT"]
+        if len(dates) >= 2:
+            features["rest_days"] = min((dates.iloc[-1] - dates.iloc[-2]).days, 7)
         else:
-            features["rest_days"] = 3  # default
+            features["rest_days"] = 3
+
+        # Home/away record
+        home_games = df[df["IS_HOME"] == 1]
+        away_games = df[df["IS_HOME"] == 0]
+        features["home_wpct"] = round(home_games["WIN"].mean(), 3) if len(home_games) > 0 else 0.5
+        features["away_wpct"] = round(away_games["WIN"].mean(), 3) if len(away_games) > 0 else 0.5
 
         _cached_set(cache_key, features)
         return features
 
     except Exception as e:
         return {"error": f"NBA API error for team {team_id}: {str(e)[:200]}"}
+
+
+def _compute_win_streak(wins) -> int:
+    """Count consecutive wins going into next game (from end of array)."""
+    streak = 0
+    for w in reversed(wins):
+        if w == 1:
+            streak += 1
+        else:
+            break
+    return streak
 
 
 def _get_all_teams() -> dict:
@@ -153,20 +178,23 @@ def _get_todays_games() -> list:
 
 
 def _build_training_data(seasons: list = None) -> tuple:
-    """Build training dataset from 3 seasons of NBA games.
+    """Build training dataset from 3 seasons of NBA games using PRE-GAME features only.
 
-    Returns (X, y) where X = feature matrix, y = home win (0/1).
+    For each game, features are rolling 10-game averages from PRIOR games
+    (not the game itself — that would be data leakage). Also includes
+    season win%, home/away record, rest days, and win streak.
+
+    Returns (X, y, feature_names) where y = home win (0/1).
     Caches to parquet for fast reloads.
     """
     import pandas as pd
     from nba_api.stats.endpoints import leaguegamelog
 
     if seasons is None:
-        # Last 3 full seasons
         current_year = datetime.now().year
         seasons = [f"{y}-{str(y+1)[-2:]}" for y in range(current_year - 3, current_year)]
 
-    cache_path = MODEL_DIR / "nba_training_data.parquet"
+    cache_path = MODEL_DIR / "nba_training_data_v2.parquet"
     if cache_path.exists():
         age_hours = (time.time() - cache_path.stat().st_mtime) / 3600
         if age_hours < 168:  # 1 week
@@ -175,57 +203,121 @@ def _build_training_data(seasons: list = None) -> tuple:
             y = df["home_win"].values
             return X, y, df.drop(columns=["home_win"]).columns.tolist()
 
+    ROLLING_WINDOW = 10
     all_rows = []
+
     for season in seasons:
         try:
             time.sleep(1.0)
-            log = leaguegamelog.LeagueGameLog(season=season, season_type_all_star="Regular Season", timeout=30)
+            log = leaguegamelog.LeagueGameLog(
+                season=season, season_type_all_star="Regular Season", timeout=30
+            )
             df = log.get_data_frames()[0]
+            if df.empty:
+                continue
 
-            # Group by game — each game has 2 rows (home + away)
+            # Parse dates and sort oldest-first so rolling windows look backward
+            df["GAME_DATE_DT"] = pd.to_datetime(df["GAME_DATE"])
+            df["IS_HOME"] = df["MATCHUP"].str.contains("vs.", na=False).astype(int)
+            df["WIN"] = (df["WL"] == "W").astype(int)
+            df = df.sort_values("GAME_DATE_DT").reset_index(drop=True)
+
+            # Build per-team rolling stats (prior games only — shift(1) prevents leakage)
+            stat_cols = ["FG_PCT", "FG3_PCT", "REB", "AST", "TOV", "PTS"]
+            team_groups = df.groupby("TEAM_ID")
+
+            for col in stat_cols:
+                df[f"roll_{col}"] = team_groups[col].transform(
+                    lambda s: s.shift(1).rolling(ROLLING_WINDOW, min_periods=3).mean()
+                )
+
+            # Rolling win% (season-to-date, shifted to exclude current game)
+            df["roll_win_pct"] = team_groups["WIN"].transform(
+                lambda s: s.shift(1).expanding(min_periods=3).mean()
+            )
+
+            # Rest days (days since team's previous game)
+            df["rest_days"] = team_groups["GAME_DATE_DT"].transform(
+                lambda s: s.diff().dt.days
+            ).fillna(3).clip(upper=7)
+
+            # Win streak (consecutive wins going into this game, shifted)
+            def _streak(s):
+                streak = []
+                current = 0
+                for w in s:
+                    streak.append(current)
+                    current = current + 1 if w == 1 else 0
+                return streak
+            df["win_streak"] = team_groups["WIN"].transform(_streak)
+
+            # Home win% and away win% (season-to-date for location-specific record)
+            df["home_game_win"] = df["WIN"].where(df["IS_HOME"] == 1)
+            df["away_game_win"] = df["WIN"].where(df["IS_HOME"] == 0)
+            df["home_record_wpct"] = team_groups["home_game_win"].transform(
+                lambda s: s.shift(1).expanding(min_periods=1).mean()
+            ).fillna(0.5)
+            df["away_record_wpct"] = team_groups["away_game_win"].transform(
+                lambda s: s.shift(1).expanding(min_periods=1).mean()
+            ).fillna(0.5)
+
+            # Drop rows where rolling stats aren't available yet (first ~10 games of season)
+            df = df.dropna(subset=[f"roll_{stat_cols[0]}"])
+
+            # Now pair home and away rows for each game
             game_groups = df.groupby("GAME_ID")
             for game_id, group in game_groups:
                 if len(group) != 2:
                     continue
 
-                # Determine home vs away from MATCHUP column ("vs." = home, "@" = away)
-                home_row = None
-                away_row = None
-                for _, row in group.iterrows():
-                    matchup = str(row.get("MATCHUP", ""))
-                    if "vs." in matchup:
-                        home_row = row
-                    elif "@" in matchup:
-                        away_row = row
+                home_row = group[group["IS_HOME"] == 1]
+                away_row = group[group["IS_HOME"] == 0]
 
-                if home_row is None or away_row is None:
+                if home_row.empty or away_row.empty:
                     continue
 
-                home_win = 1 if home_row.get("WL") == "W" else 0
+                h = home_row.iloc[0]
+                a = away_row.iloc[0]
 
-                all_rows.append({
-                    "home_fg_pct": home_row.get("FG_PCT", 0),
-                    "home_fg3_pct": home_row.get("FG3_PCT", 0),
-                    "home_reb": home_row.get("REB", 0),
-                    "home_ast": home_row.get("AST", 0),
-                    "home_tov": home_row.get("TOV", 0),
-                    "home_pts": home_row.get("PTS", 0),
-                    "away_fg_pct": away_row.get("FG_PCT", 0),
-                    "away_fg3_pct": away_row.get("FG3_PCT", 0),
-                    "away_reb": away_row.get("REB", 0),
-                    "away_ast": away_row.get("AST", 0),
-                    "away_tov": away_row.get("TOV", 0),
-                    "away_pts": away_row.get("PTS", 0),
-                    "home_win": home_win,
-                })
+                row = {
+                    # Home team pre-game rolling stats
+                    "home_roll_fg_pct": h["roll_FG_PCT"],
+                    "home_roll_fg3_pct": h["roll_FG3_PCT"],
+                    "home_roll_reb": h["roll_REB"],
+                    "home_roll_ast": h["roll_AST"],
+                    "home_roll_tov": h["roll_TOV"],
+                    "home_roll_pts": h["roll_PTS"],
+                    "home_win_pct": h["roll_win_pct"],
+                    "home_rest_days": h["rest_days"],
+                    "home_win_streak": h["win_streak"],
+                    "home_home_wpct": h["home_record_wpct"],
+                    # Away team pre-game rolling stats
+                    "away_roll_fg_pct": a["roll_FG_PCT"],
+                    "away_roll_fg3_pct": a["roll_FG3_PCT"],
+                    "away_roll_reb": a["roll_REB"],
+                    "away_roll_ast": a["roll_AST"],
+                    "away_roll_tov": a["roll_TOV"],
+                    "away_roll_pts": a["roll_PTS"],
+                    "away_win_pct": a["roll_win_pct"],
+                    "away_rest_days": a["rest_days"],
+                    "away_win_streak": a["win_streak"],
+                    "away_away_wpct": a["away_record_wpct"],
+                    # Differentials (home advantage signal)
+                    "pts_diff": h["roll_PTS"] - a["roll_PTS"],
+                    "fg_pct_diff": h["roll_FG_PCT"] - a["roll_FG_PCT"],
+                    "reb_diff": h["roll_REB"] - a["roll_REB"],
+                    # Target
+                    "home_win": h["WIN"],
+                }
+                all_rows.append(row)
 
         except Exception as e:
-            continue  # Skip season on error
+            continue
 
     if not all_rows:
         return None, None, None
 
-    result_df = pd.DataFrame(all_rows)
+    result_df = pd.DataFrame(all_rows).dropna()
     result_df.to_parquet(cache_path)
 
     X = result_df.drop(columns=["home_win"]).values
@@ -291,26 +383,43 @@ def _load_model(sport: str = "nba") -> dict:
 
 
 def _predict_game(home_features: dict, away_features: dict, model_data: dict) -> dict:
-    """Predict a single game using loaded model."""
+    """Predict a single game using loaded model with pre-game features."""
     import numpy as np
 
     model = model_data["model"]
     feature_names = model_data["features"]
 
-    # Build feature vector matching training order
+    h = home_features
+    a = away_features
+
+    # Map live team features → training feature names
     feature_map = {
-        "home_fg_pct": home_features.get("fg_pct", 0.45),
-        "home_fg3_pct": home_features.get("fg3_pct", 0.36),
-        "home_reb": home_features.get("reb", 44),
-        "home_ast": home_features.get("ast", 24),
-        "home_tov": home_features.get("tov", 14),
-        "home_pts": home_features.get("pts", 110),
-        "away_fg_pct": away_features.get("fg_pct", 0.45),
-        "away_fg3_pct": away_features.get("fg3_pct", 0.36),
-        "away_reb": away_features.get("reb", 44),
-        "away_ast": away_features.get("ast", 24),
-        "away_tov": away_features.get("tov", 14),
-        "away_pts": away_features.get("pts", 110),
+        # Home team rolling stats
+        "home_roll_fg_pct": h.get("roll_fg_pct", 0.45),
+        "home_roll_fg3_pct": h.get("roll_fg3_pct", 0.36),
+        "home_roll_reb": h.get("roll_reb", 44),
+        "home_roll_ast": h.get("roll_ast", 24),
+        "home_roll_tov": h.get("roll_tov", 14),
+        "home_roll_pts": h.get("roll_pts", 110),
+        "home_win_pct": h.get("win_pct", 0.5),
+        "home_rest_days": h.get("rest_days", 2),
+        "home_win_streak": h.get("win_streak", 0),
+        "home_home_wpct": h.get("home_wpct", 0.5),
+        # Away team rolling stats
+        "away_roll_fg_pct": a.get("roll_fg_pct", 0.45),
+        "away_roll_fg3_pct": a.get("roll_fg3_pct", 0.36),
+        "away_roll_reb": a.get("roll_reb", 44),
+        "away_roll_ast": a.get("roll_ast", 24),
+        "away_roll_tov": a.get("roll_tov", 14),
+        "away_roll_pts": a.get("roll_pts", 110),
+        "away_win_pct": a.get("win_pct", 0.5),
+        "away_rest_days": a.get("rest_days", 2),
+        "away_win_streak": a.get("win_streak", 0),
+        "away_away_wpct": a.get("away_wpct", 0.5),
+        # Differentials
+        "pts_diff": h.get("roll_pts", 110) - a.get("roll_pts", 110),
+        "fg_pct_diff": h.get("roll_fg_pct", 0.45) - a.get("roll_fg_pct", 0.45),
+        "reb_diff": h.get("roll_reb", 44) - a.get("roll_reb", 44),
     }
 
     X = np.array([[feature_map.get(f, 0) for f in feature_names]])
@@ -537,18 +646,29 @@ def sports_predict(action: str, sport: str = "nba", team: str = "",
 def _feature_desc(name: str) -> str:
     """Human-readable feature description."""
     descs = {
-        "home_fg_pct": "Home team field goal percentage (rolling avg)",
-        "home_fg3_pct": "Home team 3-point percentage (rolling avg)",
-        "home_reb": "Home team rebounds per game (rolling avg)",
-        "home_ast": "Home team assists per game (rolling avg)",
-        "home_tov": "Home team turnovers per game (rolling avg)",
-        "home_pts": "Home team points per game (rolling avg)",
-        "away_fg_pct": "Away team field goal percentage (rolling avg)",
-        "away_fg3_pct": "Away team 3-point percentage (rolling avg)",
-        "away_reb": "Away team rebounds per game (rolling avg)",
-        "away_ast": "Away team assists per game (rolling avg)",
-        "away_tov": "Away team turnovers per game (rolling avg)",
-        "away_pts": "Away team points per game (rolling avg)",
+        "home_roll_fg_pct": "Home team FG% (rolling 10-game avg BEFORE this game)",
+        "home_roll_fg3_pct": "Home team 3PT% (rolling 10-game avg BEFORE this game)",
+        "home_roll_reb": "Home team rebounds/game (rolling 10-game avg BEFORE this game)",
+        "home_roll_ast": "Home team assists/game (rolling 10-game avg BEFORE this game)",
+        "home_roll_tov": "Home team turnovers/game (rolling 10-game avg BEFORE this game)",
+        "home_roll_pts": "Home team points/game (rolling 10-game avg BEFORE this game)",
+        "home_win_pct": "Home team season-to-date win percentage",
+        "home_rest_days": "Days since home team's last game (capped at 7)",
+        "home_win_streak": "Home team consecutive wins entering this game",
+        "home_home_wpct": "Home team win% in home games this season",
+        "away_roll_fg_pct": "Away team FG% (rolling 10-game avg BEFORE this game)",
+        "away_roll_fg3_pct": "Away team 3PT% (rolling 10-game avg BEFORE this game)",
+        "away_roll_reb": "Away team rebounds/game (rolling 10-game avg BEFORE this game)",
+        "away_roll_ast": "Away team assists/game (rolling 10-game avg BEFORE this game)",
+        "away_roll_tov": "Away team turnovers/game (rolling 10-game avg BEFORE this game)",
+        "away_roll_pts": "Away team points/game (rolling 10-game avg BEFORE this game)",
+        "away_win_pct": "Away team season-to-date win percentage",
+        "away_rest_days": "Days since away team's last game (capped at 7)",
+        "away_win_streak": "Away team consecutive wins entering this game",
+        "away_away_wpct": "Away team win% in away games this season",
+        "pts_diff": "Points/game differential (home rolling avg minus away rolling avg)",
+        "fg_pct_diff": "FG% differential (home minus away)",
+        "reb_diff": "Rebounds/game differential (home minus away)",
     }
     return descs.get(name, name)
 
