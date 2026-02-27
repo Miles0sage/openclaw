@@ -725,7 +725,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -4150,6 +4150,84 @@ async def api_trading_safety(request: Request):
         result = manage_safety(
             action=body.get("action", "status"),
             config=body.get("config"),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# SPORTSBOOK ODDS + BETTING ENGINE ENDPOINTS (Phase 3)
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/sportsbook/odds")
+async def api_sportsbook_odds(request: Request):
+    """Live sportsbook odds from 200+ bookmakers — moneylines, spreads, totals, comparisons."""
+    try:
+        body = await request.json()
+        from sportsbook_odds import sportsbook_odds
+        result = sportsbook_odds(
+            action=body.get("action", "sports"),
+            sport=body.get("sport", ""),
+            market=body.get("market", "h2h"),
+            bookmakers=body.get("bookmakers", ""),
+            event_id=body.get("event_id", ""),
+            limit=body.get("limit", 10),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/sportsbook/arb")
+async def api_sportsbook_arb(request: Request):
+    """Sportsbook arbitrage + EV scanner — find arbs and +EV bets vs Pinnacle sharp line."""
+    try:
+        body = await request.json()
+        from sportsbook_odds import sportsbook_arb
+        result = sportsbook_arb(
+            action=body.get("action", "scan"),
+            sport=body.get("sport", "basketball_nba"),
+            event_id=body.get("event_id", ""),
+            min_profit=body.get("min_profit", 0.0),
+            min_ev=body.get("min_ev", 0.01),
+            limit=body.get("limit", 10),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/sports/predict")
+async def api_sports_predict(request: Request):
+    """XGBoost-powered NBA predictions — win probabilities, model evaluation, training."""
+    try:
+        body = await request.json()
+        from sports_model import sports_predict
+        result = sports_predict(
+            action=body.get("action", "predict"),
+            sport=body.get("sport", "nba"),
+            team=body.get("team", ""),
+            date=body.get("date", ""),
+            limit=body.get("limit", 10),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/sports/betting")
+async def api_sports_betting(request: Request):
+    """Full betting pipeline — predictions + odds + EV + Kelly sizing."""
+    try:
+        body = await request.json()
+        from sports_model import sports_betting
+        result = sports_betting(
+            action=body.get("action", "recommend"),
+            sport=body.get("sport", "nba"),
+            bankroll=body.get("bankroll", 100.0),
+            min_ev=body.get("min_ev", 0.01),
+            limit=body.get("limit", 10),
         )
         return json.loads(result)
     except Exception as e:

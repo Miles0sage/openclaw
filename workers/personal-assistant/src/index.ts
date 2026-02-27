@@ -1026,6 +1026,92 @@ const OPENCLAW_TOOLS = [
           required: ["action"],
         },
       },
+      // --- Sportsbook Odds + Betting Engine (Phase 3) ---
+      {
+        name: "sportsbook_odds",
+        description:
+          "Live sportsbook odds from 200+ bookmakers. Actions: sports (list in-season), odds (live odds for a sport), event (all markets for one game), compare (side-by-side bookmaker comparison), best_odds (best line across all books).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: sports, odds, event, compare, best_odds",
+            },
+            sport: {
+              type: "STRING",
+              description:
+                "Sport key: basketball_nba, americanfootball_nfl, baseball_mlb, icehockey_nhl",
+            },
+            market: {
+              type: "STRING",
+              description: "Market: h2h (moneyline), spreads, totals. Default: h2h",
+            },
+            bookmakers: { type: "STRING", description: "Comma-separated bookmaker keys to filter" },
+            event_id: { type: "STRING", description: "Event ID for action=event" },
+            limit: { type: "NUMBER", description: "Max results (default: 10)" },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "sportsbook_arb",
+        description:
+          "Sportsbook arbitrage + EV scanner. Actions: scan (arbs where implied probs < 100%), calculate (optimal stakes for an arb), ev_scan (compare soft book odds vs Pinnacle sharp line, flag +EV bets).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: scan, calculate, ev_scan",
+            },
+            sport: { type: "STRING", description: "Sport key (default: basketball_nba)" },
+            event_id: { type: "STRING", description: "Event ID for action=calculate" },
+            min_profit: { type: "NUMBER", description: "Min arb profit % (default: 0)" },
+            min_ev: { type: "NUMBER", description: "Min EV threshold (default: 0.01 = 1%)" },
+            limit: { type: "NUMBER", description: "Max results (default: 10)" },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "sports_predict",
+        description:
+          "XGBoost-powered NBA game predictions. Actions: predict (today's games + win probs), evaluate (model accuracy, Brier score), train (retrain on 3 seasons), features (model weights), compare (predictions vs odds → +EV picks).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: predict, evaluate, train, features, compare",
+            },
+            sport: { type: "STRING", description: "Sport: nba (default)" },
+            team: { type: "STRING", description: "Team name or abbreviation" },
+            date: { type: "STRING", description: "Date YYYY-MM-DD (default: today)" },
+            limit: { type: "NUMBER", description: "Max results (default: 10)" },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "sports_betting",
+        description:
+          "Full betting pipeline: XGBoost predictions + live odds + EV + Kelly sizing. Actions: recommend (full pipeline with picks), bankroll (Kelly-sized recs for a bankroll), dashboard (multi-sport opportunity summary).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: recommend, bankroll, dashboard",
+            },
+            sport: { type: "STRING", description: "Sport: nba (default)" },
+            bankroll: { type: "NUMBER", description: "Bankroll in USD (default: 100)" },
+            min_ev: { type: "NUMBER", description: "Min EV threshold (default: 0.01)" },
+            limit: { type: "NUMBER", description: "Max results (default: 10)" },
+          },
+          required: ["action"],
+        },
+      },
       // --- Environment ---
       {
         name: "env_manage",
@@ -1692,6 +1778,61 @@ async function executeTool(
           }),
         })
       ).json();
+    // --- Sportsbook Odds + Betting Engine (Phase 3) ---
+    case "sportsbook_odds":
+      return (
+        await gatewayFetch(env, "/api/sportsbook/odds", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            sport: args.sport,
+            market: args.market,
+            bookmakers: args.bookmakers,
+            event_id: args.event_id,
+            limit: args.limit,
+          }),
+        })
+      ).json();
+    case "sportsbook_arb":
+      return (
+        await gatewayFetch(env, "/api/sportsbook/arb", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            sport: args.sport,
+            event_id: args.event_id,
+            min_profit: args.min_profit,
+            min_ev: args.min_ev,
+            limit: args.limit,
+          }),
+        })
+      ).json();
+    case "sports_predict":
+      return (
+        await gatewayFetch(env, "/api/sports/predict", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            sport: args.sport,
+            team: args.team,
+            date: args.date,
+            limit: args.limit,
+          }),
+        })
+      ).json();
+    case "sports_betting":
+      return (
+        await gatewayFetch(env, "/api/sports/betting", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            sport: args.sport,
+            bankroll: args.bankroll,
+            min_ev: args.min_ev,
+            limit: args.limit,
+          }),
+        })
+      ).json();
     // --- Environment ---
     case "env_manage":
       return (
@@ -1907,6 +2048,10 @@ CAPABILITIES: You have live access to the OpenClaw agency via 69 function calls.
 - **Arbitrage Scanner**: Cross-platform arb detection (arb_scanner) — scan, bonds, mispricing
 - **Trading Strategies**: Automated scanners (trading_strategies) — bonds, mispricing, whale alerts, trending, expiring
 - **Trading Safety**: Dry-run toggle, kill switch, position limits, trade audit log (trading_safety)
+- **Sportsbook Odds**: Live odds from 200+ bookmakers (sportsbook_odds) — moneylines, spreads, totals, best line finder
+- **Sportsbook Arb/EV**: Arbitrage scanner + EV detector vs Pinnacle sharp line (sportsbook_arb) — scan, calculate, ev_scan
+- **Sports Predictions**: XGBoost NBA win probability model (sports_predict) — predict, train, evaluate, compare to odds
+- **Sports Betting**: Full pipeline: predictions + odds + EV + Kelly sizing (sports_betting) — recommend, bankroll, dashboard
 - **Environment**: Manage env vars and .env files
 - **Memory**: Search and save persistent memory
 - **Agents**: List, spawn, and monitor agents
@@ -1956,6 +2101,15 @@ ROUTING:
 - When Miles asks for trading opportunities or "what should I trade?", use trading_strategies(action=summary) for a full scan, or specific: bonds, mispricing, trending, expiring.
 - When Miles asks about trading safety, limits, or kill switch, use trading_safety(action=status). To toggle kill switch: trading_safety(action=kill_switch). To view trade log: trading_safety(action=trade_log).
 - CRITICAL: Never place a real trade (dry_run=false) without Miles explicitly confirming. When in doubt, use dry_run=true.
+- When Miles asks "what are the odds?", "show me NBA odds", or about sportsbook lines, use sportsbook_odds(action=odds, sport=basketball_nba).
+- When Miles asks to "compare odds" or "which book has the best line", use sportsbook_odds(action=best_odds, sport=basketball_nba).
+- When Miles asks "scan for +EV", "find value bets", or "are there any +EV bets?", use sportsbook_arb(action=ev_scan, sport=basketball_nba).
+- When Miles asks "scan for arbs" on sportsbooks (not prediction markets), use sportsbook_arb(action=scan, sport=basketball_nba).
+- When Miles asks "who wins tonight?", "predict the games", or about NBA predictions, use sports_predict(action=predict).
+- When Miles asks to train the model or "retrain", use sports_predict(action=train).
+- When Miles asks "what should I bet?", "give me picks", or "what NBA bets should I make?", use sports_betting(action=recommend, bankroll=100).
+- When Miles asks about model accuracy or evaluation, use sports_predict(action=evaluate).
+- For the full pipeline (predictions + odds + EV + Kelly sizing), use sports_betting(action=recommend).
 - When Miles asks to send a Slack message, use send_slack_message.
 - When Miles asks about security scanning, use security_scan.
 - When Miles asks about AI news, latest developments, or what's happening in AI, call read_ai_news. Use hours=72 for a broader view since some blogs post infrequently.

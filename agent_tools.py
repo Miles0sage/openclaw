@@ -1000,6 +1000,73 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    # ═ Sportsbook Odds + Betting Engine (Phase 3)
+    {
+        "name": "sportsbook_odds",
+        "description": "Live sportsbook odds from 200+ bookmakers via The Odds API. Actions: sports (list in-season), odds (live odds for a sport), event (all markets for one game), compare (side-by-side bookmaker comparison), best_odds (best line for each outcome).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["sports", "odds", "event", "compare", "best_odds"], "description": "Odds action"},
+                "sport": {"type": "string", "description": "Sport key (e.g. basketball_nba, americanfootball_nfl). Use action=sports to list."},
+                "market": {"type": "string", "description": "Market type: h2h (moneyline), spreads, totals. Default: h2h"},
+                "bookmakers": {"type": "string", "description": "Comma-separated bookmaker keys to filter (e.g. draftkings,fanduel)"},
+                "event_id": {"type": "string", "description": "Event ID for action=event"},
+                "limit": {"type": "integer", "description": "Max results (default: 10)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "sportsbook_arb",
+        "description": "Sportsbook arbitrage + EV scanner. Actions: scan (find arbs where implied probs < 100%), calculate (optimal stake allocation for a specific arb), ev_scan (compare soft book odds vs Pinnacle sharp line, flag +EV bets).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["scan", "calculate", "ev_scan"], "description": "Scanner action"},
+                "sport": {"type": "string", "description": "Sport key (default: basketball_nba)"},
+                "event_id": {"type": "string", "description": "Event ID for action=calculate"},
+                "min_profit": {"type": "number", "description": "Minimum arb profit % to report (default: 0)"},
+                "min_ev": {"type": "number", "description": "Minimum EV to flag (default: 0.01 = 1%)"},
+                "limit": {"type": "integer", "description": "Max results (default: 10)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "sports_predict",
+        "description": "XGBoost-powered NBA game predictions. Actions: predict (today's games with win probabilities), evaluate (model accuracy + Brier score), train (retrain on 3 seasons), features (model feature weights), compare (predictions vs current odds → +EV recommendations).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["predict", "evaluate", "train", "features", "compare"], "description": "Prediction action"},
+                "sport": {"type": "string", "description": "Sport: nba (default, only supported currently)"},
+                "team": {"type": "string", "description": "Team name or abbreviation (for team-specific queries)"},
+                "date": {"type": "string", "description": "Date for predictions (YYYY-MM-DD, default: today)"},
+                "limit": {"type": "integer", "description": "Max results (default: 10)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "sports_betting",
+        "description": "Full betting pipeline: XGBoost predictions + live odds + EV calculation + Kelly sizing. Actions: recommend (full pipeline with picks), bankroll (Kelly-sized recommendations), dashboard (multi-sport opportunity summary).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["recommend", "bankroll", "dashboard"], "description": "Betting action"},
+                "sport": {"type": "string", "description": "Sport: nba (default)"},
+                "bankroll": {"type": "number", "description": "Bankroll amount in USD (default: 100)"},
+                "min_ev": {"type": "number", "description": "Minimum EV threshold (default: 0.01 = 1%)"},
+                "limit": {"type": "integer", "description": "Max results (default: 10)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -1188,6 +1255,27 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
         elif tool_name == "trading_safety":
             from trading_safety import manage_safety
             return manage_safety(tool_input["action"], tool_input.get("config"))
+        # ═ Sportsbook Odds + Betting Engine (Phase 3)
+        elif tool_name == "sportsbook_odds":
+            from sportsbook_odds import sportsbook_odds
+            return sportsbook_odds(tool_input["action"], tool_input.get("sport", ""),
+                                   tool_input.get("market", "h2h"), tool_input.get("bookmakers", ""),
+                                   tool_input.get("event_id", ""), tool_input.get("limit", 10))
+        elif tool_name == "sportsbook_arb":
+            from sportsbook_odds import sportsbook_arb
+            return sportsbook_arb(tool_input["action"], tool_input.get("sport", "basketball_nba"),
+                                  tool_input.get("event_id", ""), tool_input.get("min_profit", 0.0),
+                                  tool_input.get("min_ev", 0.01), tool_input.get("limit", 10))
+        elif tool_name == "sports_predict":
+            from sports_model import sports_predict
+            return sports_predict(tool_input["action"], tool_input.get("sport", "nba"),
+                                  tool_input.get("team", ""), tool_input.get("date", ""),
+                                  tool_input.get("limit", 10))
+        elif tool_name == "sports_betting":
+            from sports_model import sports_betting
+            return sports_betting(tool_input["action"], tool_input.get("sport", "nba"),
+                                  tool_input.get("bankroll", 100.0), tool_input.get("min_ev", 0.01),
+                                  tool_input.get("limit", 10))
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:
