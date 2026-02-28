@@ -1120,6 +1120,30 @@ const OPENCLAW_TOOLS = [
           required: ["action"],
         },
       },
+      // --- Prediction Tracker ---
+      {
+        name: "prediction_tracker",
+        description:
+          "Track sports predictions and results over time. Actions: log (save today's predictions before games start), check (grade a day's predictions against actual NBA scores), record (overall track record — accuracy, ROI, best/worst days), yesterday (grade yesterday + show results).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: log, check, record, yesterday",
+            },
+            date: {
+              type: "STRING",
+              description: "Date YYYY-MM-DD (default: today for log, yesterday for check)",
+            },
+            bankroll: {
+              type: "NUMBER",
+              description: "Bankroll in USD for logging recommendations (default: 100)",
+            },
+          },
+          required: ["action"],
+        },
+      },
       // --- Environment ---
       {
         name: "env_manage",
@@ -1841,6 +1865,18 @@ async function executeTool(
           }),
         })
       ).json();
+    // --- Prediction Tracker ---
+    case "prediction_tracker":
+      return (
+        await gatewayFetch(env, "/api/sports/tracker", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            date: args.date,
+            bankroll: args.bankroll,
+          }),
+        })
+      ).json();
     // --- Environment ---
     case "env_manage":
       return (
@@ -2064,6 +2100,7 @@ CAPABILITIES: You have live access to the OpenClaw agency via 73 function calls.
 - **Sportsbook Arb/EV**: Arbitrage scanner + EV detector vs Pinnacle sharp line (sportsbook_arb) — scan, calculate, ev_scan
 - **Sports Predictions**: XGBoost NBA win probability model (sports_predict) — predict, train, evaluate, compare to odds
 - **Sports Betting**: Full pipeline: predictions + odds + EV + Kelly sizing (sports_betting) — recommend, bankroll, dashboard
+- **Prediction Tracker**: Log predictions, grade against actual NBA scores, track accuracy/ROI (prediction_tracker) — log, check, record, yesterday
 - **Environment**: Manage env vars and .env files
 - **Memory**: Search and save persistent memory
 - **Agents**: List, spawn, and monitor agents
@@ -2122,6 +2159,10 @@ ROUTING:
 - When Miles asks "what should I bet?", "give me picks", or "what NBA bets should I make?", use sports_betting(action=recommend, bankroll=100).
 - When Miles asks about model accuracy or evaluation, use sports_predict(action=evaluate).
 - For the full pipeline (predictions + odds + EV + Kelly sizing), use sports_betting(action=recommend).
+- When Miles asks "how did yesterday go?", "how did my picks do?", or about past prediction results, use prediction_tracker(action=yesterday).
+- When Miles asks "what's my record?", "track record", or about overall accuracy/ROI, use prediction_tracker(action=record).
+- When Miles asks to log or save today's predictions, use prediction_tracker(action=log).
+- When Miles asks to grade or check a specific date's predictions, use prediction_tracker(action=check, date="YYYY-MM-DD").
 - When Miles asks to send a Slack message, use send_slack_message.
 - When Miles asks about security scanning, use security_scan.
 - When Miles asks about AI news, latest developments, or what's happening in AI, call read_ai_news. Use hours=72 for a broader view since some blogs post infrequently.
@@ -2295,6 +2336,63 @@ function formatBettingTable(toolName: string, data: Record<string, unknown> | nu
       t += "</pre>";
     }
     return t;
+  }
+
+  // prediction_tracker — check/yesterday results
+  if (toolName === "prediction_tracker" && data.summary) {
+    const s = data.summary as Record<string, unknown>;
+    const date = String(data.date || "");
+    const profitSign = Number(s.total_profit || 0) >= 0 ? "+" : "";
+
+    let t = `<b>Results: ${date}</b>\n`;
+    t += `Picks: ${s.picks_correct}/${s.picks_total} (${s.picks_pct}%)\n`;
+    t += `Bets: ${s.bets_won || 0}/${s.bets_total || 0}\n`;
+    t += `Profit: ${profitSign}$${Number(s.total_profit || 0).toFixed(2)} (${profitSign}${s.roi_pct}% ROI)\n`;
+
+    const preds = data.predictions as Array<Record<string, unknown>> | undefined;
+    if (preds && preds.length > 0) {
+      const pad = (str: string, n: number) => (str.length > n ? str.slice(0, n) : str.padEnd(n));
+      t += "\n<pre>\n";
+      for (const p of preds.slice(0, 10)) {
+        const winner =
+          String(p.predicted_winner || "")
+            .split(" ")
+            .pop() || "";
+        const actual =
+          String(p.actual_winner || "")
+            .split(" ")
+            .pop() || "";
+        const mark = p.correct === true ? "W" : p.correct === false ? "L" : "?";
+        const score = p.home_score ? `${p.away_score}-${p.home_score}` : "";
+        t += `${mark} ${pad(winner, 12)} ${pad(score, 8)} (was ${actual})\n`;
+      }
+      t += "</pre>";
+    }
+    return t;
+  }
+
+  // prediction_tracker — record (overall stats)
+  if (toolName === "prediction_tracker" && data.overall) {
+    const o = data.overall as Record<string, unknown>;
+    const profitSign = Number(o.total_profit || 0) >= 0 ? "+" : "";
+    let t = `<b>Track Record (${data.total_days_graded} days)</b>\n`;
+    t += `Picks: ${o.picks_correct}/${o.picks_total} (${o.picks_pct}%)\n`;
+    t += `Bets: ${o.bets_won}/${o.bets_total} (${o.bets_pct}%)\n`;
+    t += `Total wagered: $${Number(o.total_wagered || 0).toFixed(2)}\n`;
+    t += `Total profit: ${profitSign}$${Number(o.total_profit || 0).toFixed(2)} (${profitSign}${o.roi_pct}% ROI)`;
+
+    const best = data.best_day as Record<string, unknown> | undefined;
+    const worst = data.worst_day as Record<string, unknown> | undefined;
+    if (best)
+      t += `\n\nBest: ${best.date} (${Number(best.profit || 0) >= 0 ? "+" : ""}$${Number(best.profit || 0).toFixed(2)})`;
+    if (worst)
+      t += `\nWorst: ${worst.date} (${Number(worst.profit || 0) >= 0 ? "+" : ""}$${Number(worst.profit || 0).toFixed(2)})`;
+    return t;
+  }
+
+  // prediction_tracker — log confirmation
+  if (toolName === "prediction_tracker" && data.status === "logged") {
+    return `Predictions logged for ${data.date}: ${data.games} games, ${data.bets} bets saved.`;
   }
 
   return null;
@@ -3724,7 +3822,66 @@ async function handleScheduled(env: Env, scheduledTime: number) {
     }
   }
 
-  // 3. Work shift start at 00:00 UTC (5pm MST) — quick status check
+  // 3. Auto-log predictions at 21:00 UTC (2pm MST) — before NBA games start
+  if (hour === 21) {
+    const day = new Date(scheduledTime).getUTCDay();
+    if (day === 1) return; // Monday OFF
+
+    try {
+      const logResp = await gatewayFetch(env, "/api/sports/tracker", {
+        method: "POST",
+        body: JSON.stringify({ action: "log", bankroll: 100 }),
+      });
+      if (logResp.ok) {
+        const logData = (await logResp.json()) as { games?: number; bets?: number; date?: string };
+        if (logData.games && logData.games > 0) {
+          await sendTelegramMessage(
+            env,
+            `<b>Predictions logged</b>\n${logData.games} games, ${logData.bets || 0} bets saved for ${logData.date || "today"}`,
+          );
+        }
+      }
+    } catch {
+      // Don't crash the cron
+    }
+  }
+
+  // 4. Auto-grade yesterday at 17:00 UTC (10am MST) — after games finished
+  if (hour === 17) {
+    const day = new Date(scheduledTime).getUTCDay();
+    if (day === 1) return; // Monday OFF (and no Sunday games to grade typically)
+
+    try {
+      const checkResp = await gatewayFetch(env, "/api/sports/tracker", {
+        method: "POST",
+        body: JSON.stringify({ action: "yesterday" }),
+      });
+      if (checkResp.ok) {
+        const checkData = (await checkResp.json()) as {
+          summary?: {
+            picks_correct?: number;
+            picks_total?: number;
+            picks_pct?: number;
+            total_profit?: number;
+            roi_pct?: number;
+          };
+          date?: string;
+        };
+        const s = checkData.summary;
+        if (s && s.picks_total && s.picks_total > 0) {
+          const profitSign = (s.total_profit || 0) >= 0 ? "+" : "";
+          await sendTelegramMessage(
+            env,
+            `<b>Yesterday's results</b> (${checkData.date})\nPicks: ${s.picks_correct}/${s.picks_total} (${s.picks_pct}%)\nProfit: ${profitSign}$${(s.total_profit || 0).toFixed(2)} (${profitSign}${s.roi_pct}% ROI)`,
+          );
+        }
+      }
+    } catch {
+      // Don't crash the cron
+    }
+  }
+
+  // 5. Work shift start at 00:00 UTC (5pm MST) — quick status check
   if (hour === 0) {
     const day = new Date(scheduledTime).getUTCDay();
     if (day === 1) return; // Monday OFF

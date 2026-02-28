@@ -1067,6 +1067,20 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    {
+        "name": "prediction_tracker",
+        "description": "Track sports predictions and results over time. Actions: log (save today's predictions before games), check (grade a day's predictions against actual scores), record (overall track record across all days), yesterday (grade yesterday + show results).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["log", "check", "record", "yesterday"], "description": "Tracker action"},
+                "date": {"type": "string", "description": "Date to check (YYYY-MM-DD, default: yesterday for check, today for log)"},
+                "bankroll": {"type": "number", "description": "Bankroll for logging recommendations (default: 100)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -1276,6 +1290,10 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             return sports_betting(tool_input["action"], tool_input.get("sport", "nba"),
                                   tool_input.get("bankroll", 100.0), tool_input.get("min_ev", 0.01),
                                   tool_input.get("limit", 10))
+        elif tool_name == "prediction_tracker":
+            from prediction_tracker import prediction_tracker
+            return prediction_tracker(tool_input["action"], tool_input.get("date", ""),
+                                      tool_input.get("bankroll", 100.0))
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:

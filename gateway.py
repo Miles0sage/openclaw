@@ -4278,6 +4278,22 @@ async def api_sports_betting(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.post("/api/sports/tracker")
+async def api_sports_tracker(request: Request):
+    """Prediction tracker — log predictions, grade results, track accuracy/ROI."""
+    try:
+        body = await request.json()
+        from prediction_tracker import prediction_tracker
+        result = prediction_tracker(
+            action=body.get("action", "record"),
+            date=body.get("date", ""),
+            bankroll=body.get("bankroll", 100.0),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.post("/api/prediction")
 async def api_prediction(request: Request):
     """Prediction market queries — PA worker calls this endpoint."""
