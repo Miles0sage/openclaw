@@ -1081,6 +1081,24 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    # ═══════════════════════════════════════════════════════════════
+    # DEEP RESEARCH ENGINE
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "deep_research",
+        "description": "Multi-step autonomous deep research. Breaks a complex question into sub-questions, researches each in parallel via Perplexity Sonar, then synthesizes into a structured Markdown report with citations. Modes: general, market, technical, academic, news, due_diligence. Depth: quick (3 sub-Qs), medium (5), deep (8).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The research question or topic to investigate"},
+                "depth": {"type": "string", "enum": ["quick", "medium", "deep"], "description": "Research depth: quick (3 sub-questions, ~30s), medium (5, ~1min), deep (8, ~2min). Default: medium"},
+                "mode": {"type": "string", "enum": ["general", "market", "technical", "academic", "news", "due_diligence"], "description": "Domain mode: general (balanced), market (competitors/sizing/trends), technical (architecture/benchmarks), academic (papers/citations), news (recent events), due_diligence (red flags/risks). Default: general"},
+                "max_sources": {"type": "integer", "description": "Override max Perplexity API calls (default: auto based on depth, max 8)"},
+            },
+            "required": ["query"],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -1294,6 +1312,12 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             from prediction_tracker import prediction_tracker
             return prediction_tracker(tool_input["action"], tool_input.get("date", ""),
                                       tool_input.get("bankroll", 100.0))
+        # ═ Deep Research
+        elif tool_name == "deep_research":
+            from deep_research import deep_research
+            return deep_research(tool_input["query"], tool_input.get("depth", "medium"),
+                                 tool_input.get("mode", "general"),
+                                 tool_input.get("max_sources", 0))
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:

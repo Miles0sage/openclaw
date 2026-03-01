@@ -1144,6 +1144,35 @@ const OPENCLAW_TOOLS = [
           required: ["action"],
         },
       },
+      // --- Deep Research ---
+      {
+        name: "deep_research",
+        description:
+          "Multi-step autonomous deep research. Breaks complex questions into sub-questions, researches each in parallel, synthesizes into a structured report with citations. Modes: general, market, technical, academic, news, due_diligence. Depth: quick (~30s), medium (~1min), deep (~2min).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: {
+              type: "STRING",
+              description: "The research question or topic to investigate thoroughly",
+            },
+            depth: {
+              type: "STRING",
+              description: "Depth: quick (3 sub-Qs), medium (5), deep (8). Default: medium",
+            },
+            mode: {
+              type: "STRING",
+              description:
+                "Domain: general, market (competitors/sizing), technical (architecture/benchmarks), academic (papers), news (recent events), due_diligence (red flags/risks). Default: general",
+            },
+            max_sources: {
+              type: "NUMBER",
+              description: "Override max API calls (default: auto, max: 8)",
+            },
+          },
+          required: ["query"],
+        },
+      },
       // --- Environment ---
       {
         name: "env_manage",
@@ -1877,6 +1906,19 @@ async function executeTool(
           }),
         })
       ).json();
+    // --- Deep Research ---
+    case "deep_research":
+      return (
+        await gatewayFetch(env, "/api/research/deep", {
+          method: "POST",
+          body: JSON.stringify({
+            query: args.query,
+            depth: args.depth,
+            mode: args.mode,
+            max_sources: args.max_sources,
+          }),
+        })
+      ).json();
     // --- Environment ---
     case "env_manage":
       return (
@@ -2101,6 +2143,7 @@ CAPABILITIES: You have live access to the OpenClaw agency via 73 function calls.
 - **Sports Predictions**: XGBoost NBA win probability model (sports_predict) — predict, train, evaluate, compare to odds
 - **Sports Betting**: Full pipeline: predictions + odds + EV + Kelly sizing (sports_betting) — recommend, bankroll, dashboard
 - **Prediction Tracker**: Log predictions, grade against actual NBA scores, track accuracy/ROI (prediction_tracker) — log, check, record, yesterday
+- **Deep Research**: Multi-step autonomous research engine (deep_research) — breaks questions into sub-Qs, researches in parallel, synthesizes report. Modes: general, market, technical, academic, news, due_diligence
 - **Environment**: Manage env vars and .env files
 - **Memory**: Search and save persistent memory
 - **Agents**: List, spawn, and monitor agents
@@ -2134,7 +2177,7 @@ ROUTING:
 - When Miles asks about events/activity, call get_events.
 - When Miles asks about a GitHub repo, call github_repo_info.
 - When Miles asks to search the web or look something up, call web_search or research_task.
-- When Miles asks for deep research, analysis, or "look into X thoroughly", use perplexity_research for high-quality synthesized answers with citations. Use web_search for quick lookups.
+- When Miles asks for deep research, analysis, "look into X thoroughly", "research X", "investigate", "do a deep dive on", or any complex multi-faceted question, use deep_research. Pick the right mode: market (for competitors/business), technical (for tools/frameworks), academic (for papers/studies), news (for recent events), due_diligence (for companies/products). Use perplexity_research only for quick single-question lookups. Use web_search for simple fact checks.
 - When Miles asks to read/edit/write a file, use file_read/file_edit/file_write.
 - When Miles asks to run a command, use shell_execute.
 - When Miles asks about git status/commits/push, use git_operations.
