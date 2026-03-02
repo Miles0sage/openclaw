@@ -1357,6 +1357,35 @@ const OPENCLAW_TOOLS = [
       },
     ],
   },
+  // --- Lead Finder (Google Maps/Search) ---
+  {
+    functionDeclarations: [
+      {
+        name: "find_leads",
+        description:
+          "Search Google Maps and web for real local businesses. Finds restaurants, barbershops, dental offices, auto shops, real estate etc. Returns business name, phone, address, website, rating. Saves leads automatically. Use when Miles wants to find potential clients or prospect for new business.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            business_type: {
+              type: "STRING",
+              description:
+                "Type of business: restaurants, barbershops, dental offices, auto repair shops, real estate agencies, etc.",
+            },
+            location: {
+              type: "STRING",
+              description: "City and state. Default: Flagstaff, AZ",
+            },
+            limit: {
+              type: "INTEGER",
+              description: "Max leads to find. Default: 10",
+            },
+          },
+          required: ["business_type"],
+        },
+      },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -2072,6 +2101,14 @@ async function executeTool(
             custom_notes: args.custom_notes,
           }),
         })
+      ).json();
+    // --- Lead Finder (Google Maps/Search) ---
+    case "find_leads":
+      return (
+        await gatewayFetch(
+          env,
+          `/api/leads/find?type=${encodeURIComponent(args.business_type || "restaurants")}&location=${encodeURIComponent(args.location || "Flagstaff, AZ")}&limit=${args.limit || 10}`,
+        )
       ).json();
     default:
       return { error: `Unknown tool: ${name}` };

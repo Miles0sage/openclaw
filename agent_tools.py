@@ -1122,6 +1122,22 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "find_leads",
+        "description": "Search Google Maps and web for real local businesses. Finds restaurants, barbershops, dental offices, auto shops, real estate agencies etc. Returns business name, phone, address, website, rating. Saves leads automatically. Use when Miles wants to find potential clients to reach out to.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "business_type": {"type": "string", "description": "Type of business to search for: restaurants, barbershops, dental offices, auto repair shops, real estate agencies, etc."},
+                "location": {"type": "string", "description": "City and state to search in. Default: Flagstaff, AZ"},
+                "limit": {"type": "integer", "description": "Max number of leads to find. Default: 10"},
+                "save": {"type": "boolean", "description": "Save leads to disk. Default: true"},
+            },
+            "required": ["business_type"],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -1351,6 +1367,23 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                 selected_services=tool_input["selected_services"],
                 custom_notes=tool_input.get("custom_notes", ""),
             )
+        elif tool_name == "find_leads":
+            import asyncio
+            from lead_finder import find_leads
+            leads = asyncio.get_event_loop().run_until_complete(
+                find_leads(
+                    business_type=tool_input.get("business_type", "restaurants"),
+                    location=tool_input.get("location", "Flagstaff, AZ"),
+                    limit=tool_input.get("limit", 10),
+                    save=tool_input.get("save", True),
+                )
+            )
+            if not leads:
+                return "No leads found. Try a different business type or location."
+            lines = [f"Found {len(leads)} leads:\n"]
+            for l in leads:
+                lines.append(f"• {l['business_name']} — {l.get('phone', 'no phone')} — {l.get('address', 'no address')}")
+            return "\n".join(lines)
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:

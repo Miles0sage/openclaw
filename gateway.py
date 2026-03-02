@@ -2789,6 +2789,13 @@ _CLAUDE_CODE_PATTERNS = [
     (r'^\s*spawn\s+(?:agent[:\s]+)?(.+)', 'single'),
 ]
 
+# Lead finder patterns — handled separately from agents
+_LEAD_FINDER_PATTERNS = [
+    r'^\s*find\s+(?:leads?\s+(?:for\s+)?)?(\w[\w\s]+?)(?:\s+in\s+(.+))?$',
+    r'^\s*search\s+(?:for\s+)?(\w[\w\s]+?)(?:\s+in\s+(.+))?$',
+    r'^\s*(?:get|show|list)\s+(?:me\s+)?(\w[\w\s]+?)(?:\s+(?:in|near|around)\s+(.+))?$',
+]
+
 _TASK_PATTERNS = [
     r'^create task[:\s]+(.+)', r'^todo[:\s]+(.+)', r'^add task[:\s]+(.+)',
     r'^remind me to[:\s]+(.+)', r'^new task[:\s]+(.+)',
@@ -2827,9 +2834,57 @@ async def telegram_webhook(request: Request):
         await _tg_typing(chat_id)
 
         # ═══════════════════════════════════════════════
-        # 1. CLAUDE CODE AGENT TRIGGER — build/fix/run/PR commands
+        # 0. LEAD FINDER — "find restaurants", "search barbershops in Phoenix"
         # ═══════════════════════════════════════════════
         text_lower = text.strip().lower()
+
+        lead_find_match = None
+        for lfp in _LEAD_FINDER_PATTERNS:
+            lfm = _re_tg.match(lfp, text.strip(), _re_tg.IGNORECASE)
+            if lfm:
+                biz_type = lfm.group(1).strip()
+                location = (lfm.group(2).strip() if lfm.lastindex and lfm.lastindex >= 2 and lfm.group(2) else "Flagstaff, AZ")
+                biz_keywords = ['restaurant', 'barber', 'salon', 'dental', 'dentist', 'auto', 'mechanic',
+                                'real estate', 'realtor', 'cafe', 'coffee', 'pizza', 'bar', 'gym', 'spa',
+                                'hotel', 'motel', 'store', 'shop', 'clinic', 'office', 'agency', 'plumber',
+                                'electrician', 'contractor', 'bakery', 'florist', 'pharmacy', 'vet']
+                if any(kw in biz_type.lower() for kw in biz_keywords):
+                    lead_find_match = (biz_type, location)
+                    break
+
+        if lead_find_match:
+            biz_type, location = lead_find_match
+            try:
+                from lead_finder import find_leads
+                leads = await find_leads(biz_type, location, limit=10, save=True)
+                if leads:
+                    lines = [f"<b>Found {len(leads)} {biz_type} in {location}</b>\n"]
+                    for i, l in enumerate(leads, 1):
+                        name = l.get('business_name', 'Unknown')
+                        phone = l.get('phone', '')
+                        addr = l.get('address', '')
+                        website = l.get('website_url', '')
+                        line = f"{i}. <b>{name}</b>"
+                        if phone:
+                            line += f"\n   {phone}"
+                        if addr:
+                            line += f"\n   {addr}"
+                        if website:
+                            line += f"\n   {website[:50]}"
+                        lines.append(line)
+                    lines.append(f"\nAll {len(leads)} saved as leads")
+                    await _tg_send(chat_id, "\n".join(lines), reply_to=msg_id)
+                else:
+                    await _tg_send(chat_id, f"No {biz_type} found in {location}. Try a different search.", reply_to=msg_id)
+                return {"ok": True}
+            except Exception as e:
+                logger.error(f"Lead finder from Telegram failed: {e}")
+                await _tg_send(chat_id, f"Lead search failed: {e}", reply_to=msg_id)
+                return {"ok": True}
+
+        # ═══════════════════════════════════════════════
+        # 1. CLAUDE CODE AGENT TRIGGER — build/fix/run/PR commands
+        # ═══════════════════════════════════════════════
         agent_match = None
         agent_mode = None
 
@@ -5971,6 +6026,56 @@ async def verify_output(request: Request):
         "gates": [{"gate": g.gate, "passed": g.passed, "score": g.score,
                     "issues_count": len(g.issues)} for g in result.gates]
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# LEAD FINDER — Google Maps / Search for real businesses
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/leads/find")
+async def find_leads_endpoint(
+    type: str = "restaurants",
+    location: str = "Flagstaff, AZ",
+    limit: int = 10,
+    save: bool = True,
+):
+    """Search Google for real businesses and create leads automatically."""
+    try:
+        from lead_finder import find_leads
+        leads = await find_leads(type, location, limit, save)
+        return {
+            "success": True,
+            "business_type": type,
+            "location": location,
+            "leads": leads,
+            "total": len(leads),
+        }
+    except Exception as e:
+        logger.error(f"Lead finder error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/leads/find-all")
+async def find_all_leads_endpoint(
+    location: str = "Flagstaff, AZ",
+    limit: int = 5,
+):
+    """Search Google for ALL business types at once."""
+    try:
+        from lead_finder import find_leads_multi
+        types = ["restaurants", "barbershops", "dental offices", "auto repair shops", "real estate agencies"]
+        results = await find_leads_multi(types, location, limit)
+        total = sum(len(v) for v in results.values())
+        return {
+            "success": True,
+            "location": location,
+            "results": {k: len(v) for k, v in results.items()},
+            "total_leads": total,
+            "leads": results,
+        }
+    except Exception as e:
+        logger.error(f"Lead finder multi error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ═══════════════════════════════════════════════════════════════════════
