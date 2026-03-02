@@ -751,7 +751,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -6231,6 +6231,63 @@ async def list_calls():
         return {"calls": calls, "total": len(calls)}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/calls/webhook")
+async def vapi_call_webhook(request: Request):
+    """Receive Vapi call status updates and transcripts."""
+    try:
+        data = await request.json()
+        msg_type = data.get("message", {}).get("type", data.get("type", ""))
+        call_data = data.get("message", {}).get("call", data.get("call", {}))
+        call_id = call_data.get("id", "unknown")
+
+        logger.info(f"Vapi webhook: {msg_type} for call {call_id}")
+
+        # Save end-of-call report with transcript
+        if msg_type in ("end-of-call-report", "call.ended"):
+            transcript = data.get("message", {}).get("transcript", data.get("transcript", ""))
+            summary = data.get("message", {}).get("summary", data.get("summary", ""))
+            duration = call_data.get("duration", 0)
+            ended_reason = call_data.get("endedReason", "")
+            customer = call_data.get("customer", {})
+
+            # Save transcript
+            calls_dir = "/root/openclaw/data/calls"
+            os.makedirs(calls_dir, exist_ok=True)
+            transcript_path = os.path.join(calls_dir, f"{call_id}.json")
+            with open(transcript_path, "w") as f:
+                json.dump({
+                    "call_id": call_id,
+                    "customer_number": customer.get("number", ""),
+                    "customer_name": customer.get("name", ""),
+                    "duration_seconds": duration,
+                    "ended_reason": ended_reason,
+                    "transcript": transcript,
+                    "summary": summary,
+                    "raw": data,
+                    "saved_at": datetime.now(timezone.utc).isoformat(),
+                }, f, indent=2)
+
+            # Send Telegram notification
+            outcome = "booked" if any(w in str(transcript).lower() for w in ["schedule", "thursday", "tuesday", "meeting", "appointment", "coffee"]) else "no meeting"
+            try:
+                from alerts import send_telegram
+                import asyncio
+                await send_telegram(
+                    f"📞 Call ended: {customer.get('name', 'Unknown')}\n"
+                    f"Duration: {duration}s | Outcome: {outcome}\n"
+                    f"Reason: {ended_reason}"
+                )
+            except Exception:
+                pass
+
+            logger.info(f"Call transcript saved: {call_id} ({duration}s, {ended_reason})")
+
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Vapi webhook error: {e}")
+        return {"ok": True}
 
 
 # ═══════════════════════════════════════════════════════════════════════
