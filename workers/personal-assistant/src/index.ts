@@ -1386,6 +1386,29 @@ const OPENCLAW_TOOLS = [
       },
     ],
   },
+  // --- Sales Caller (Vapi + ElevenLabs outbound calls) ---
+  {
+    functionDeclarations: [
+      {
+        name: "sales_call",
+        description:
+          "Make an AI outbound sales call to a business using Vapi + ElevenLabs. The AI introduces OpenClaw, pitches services, handles objections, and books meetings. Use when Miles wants to call leads or prospects.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            phone: { type: "STRING", description: "Phone number to call" },
+            business_name: { type: "STRING", description: "Business name" },
+            business_type: {
+              type: "STRING",
+              description: "Type: restaurant, barbershop, dental, auto, real_estate",
+            },
+            owner_name: { type: "STRING", description: "Owner name if known" },
+          },
+          required: ["phone", "business_name"],
+        },
+      },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -2109,6 +2132,19 @@ async function executeTool(
           env,
           `/api/leads/find?type=${encodeURIComponent(args.business_type || "restaurants")}&location=${encodeURIComponent(args.location || "Flagstaff, AZ")}&limit=${args.limit || 10}`,
         )
+      ).json();
+    // --- Sales Caller (Vapi outbound) ---
+    case "sales_call":
+      return (
+        await gatewayFetch(env, "/api/calls/make", {
+          method: "POST",
+          body: JSON.stringify({
+            phone: args.phone,
+            business_name: args.business_name,
+            business_type: args.business_type || "restaurant",
+            owner_name: args.owner_name || "",
+          }),
+        })
       ).json();
     default:
       return { error: `Unknown tool: ${name}` };

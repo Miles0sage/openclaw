@@ -2789,6 +2789,12 @@ _CLAUDE_CODE_PATTERNS = [
     (r'^\s*spawn\s+(?:agent[:\s]+)?(.+)', 'single'),
 ]
 
+# Call patterns — trigger outbound sales calls
+_CALL_PATTERNS = [
+    r'^\s*call\s+(?:the\s+)?leads?(?:\s+for\s+(.+))?',  # "call leads", "call the leads for restaurants"
+    r'^\s*call\s+(.+)',  # "call Mountain Grill", "call 928-555-1234"
+]
+
 # Lead finder patterns — handled separately from agents
 _LEAD_FINDER_PATTERNS = [
     r'^\s*find\s+(?:leads?\s+(?:for\s+)?)?(\w[\w\s]+?)(?:\s+in\s+(.+))?$',
@@ -2880,6 +2886,95 @@ async def telegram_webhook(request: Request):
             except Exception as e:
                 logger.error(f"Lead finder from Telegram failed: {e}")
                 await _tg_send(chat_id, f"Lead search failed: {e}", reply_to=msg_id)
+                return {"ok": True}
+
+        # ═══════════════════════════════════════════════
+        # 0.5. SALES CALLER — "call leads", "call Mountain Grill"
+        # ═══════════════════════════════════════════════
+        call_match = None
+        for cp in _CALL_PATTERNS:
+            cm = _re_tg.match(cp, text.strip(), _re_tg.IGNORECASE)
+            if cm:
+                call_match = (cm.group(1) or "").strip() if cm.lastindex and cm.lastindex >= 1 else ""
+                break
+
+        if call_match is not None and _re_tg.match(r'^\s*call\s', text.strip(), _re_tg.IGNORECASE):
+            try:
+                from sales_caller import call_lead, call_leads_batch, VAPI_PHONE_NUMBER_ID
+
+                if not VAPI_PHONE_NUMBER_ID:
+                    await _tg_send(chat_id,
+                        "<b>Setup needed:</b>\n\n"
+                        "1. Go to dashboard.vapi.ai > Phone Numbers\n"
+                        "2. Copy the phone number ID (not the number itself)\n"
+                        "3. Add to .env: VAPI_PHONE_NUMBER_ID=your-id-here\n"
+                        "4. Restart gateway: systemctl restart openclaw-gateway\n\n"
+                        "Then try again!",
+                        reply_to=msg_id)
+                    return {"ok": True}
+
+                # Check if it's a phone number
+                phone_match = _re_tg.search(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', call_match)
+                if phone_match:
+                    # Direct call to a number
+                    result = await call_lead(
+                        phone=phone_match.group(0),
+                        business_name=call_match.replace(phone_match.group(0), '').strip() or "Unknown",
+                    )
+                    if result.get("success"):
+                        await _tg_send(chat_id, f"<b>Calling {result['business_name']}</b>\nCall ID: <code>{result['call_id']}</code>", reply_to=msg_id)
+                    else:
+                        await _tg_send(chat_id, f"Call failed: {result.get('error', 'unknown')}", reply_to=msg_id)
+                    return {"ok": True}
+
+                # "call leads" or "call leads for restaurants"
+                if 'lead' in call_match.lower() or not call_match:
+                    biz_filter = call_match.replace('leads', '').replace('lead', '').replace('for', '').strip() or None
+                    results = await call_leads_batch(business_type=biz_filter, limit=5, delay_seconds=60)
+                    called = [r for r in results if r.get("success")]
+                    skipped = [r for r in results if r.get("skipped")]
+                    failed = [r for r in results if r.get("error") and not r.get("success")]
+                    lines = [f"<b>Sales calls: {len(called)} made, {len(skipped)} skipped, {len(failed)} failed</b>\n"]
+                    for r in called:
+                        lines.append(f"Called: {r['business_name']} ({r['phone']})")
+                    for r in skipped:
+                        lines.append(f"Skipped: {r['business_name']} — {r.get('reason', 'no phone')}")
+                    for r in failed:
+                        lines.append(f"Failed: {r.get('business_name', '?')} — {r.get('error', '?')[:100]}")
+                    await _tg_send(chat_id, "\n".join(lines), reply_to=msg_id)
+                    return {"ok": True}
+
+                # Call a specific business by name — search leads
+                leads_dir = "/root/openclaw/data/leads"
+                found_lead = None
+                if os.path.exists(leads_dir):
+                    for fname in os.listdir(leads_dir):
+                        if fname.endswith(".json"):
+                            with open(os.path.join(leads_dir, fname)) as f:
+                                lead = json.load(f)
+                            if call_match.lower() in lead.get("business_name", "").lower():
+                                found_lead = lead
+                                break
+
+                if found_lead and found_lead.get("phone"):
+                    result = await call_lead(
+                        phone=found_lead["phone"],
+                        business_name=found_lead["business_name"],
+                        business_type=found_lead.get("business_type", "restaurant"),
+                        owner_name=found_lead.get("owner_name", ""),
+                        lead_id=found_lead.get("lead_id", ""),
+                    )
+                    if result.get("success"):
+                        await _tg_send(chat_id, f"<b>Calling {result['business_name']}</b> at {found_lead['phone']}\nCall ID: <code>{result['call_id']}</code>", reply_to=msg_id)
+                    else:
+                        await _tg_send(chat_id, f"Call failed: {result.get('error', 'unknown')}", reply_to=msg_id)
+                else:
+                    await _tg_send(chat_id, f"No lead found matching '{call_match}' with a phone number. Try 'find restaurants' first.", reply_to=msg_id)
+                return {"ok": True}
+
+            except Exception as e:
+                logger.error(f"Sales caller from Telegram failed: {e}")
+                await _tg_send(chat_id, f"Call error: {e}", reply_to=msg_id)
                 return {"ok": True}
 
         # ═══════════════════════════════════════════════
@@ -6075,6 +6170,66 @@ async def find_all_leads_endpoint(
         }
     except Exception as e:
         logger.error(f"Lead finder multi error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# SALES CALLER — AI outbound calls via Vapi + ElevenLabs
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/calls/make")
+async def make_sales_call(request: Request):
+    """Make an outbound AI sales call to a lead."""
+    try:
+        data = await request.json()
+        from sales_caller import call_lead
+        result = await call_lead(
+            phone=data["phone"],
+            business_name=data.get("business_name", "Unknown Business"),
+            business_type=data.get("business_type", "restaurant"),
+            owner_name=data.get("owner_name", ""),
+            lead_id=data.get("lead_id", ""),
+        )
+        return result
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/calls/batch")
+async def batch_sales_calls(request: Request):
+    """Call multiple leads in sequence."""
+    try:
+        data = await request.json()
+        from sales_caller import call_leads_batch
+        results = await call_leads_batch(
+            lead_ids=data.get("lead_ids"),
+            business_type=data.get("business_type"),
+            limit=data.get("limit", 5),
+            delay_seconds=data.get("delay_seconds", 60),
+        )
+        return {"success": True, "calls": results, "total": len(results)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/calls/status/{call_id}")
+async def call_status(call_id: str):
+    """Check status of an outbound call."""
+    try:
+        from sales_caller import get_call_status
+        return await get_call_status(call_id)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/calls")
+async def list_calls():
+    """List recent outbound sales calls."""
+    try:
+        from sales_caller import list_recent_calls
+        calls = await list_recent_calls(limit=20)
+        return {"calls": calls, "total": len(calls)}
+    except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 

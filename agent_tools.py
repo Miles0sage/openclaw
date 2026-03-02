@@ -1138,6 +1138,22 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "sales_call",
+        "description": "Make an AI outbound sales call to a business lead using Vapi + ElevenLabs. The AI introduces OpenClaw, pitches services based on business type, handles objections, and tries to book a meeting. Use when Miles wants to call leads or prospects.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Phone number to call"},
+                "business_name": {"type": "string", "description": "Name of the business"},
+                "business_type": {"type": "string", "description": "Type: restaurant, barbershop, dental, auto, real_estate"},
+                "owner_name": {"type": "string", "description": "Owner's name if known"},
+            },
+            "required": ["phone", "business_name"],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -1367,6 +1383,20 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                 selected_services=tool_input["selected_services"],
                 custom_notes=tool_input.get("custom_notes", ""),
             )
+        elif tool_name == "sales_call":
+            import asyncio
+            from sales_caller import call_lead
+            result = asyncio.get_event_loop().run_until_complete(
+                call_lead(
+                    phone=tool_input["phone"],
+                    business_name=tool_input["business_name"],
+                    business_type=tool_input.get("business_type", "restaurant"),
+                    owner_name=tool_input.get("owner_name", ""),
+                )
+            )
+            if result.get("success"):
+                return f"Call initiated to {result['business_name']} ({result['phone']}). Call ID: {result['call_id']}"
+            return f"Call failed: {result.get('error', 'unknown error')}"
         elif tool_name == "find_leads":
             import asyncio
             from lead_finder import find_leads
