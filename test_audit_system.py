@@ -15,7 +15,7 @@ import os
 import sys
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from request_logger import (
@@ -78,7 +78,7 @@ def generate_sample_logs():
         days_ago = i % 7
         hours_ago = (i // 7) * 3
         
-        timestamp = (datetime.utcnow() - timedelta(days=days_ago, hours=hours_ago)).isoformat() + "Z"
+        timestamp = (datetime.now(timezone.utc) - timedelta(days=days_ago, hours=hours_ago)).isoformat() + "Z"
         
         agent = agents[i % len(agents)]
         model = models[i % len(models)]
@@ -149,7 +149,7 @@ def demo_daily_summary():
     print_section("Daily Summary for Today")
     
     logger = get_logger()
-    date = datetime.utcnow().strftime("%Y-%m-%d")
+    date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     summary = logger.get_daily_summary(date)
     
     print(f"Date: {date}\n")

@@ -19,7 +19,7 @@ import uuid
 import asyncio
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Any, Callable, Tuple
@@ -164,8 +164,8 @@ class WorkflowDefinition:
     tasks: List[TaskDefinition] = field(default_factory=list)
     variables: Dict[str, Any] = field(default_factory=dict)
     timeout_seconds: int = 3600
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
@@ -186,7 +186,7 @@ class WorkflowExecution:
     task_executions: Dict[str, TaskExecution] = field(default_factory=dict)
     context: Dict[str, Any] = field(default_factory=dict)
     variables: Dict[str, Any] = field(default_factory=dict)
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     completed_at: Optional[str] = None
     total_cost_usd: float = 0.0
 
@@ -257,7 +257,7 @@ class WorkflowExecutor:
         log_file = get_logs_dir() / f"{execution_id}.log"
         try:
             with open(log_file, 'a') as f:
-                timestamp = datetime.utcnow().isoformat()
+                timestamp = datetime.now(timezone.utc).isoformat()
                 f.write(f"[{timestamp}] {message}\n")
         except Exception as e:
             logger.error(f"Failed to save workflow log: {e}")
@@ -291,7 +291,7 @@ class WorkflowExecutor:
 
         try:
             execution.status = WorkflowStatus.RUNNING
-            execution.start_time = datetime.utcnow().isoformat()
+            execution.start_time = datetime.now(timezone.utc).isoformat()
             self._save_execution(execution)
 
             # Execute the first task
@@ -320,12 +320,12 @@ class WorkflowExecutor:
                 execution.status = WorkflowStatus.COMPLETED
                 self._save_workflow_log(execution_id, f"Workflow execution completed successfully")
 
-            execution.end_time = datetime.utcnow().isoformat()
+            execution.end_time = datetime.now(timezone.utc).isoformat()
             execution.completed_at = execution.end_time
 
         except Exception as e:
             execution.status = WorkflowStatus.FAILED
-            execution.end_time = datetime.utcnow().isoformat()
+            execution.end_time = datetime.now(timezone.utc).isoformat()
             error_trace = traceback.format_exc()
             self._save_workflow_log(execution_id, f"Workflow failed: {str(e)}\n{error_trace}")
             logger.error(f"Workflow execution failed: {e}", exc_info=True)
@@ -370,7 +370,7 @@ class WorkflowExecutor:
 
         try:
             task_exec.status = TaskStatus.RUNNING
-            task_exec.start_time = datetime.utcnow().isoformat()
+            task_exec.start_time = datetime.now(timezone.utc).isoformat()
             task_exec.attempts = 0
 
             # Execute with retries
@@ -455,7 +455,7 @@ class WorkflowExecutor:
             return None
 
         finally:
-            task_exec.end_time = datetime.utcnow().isoformat()
+            task_exec.end_time = datetime.now(timezone.utc).isoformat()
             if task_exec.start_time:
                 start = datetime.fromisoformat(task_exec.start_time)
                 end = datetime.fromisoformat(task_exec.end_time)
@@ -620,7 +620,7 @@ class WorkflowExecutor:
         exec_data = self.executions[execution_id]
         if exec_data['status'] in [WorkflowStatus.RUNNING.value]:
             exec_data['status'] = WorkflowStatus.CANCELLED.value
-            exec_data['end_time'] = datetime.utcnow().isoformat()
+            exec_data['end_time'] = datetime.now(timezone.utc).isoformat()
 
             # Reconstruct execution for saving
             execution = WorkflowExecution(

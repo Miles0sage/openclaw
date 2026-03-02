@@ -15,6 +15,8 @@ Installation Instructions:
 # IMPORTS - Add these to gateway.py imports section
 # ═══════════════════════════════════════════════════════════════════════
 
+from datetime import datetime, timezone
+
 # from approval_client import ApprovalClient, ExecutionSummary, ApprovalStatus
 # from task_queue import TaskQueue, TaskStatus
 # import time
@@ -140,8 +142,8 @@ async def chat_endpoint(message: Message):
                 status="completed",
                 result=response_text[:500],
                 actual_cost=actual_cost,
-                start_time=datetime.utcnow().isoformat() + "Z",
-                end_time=datetime.utcnow().isoformat() + "Z"
+                start_time=datetime.now(timezone.utc).isoformat() + "Z",
+                end_time=datetime.now(timezone.utc).isoformat() + "Z"
             )
         )
 """
@@ -176,7 +178,7 @@ async def queue_status_endpoint():
     status = TASK_QUEUE.get_queue_status()
     return {
         "success": True,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "data": status
     }
 
@@ -203,7 +205,7 @@ async def queue_list_endpoint(
 
     return {
         "success": True,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "total": total,
         "offset": offset,
         "limit": limit,
@@ -225,7 +227,7 @@ async def queue_task_endpoint(task_id: str):
 
     return {
         "success": True,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "task": task.to_dict()
     }
 
@@ -245,7 +247,7 @@ async def queue_approve_endpoint(task_id: str, req: ApprovalManualRequest):
     logger.info(f"✅ Task manually approved: {task_id}")
     return {
         "success": True,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "task": task.to_dict()
     }
 
@@ -265,7 +267,7 @@ async def queue_reject_endpoint(task_id: str, req: ApprovalManualRequest):
     logger.warning(f"❌ Task manually rejected: {task_id}")
     return {
         "success": True,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "task": task.to_dict()
     }
 
@@ -285,7 +287,7 @@ async def queue_abort_endpoint(task_id: str):
     logger.warning(f"🛑 Task aborted: {task_id}")
     return {
         "success": True,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "task": task.to_dict()
     }
 
@@ -302,7 +304,7 @@ async def approval_health_endpoint():
 
     return {
         "success": True,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "approval_system": {
             "healthy": is_healthy,
             "fallback_mode": APPROVAL_CLIENT.fallback_mode,

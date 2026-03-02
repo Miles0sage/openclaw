@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, asdict, field
@@ -43,7 +43,7 @@ class Task:
     task_type: str  # "chat", "workflow", "batch", etc.
     description: str
     status: str = TaskStatus.PENDING.value
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat() + "Z")
     approved_at: Optional[str] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
@@ -97,7 +97,7 @@ class Task:
             task_type=data["task_type"],
             description=data["description"],
             status=data.get("status", TaskStatus.PENDING.value),
-            created_at=data.get("created_at", datetime.utcnow().isoformat() + "Z"),
+            created_at=data.get("created_at", datetime.now(timezone.utc).isoformat() + "Z"),
             approved_at=data.get("approved_at"),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
@@ -246,7 +246,7 @@ class TaskQueue:
 
         task = self.tasks[task_id]
         task.status = TaskStatus.APPROVED.value
-        task.approved_at = datetime.utcnow().isoformat() + "Z"
+        task.approved_at = datetime.now(timezone.utc).isoformat() + "Z"
         task.approval_reason = reason
         task.constraints = constraints
         logger.info(f"✅ Task approved: {task_id}")
@@ -285,7 +285,7 @@ class TaskQueue:
         task = self.tasks[task_id]
         task.status = TaskStatus.REJECTED.value
         task.rejection_reason = reason
-        task.completed_at = datetime.utcnow().isoformat() + "Z"
+        task.completed_at = datetime.now(timezone.utc).isoformat() + "Z"
         logger.warning(f"❌ Task rejected: {task_id} - {reason}")
 
         if self.auto_save:
@@ -309,7 +309,7 @@ class TaskQueue:
 
         task = self.tasks[task_id]
         task.status = TaskStatus.RUNNING.value
-        task.started_at = datetime.utcnow().isoformat() + "Z"
+        task.started_at = datetime.now(timezone.utc).isoformat() + "Z"
         logger.info(f"🚀 Task started: {task_id}")
 
         if self.auto_save:
@@ -342,7 +342,7 @@ class TaskQueue:
 
         task = self.tasks[task_id]
         task.status = TaskStatus.COMPLETED.value
-        task.completed_at = datetime.utcnow().isoformat() + "Z"
+        task.completed_at = datetime.now(timezone.utc).isoformat() + "Z"
         task.result = result
         task.actual_cost = actual_cost
         task.logs = logs
@@ -383,7 +383,7 @@ class TaskQueue:
 
         task = self.tasks[task_id]
         task.status = TaskStatus.FAILED.value
-        task.completed_at = datetime.utcnow().isoformat() + "Z"
+        task.completed_at = datetime.now(timezone.utc).isoformat() + "Z"
         task.error = error
         task.logs = logs
 
@@ -416,7 +416,7 @@ class TaskQueue:
 
         task = self.tasks[task_id]
         task.status = TaskStatus.ABORTED.value
-        task.completed_at = datetime.utcnow().isoformat() + "Z"
+        task.completed_at = datetime.now(timezone.utc).isoformat() + "Z"
         logger.warning(f"🛑 Task aborted: {task_id}")
 
         if self.auto_save:
@@ -464,7 +464,7 @@ class TaskQueue:
             "total_execution_time_ms": total_time_ms,
             "pending_approval": len(self.get_pending_approval()),
             "running": len(self.get_running_tasks()),
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
         }
 
     def register_approval_callback(
@@ -486,7 +486,7 @@ class TaskQueue:
         try:
             tasks_file = self.persistence_dir / "tasks.json"
             data = {
-                "saved_at": datetime.utcnow().isoformat() + "Z",
+                "saved_at": datetime.now(timezone.utc).isoformat() + "Z",
                 "total_tasks": len(self.tasks),
                 "tasks": [t.to_dict() for t in self.tasks.values()]
             }
@@ -515,7 +515,7 @@ class TaskQueue:
         Args:
             older_than_days: Remove tasks completed before this many days ago
         """
-        cutoff = datetime.utcnow().timestamp() - (older_than_days * 86400)
+        cutoff = datetime.now(timezone.utc).timestamp() - (older_than_days * 86400)
         to_remove = []
 
         for task_id, task in self.tasks.items():

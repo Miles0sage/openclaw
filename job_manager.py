@@ -6,7 +6,7 @@ Manages job lifecycle: pending → analyzing → pr_created → approved → mer
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
 import logging
@@ -20,12 +20,12 @@ JOBS_FILE = JOBS_DIR / "jobs.jsonl"
 
 class Job:
     def __init__(self, project: str, task: str, priority: str = "P1"):
-        self.id = f"job-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{str(uuid.uuid4())[:8]}"
+        self.id = f"job-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{str(uuid.uuid4())[:8]}"
         self.project = project
         self.task = task
         self.priority = priority
         self.status = "pending"  # pending → analyzing → code_generated → pr_created → approved → merged → done
-        self.created_at = datetime.utcnow().isoformat()
+        self.created_at = datetime.now(timezone.utc).isoformat()
         self.pr_url = None
         self.branch_name = None
         self.approved_by = None
@@ -100,7 +100,7 @@ def update_job_status(job_id: str, status: str, **kwargs):
                 for key, value in kwargs.items():
                     job[key] = value
                 if status in ["approved", "merged", "done"]:
-                    job["completed_at"] = datetime.utcnow().isoformat()
+                    job["completed_at"] = datetime.now(timezone.utc).isoformat()
             jobs.append(job)
     
     # Rewrite file

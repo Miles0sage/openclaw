@@ -6,7 +6,7 @@ After each job, stores a reflection. Before new jobs, injects relevant past refl
 import os
 import json
 import glob
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 REFLECTIONS_DIR = Path("/root/openclaw/data/reflections")
@@ -26,7 +26,7 @@ def save_reflection(job_id: str, job_data: dict, outcome: str, duration_seconds:
         "task": job_data.get("task", ""),
         "outcome": outcome,  # "success" or "failed"
         "duration_seconds": duration_seconds,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "tags": list(_extract_tags(job_data.get("task", ""))),
     }
 

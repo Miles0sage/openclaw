@@ -28,11 +28,10 @@ import logging
 from datetime import datetime, timezone
 
 # Import orchestrator
-from orchestrator import Orchestrator, AgentRole, Message as OrchMessage, MessageAudience
+from orchestrator import Orchestrator, AgentRole
 
 # Cost tracking — single source of truth in cost_tracker.py
 from cost_tracker import (
-    COST_PRICING as _COST_PRICING,
     calculate_cost,
     log_cost_event,
     get_cost_log_path,
@@ -190,7 +189,6 @@ def get_cron_scheduler():
     return _cron_scheduler_instance
 
 # Import deepseek client
-from request_logger import RequestLogger, get_logger
 from audit_routes import router as audit_router
 
 from deepseek_client import DeepseekClient
@@ -231,10 +229,10 @@ from workflow_engine import WorkflowEngine
 from job_manager import create_job, get_job, list_jobs, update_job_status
 
 # Import autonomous runner (background job executor)
-from autonomous_runner import AutonomousRunner, init_runner, get_runner
+from autonomous_runner import init_runner, get_runner
 
 # Import review cycle engine (agent-to-agent collaboration)
-from review_cycle import ReviewCycleEngine, ReviewStatus
+from review_cycle import ReviewCycleEngine
 
 # Import output verifier (quality gates)
 from output_verifier import OutputVerifier
@@ -249,17 +247,12 @@ from client_auth import router as client_auth_router
 from github_integration import router as github_router
 
 # Import email notifications
-from email_notifications import router as email_router, EmailNotifier
+from email_notifications import router as email_router
 
 # Import error recovery
-from error_recovery import ErrorRecoveryManager, init_error_recovery
+from error_recovery import init_error_recovery
 
-# Import agent registry (auto-registration system)
-from agent_registry import (
-    init_agent_registry,
-    get_agent_registry,
-    register_agents_from_config,
-)
+# agent_registry imported by other modules; not used directly in gateway
 
 
 # metrics_collector and gateway_metrics_integration removed (deleted modules)
@@ -270,12 +263,12 @@ def record_metric(**kwargs): pass
 
 from cost_gates import (
     get_cost_gates, init_cost_gates, check_cost_budget,
-    record_cost, BudgetStatus
+    BudgetStatus
 )
 
 # Import closed-loop engines
-from proposal_engine import create_proposal, get_proposal, list_proposals, update_proposal_status, estimate_cost
-from approval_engine import evaluate_proposal, auto_approve_and_execute, get_policy
+from proposal_engine import create_proposal, get_proposal, list_proposals
+from approval_engine import auto_approve_and_execute, get_policy
 from event_engine import init_event_engine, get_event_engine
 # cron_scheduler and memory_manager removed — stubs defined earlier in this file
 
@@ -364,7 +357,7 @@ _event_log = []  # Ring buffer of recent events (max 200)
 
 def broadcast_event(event_data: dict):
     """Broadcast an event to SSE subscribers via ring buffer"""
-    event_data.setdefault("timestamp", datetime.utcnow().isoformat() + "Z")
+    event_data.setdefault("timestamp", datetime.now(timezone.utc).isoformat() + "Z")
     _event_log.append(event_data)
     while len(_event_log) > 200:
         _event_log.pop(0)
@@ -403,7 +396,7 @@ def send_cost_alert_if_needed():
             daily_pct = (daily_spend / daily_limit) * 100
             for threshold in thresholds:
                 if daily_pct >= threshold:
-                    key = f"daily_{threshold}_{datetime.utcnow().strftime('%Y-%m-%d')}"
+                    key = f"daily_{threshold}_{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
                     if key not in _cost_alerts_sent:
                         alerts.append(f"Daily spend at ${daily_spend:.2f}/${daily_limit:.2f} ({daily_pct:.0f}%)")
                         _cost_alerts_sent[key] = time.time()
@@ -412,7 +405,7 @@ def send_cost_alert_if_needed():
             monthly_pct = (monthly_spend / monthly_limit) * 100
             for threshold in thresholds:
                 if monthly_pct >= threshold:
-                    key = f"monthly_{threshold}_{datetime.utcnow().strftime('%Y-%m')}"
+                    key = f"monthly_{threshold}_{datetime.now(timezone.utc).strftime('%Y-%m')}"
                     if key not in _cost_alerts_sent:
                         alerts.append(f"Monthly spend at ${monthly_spend:.2f}/${monthly_limit:.2f} ({monthly_pct:.0f}%)")
                         _cost_alerts_sent[key] = time.time()
@@ -754,11 +747,11 @@ if not AUTH_TOKEN:
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/api/health/detailed", "/api/health/circuit-breakers", "/api/health/alerts", "/secrets", "/metrics-dashboard", "/mobile"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -1429,10 +1422,10 @@ Always sign off with: {signature}"""
 
 @app.get("/")
 async def root():
-    """Serve the Overseer AI Agency landing page, with JSON fallback for API clients."""
+    """Serve the OpenClaw sales landing page."""
     try:
-        landing_path = "/root/openclaw/landing/index.html"
-        with open(landing_path, "r") as f:
+        sales_path = "/root/openclaw/static/sales/index.html"
+        with open(sales_path, "r") as f:
             html_content = f.read()
         return HTMLResponse(content=html_content)
     except FileNotFoundError:
@@ -1453,6 +1446,17 @@ async def root():
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/sales")
+async def sales_page():
+    """Serve the OpenClaw sales landing page (alias)."""
+    try:
+        sales_path = "/root/openclaw/static/sales/index.html"
+        with open(sales_path, "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Sales page not found</h1>", status_code=404)
 
 
 @app.get("/terms")
@@ -1504,7 +1508,7 @@ async def health():
         "gateway": "OpenClaw-FIXED-2026-02-18",
         "version": "2.1.0",
         "agents_active": len(CONFIG.get("agents", {})),
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 @app.get("/metrics")
@@ -1524,7 +1528,6 @@ async def dashboard(request: Request):
         dashboard_path = "/root/openclaw/dashboard.html"
         with open(dashboard_path, 'r') as f:
             html_content = f.read()
-        from fastapi.responses import HTMLResponse
         # Allow GET, HEAD, and OPTIONS for browser compatibility
         if request.method in ["GET", "HEAD", "OPTIONS"]:
             return HTMLResponse(content=html_content)
@@ -1550,6 +1553,19 @@ async def prestress_course(page: str):
             return HTMLResponse(content=f.read())
     except FileNotFoundError:
         return HTMLResponse(content=f"<h1>Page '{page}' not found</h1>", status_code=404)
+
+
+@app.get("/intake")
+async def intake_form():
+    """Serve the client intake form page (no auth)"""
+    try:
+        intake_path = "/root/openclaw/static/sales/intake.html"
+        with open(intake_path, 'r') as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Intake form not found</h1>", status_code=404)
+    except Exception as e:
+        return HTMLResponse(content=f"<h1>Error loading intake form</h1><p>{str(e)}</p>", status_code=500)
 
 
 @app.get("/monitoring")
@@ -1797,7 +1813,7 @@ async def heartbeat_status():
             }
             for agent in in_flight
         ],
-        "timestamp": datetime.utcnow().isoformat() + "Z"
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
     }
 
 
@@ -1843,8 +1859,8 @@ async def chat_endpoint(message: Message):
                 "description": message.content,
                 "status": "todo",
                 "agent": routing.get("agentId", "project_manager"),
-                "created_at": datetime.utcnow().isoformat() + "Z",
-                "updated_at": datetime.utcnow().isoformat() + "Z",
+                "created_at": datetime.now(timezone.utc).isoformat() + "Z",
+                "updated_at": datetime.now(timezone.utc).isoformat() + "Z",
                 "source": "chat",
                 "session_key": session_key
             }
@@ -1879,7 +1895,7 @@ async def chat_endpoint(message: Message):
 
             broadcast_event({"type": "task_created", "agent": "project_manager",
                              "message": f"Task created: {task_match[:80]}",
-                             "timestamp": datetime.utcnow().isoformat()})
+                             "timestamp": datetime.now(timezone.utc).isoformat()})
 
             return {"response": task_response, "agent": "project_manager", "task_created": new_task,
                     "runner_job_id": jm_job_id,
@@ -1923,7 +1939,7 @@ async def chat_endpoint(message: Message):
                         "success": False,
                         "error": "Quota limit exceeded",
                         "detail": quota_error,
-                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
                     }
                 )
 
@@ -1958,7 +1974,7 @@ async def chat_endpoint(message: Message):
                     "detail": budget_check.message,
                     "gate": budget_check.gate_name,
                     "remaining_budget": budget_check.remaining_budget,
-                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
                 }
             )
         elif budget_check.status == BudgetStatus.WARNING:
@@ -1998,7 +2014,7 @@ async def chat_endpoint(message: Message):
         # Broadcast start event for SSE
         broadcast_event({"type": "response_start", "agent": agent_id,
                          "message": f"{agent_id} is thinking...",
-                         "timestamp": datetime.utcnow().isoformat()})
+                         "timestamp": datetime.now(timezone.utc).isoformat()})
 
         # ═ TOOL USE: Auto-detect or use explicit flag
         # Agents on Anthropic get tool access for execution tasks
@@ -2147,7 +2163,7 @@ async def chat_endpoint(message: Message):
         # Broadcast response event
         broadcast_event({"type": "response_end", "agent": agent_id,
                          "message": f"{agent_id} responded ({tokens} tokens)", "tokens": tokens,
-                         "timestamp": datetime.utcnow().isoformat()})
+                         "timestamp": datetime.now(timezone.utc).isoformat()})
 
         # Check cost alerts
         send_cost_alert_if_needed()
@@ -2362,7 +2378,7 @@ async def vision_endpoint(req: VisionRequest):
         "query_type": query_type,
         "agent": "vision_agent",
         "cost_usd": round(cost_usd, 6),
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "stored": stored,
     }
 
@@ -2529,7 +2545,7 @@ async def costs_summary():
         metrics = get_cost_metrics()
         return {
             "success": True,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "data": metrics
         }
     except Exception as e:
@@ -2544,7 +2560,7 @@ async def costs_text():
         summary = get_cost_summary()
         return {
             "success": True,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "summary": summary
         }
     except Exception as e:
@@ -2604,7 +2620,7 @@ async def global_quota_status():
         if not quota_config.get("enabled", False):
             return {
                 "success": True,
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
                 "data": {
                     "quotas_enabled": False,
                     "message": "Quotas are disabled"
@@ -2638,7 +2654,7 @@ async def global_quota_status():
         
         return {
             "success": True,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "data": {
                 "daily_budget": daily_budget,
                 "daily_used": round(daily_spend, 4),
@@ -2658,7 +2674,7 @@ async def global_quota_status():
         return {
             "success": False,
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
         }
 
 
@@ -2671,7 +2687,7 @@ async def quota_status_endpoint(project_id: str = "default"):
         status = get_quota_status(project_id)
         return {
             "success": True,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "data": status
         }
     except Exception as e:
@@ -2679,7 +2695,7 @@ async def quota_status_endpoint(project_id: str = "default"):
         return {
             "success": False,
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
         }
 
 
@@ -2690,7 +2706,7 @@ async def quota_config_endpoint():
         quota_config = load_quota_config()
         return {
             "success": True,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "data": quota_config
         }
     except Exception as e:
@@ -2698,46 +2714,220 @@ async def quota_config_endpoint():
         return {
             "success": False,
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
         }
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# TELEGRAM WEBHOOK HANDLER
+# TELEGRAM WEBHOOK HANDLER — Routes to Claude Code agents on VPS
 # ═══════════════════════════════════════════════════════════════════════
+
+def _get_telegram_token() -> str:
+    """Resolve Telegram bot token from config or env."""
+    token = CONFIG.get("channels", {}).get("telegram", {}).get("botToken", "")
+    if token.startswith("${") and token.endswith("}"):
+        token = os.getenv(token[2:-1], "")
+    if not token:
+        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    return token
+
+
+async def _tg_send(chat_id, text: str, reply_to: int = None):
+    """Send a message to Telegram. Splits long messages. HTML parse mode with plain-text fallback."""
+    token = _get_telegram_token()
+    if not token:
+        return
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+    # Split into 4096-char chunks (Telegram limit)
+    chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
+    async with httpx.AsyncClient(timeout=15) as client:
+        for i, chunk in enumerate(chunks):
+            payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML"}
+            if reply_to and i == 0:
+                payload["reply_to_message_id"] = reply_to
+                payload["allow_sending_without_reply"] = True
+            try:
+                resp = await client.post(url, json=payload)
+                if resp.status_code != 200:
+                    # Retry without HTML parse mode and without reply
+                    payload.pop("parse_mode", None)
+                    payload.pop("reply_to_message_id", None)
+                    await client.post(url, json=payload)
+            except Exception as e:
+                logger.error(f"Telegram send error: {e}")
+
+
+async def _tg_typing(chat_id):
+    """Send typing indicator."""
+    token = _get_telegram_token()
+    if not token:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{token}/sendChatAction",
+                json={"chat_id": chat_id, "action": "typing"}
+            )
+    except Exception:
+        pass
+
+
+# ── Claude Code agent patterns ──
+import re as _re_tg
+
+_CLAUDE_CODE_PATTERNS = [
+    # "build X", "fix X", "create X", "deploy X", "refactor X"
+    (r'^\s*(?:build|fix|create|deploy|refactor|implement|add|update|upgrade|wire|connect|ship)\s+(.+)', 'single'),
+    # "run all in parallel", "run these in parallel: X, Y, Z"
+    (r'^\s*run\s+(?:all|these|everything)\s+in\s+parallel(?:[:\s]+(.+))?', 'parallel'),
+    # "run: X" or "agent: X" — direct agent command
+    (r'^\s*(?:run|agent|execute|do)[:\s]+(.+)', 'single'),
+    # "PR for X", "create PR", "make a PR"
+    (r'^\s*(?:create|make|open|submit)\s+(?:a\s+)?(?:pr|pull request)(?:\s+(?:for\s+)?(.+))?', 'pr'),
+    # "spawn agent: X"
+    (r'^\s*spawn\s+(?:agent[:\s]+)?(.+)', 'single'),
+]
+
+_TASK_PATTERNS = [
+    r'^create task[:\s]+(.+)', r'^todo[:\s]+(.+)', r'^add task[:\s]+(.+)',
+    r'^remind me to[:\s]+(.+)', r'^new task[:\s]+(.+)',
+]
+
+TELEGRAM_OWNER_ID = os.getenv("TELEGRAM_USER_ID", "8475962905")
+
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
-    """Receive Telegram messages via webhook"""
+    """Receive Telegram messages — routes to Claude Code agents for build/fix commands."""
     try:
         update = await request.json()
 
-        # Extract message from update
         if "message" not in update:
-            logger.debug(f"Skipping non-message update: {update.get('update_id')}")
             return {"ok": True}
 
         message = update["message"]
         chat_id = message["chat"]["id"]
-        user_id = message["from"]["id"]
+        user_id = str(message["from"]["id"])
         text = message.get("text", "")
-
-        # Create session key from Telegram IDs
-        session_key = f"telegram:{user_id}:{chat_id}"
+        msg_id = message.get("message_id")
 
         if not text:
             return {"ok": True}
 
-        logger.info(f"📱 Telegram message from {user_id} in chat {chat_id}: {text[:50]}")
+        # Owner-only check
+        if TELEGRAM_OWNER_ID and user_id != TELEGRAM_OWNER_ID:
+            logger.info(f"Ignoring non-owner Telegram message from {user_id}")
+            return {"ok": True}
 
-        # ═ TASK CREATION: Detect "create task:", "todo:", etc. from Telegram
-        import re as _re_tg
-        _TG_TASK_PATTERNS = [
-            r'^create task[:\s]+(.+)', r'^todo[:\s]+(.+)', r'^add task[:\s]+(.+)',
-            r'^remind me to[:\s]+(.+)', r'^new task[:\s]+(.+)',
-        ]
+        session_key = f"telegram:{user_id}:{chat_id}"
+        logger.info(f"📱 Telegram from {user_id}: {text[:80]}")
+
+        # Send typing indicator
+        await _tg_typing(chat_id)
+
+        # ═══════════════════════════════════════════════
+        # 1. CLAUDE CODE AGENT TRIGGER — build/fix/run/PR commands
+        # ═══════════════════════════════════════════════
+        text_lower = text.strip().lower()
+        agent_match = None
+        agent_mode = None
+
+        for pattern, mode in _CLAUDE_CODE_PATTERNS:
+            m = _re_tg.match(pattern, text.strip(), _re_tg.IGNORECASE)
+            if m:
+                agent_match = (m.group(1) or text).strip()
+                agent_mode = mode
+                break
+
+        if agent_match:
+            try:
+                from tmux_spawner import get_spawner
+                spawner = get_spawner()
+
+                if agent_mode == 'parallel':
+                    # Split comma/newline separated tasks
+                    if agent_match and agent_match != text.strip():
+                        tasks_list = [t.strip() for t in _re_tg.split(r'[,\n]+', agent_match) if t.strip()]
+                    else:
+                        # "run all in parallel" with no specifics — run OpenClaw improvements
+                        tasks_list = [
+                            "Fix any bugs in /root/openclaw/gateway.py — check for duplicate endpoints, remove dead code, fix deprecation warnings",
+                            "Review and improve /root/openclaw/static/sales/index.html — make sure all links work, forms submit correctly",
+                            "Run tests and check health of all OpenClaw endpoints — report any failures",
+                        ]
+
+                    jobs = []
+                    for i, task in enumerate(tasks_list):
+                        job_id = f"tg-{int(time.time())}-{i}"
+                        jobs.append({"job_id": job_id, "prompt": task, "timeout_minutes": 30})
+
+                    results = spawner.spawn_parallel(jobs)
+                    status_lines = []
+                    for r in results:
+                        emoji = "✅" if r["status"] == "spawned" else "❌"
+                        status_lines.append(f"{emoji} {r['job_id']}: {r['status']}")
+
+                    response = (
+                        f"<b>🚀 {len(results)} agents spawned in parallel</b>\n\n"
+                        + "\n".join(status_lines) + "\n\n"
+                        f"Check status: /status\n"
+                        f"Or: <code>tmux attach -t openclaw-agents</code>"
+                    )
+                    await _tg_send(chat_id, response, reply_to=msg_id)
+                    return {"ok": True}
+
+                elif agent_mode == 'pr':
+                    # PR creation task
+                    pr_prompt = (
+                        f"Create a git commit and PR for the following changes in /root/openclaw/: {agent_match}. "
+                        f"Use descriptive commit messages. Push to GitHub and create a PR. "
+                        f"Report the PR URL when done."
+                    )
+                    job_id = f"tg-pr-{int(time.time())}"
+                    pane_id = spawner.spawn_agent(job_id=job_id, prompt=pr_prompt, timeout_minutes=15)
+
+                    await _tg_send(
+                        chat_id,
+                        f"<b>📝 PR agent spawned</b>\n"
+                        f"Job: <code>{job_id}</code>\n"
+                        f"Task: {agent_match[:200]}\n"
+                        f"Pane: {pane_id}",
+                        reply_to=msg_id
+                    )
+                    return {"ok": True}
+
+                else:
+                    # Single agent task
+                    job_id = f"tg-{int(time.time())}"
+                    prompt = (
+                        f"You are an OpenClaw agent working on the VPS. Working directory: /root/openclaw/\n"
+                        f"Task from Miles via Telegram: {agent_match}\n\n"
+                        f"Do the work. Be thorough. When done, write a summary of what you did."
+                    )
+                    pane_id = spawner.spawn_agent(job_id=job_id, prompt=prompt, timeout_minutes=30)
+
+                    await _tg_send(
+                        chat_id,
+                        f"<b>⚡ Agent spawned</b>\n"
+                        f"Job: <code>{job_id}</code>\n"
+                        f"Task: {agent_match[:300]}\n"
+                        f"Pane: {pane_id}\n\n"
+                        f"Check output: <code>./autonomous.sh output {job_id}</code>",
+                        reply_to=msg_id
+                    )
+                    return {"ok": True}
+
+            except Exception as e:
+                logger.error(f"Agent spawn from Telegram failed: {e}")
+                await _tg_send(chat_id, f"❌ Agent spawn failed: {e}", reply_to=msg_id)
+                # Fall through to normal processing
+
+        # ═══════════════════════════════════════════════
+        # 2. TASK CREATION — "create task:", "todo:", "remind me to:"
+        # ═══════════════════════════════════════════════
         tg_task_match = None
-        for _p in _TG_TASK_PATTERNS:
+        for _p in _TASK_PATTERNS:
             _m = _re_tg.match(_p, text.strip(), _re_tg.IGNORECASE)
             if _m:
                 tg_task_match = _m.group(1).strip()
@@ -2757,8 +2947,8 @@ async def telegram_webhook(request: Request):
                     "description": text,
                     "status": "todo",
                     "agent": routing.get("agentId", "project_manager"),
-                    "created_at": datetime.utcnow().isoformat() + "Z",
-                    "updated_at": datetime.utcnow().isoformat() + "Z",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
                     "source": "telegram",
                     "session_key": session_key
                 }
@@ -2766,89 +2956,112 @@ async def telegram_webhook(request: Request):
                 with open(TASKS_FILE, 'w') as f:
                     json.dump(tasks, f, indent=2)
 
-                # Also enqueue in the autonomous runner so Telegram-created tasks get executed
                 tg_jm_job_id = None
                 try:
-                    tg_jm_job = create_job(
-                        project=new_task.get("title", "telegram-task"),
-                        task=text,
-                        priority="P1"
-                    )
+                    tg_jm_job = create_job(project=new_task.get("title", "telegram-task"), task=text, priority="P1")
                     tg_jm_job_id = tg_jm_job.id
-                    logger.info(f"✅ Runner job created for Telegram task: {tg_jm_job_id}")
-                except Exception as _tje:
-                    logger.warning(f"Runner job creation failed for Telegram task (non-fatal): {_tje}")
+                except Exception:
+                    pass
 
                 task_response = (
-                    f"Task created: {tg_task_match[:200]}\n"
+                    f"✅ Task created: {tg_task_match[:200]}\n"
                     f"ID: {new_task['id']}"
-                    + (f" | Runner job: {tg_jm_job_id}" if tg_jm_job_id else "") + "\n"
-                    f"Assigned to: {routing.get('agentId', 'project_manager')}"
+                    + (f" | Job: {tg_jm_job_id}" if tg_jm_job_id else "")
                 )
                 broadcast_event({"type": "task_created", "agent": "project_manager",
                                  "message": f"Task from Telegram: {tg_task_match[:80]}"})
-
-                # Send confirmation to Telegram
-                telegram_token = CONFIG.get("channels", {}).get("telegram", {}).get("botToken", "")
-                if telegram_token.startswith("${") and telegram_token.endswith("}"):
-                    telegram_token = os.getenv(telegram_token[2:-1], "")
-                if not telegram_token:
-                    telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-                if telegram_token:
-                    async with httpx.AsyncClient(timeout=10) as tg_client:
-                        await tg_client.post(
-                            f"https://api.telegram.org/bot{telegram_token}/sendMessage",
-                            json={"chat_id": chat_id, "text": task_response, "reply_to_message_id": message["message_id"]}
-                        )
+                await _tg_send(chat_id, task_response, reply_to=msg_id)
                 return {"ok": True}
             except Exception as e:
                 logger.error(f"Telegram task creation failed: {e}")
-                # Fall through to normal processing
 
-        # Route message through OpenClaw chat endpoint
+        # ═══════════════════════════════════════════════
+        # 3. STATUS CHECK — "status", "agents", "what's running"
+        # ═══════════════════════════════════════════════
+        if text_lower in ("status", "/status", "what's running", "agents", "check agents"):
+            try:
+                from tmux_spawner import get_spawner
+                spawner = get_spawner()
+                agents = spawner.list_agents()
+                if agents:
+                    lines = [f"<b>🤖 {len(agents)} agents running</b>\n"]
+                    for a in agents:
+                        lines.append(f"• {a['job_id'] or a['window_name']} — {a['status']} ({a['runtime_human']})")
+                    await _tg_send(chat_id, "\n".join(lines), reply_to=msg_id)
+                else:
+                    await _tg_send(chat_id, "No agents running. Send a command to spawn one!", reply_to=msg_id)
+                return {"ok": True}
+            except Exception as e:
+                await _tg_send(chat_id, f"Status check failed: {e}", reply_to=msg_id)
+                return {"ok": True}
+
+        # ═══════════════════════════════════════════════
+        # 4. AGENT OUTPUT — "output JOB_ID"
+        # ═══════════════════════════════════════════════
+        output_match = _re_tg.match(r'^\s*output\s+(\S+)', text.strip(), _re_tg.IGNORECASE)
+        if output_match:
+            job_id = output_match.group(1)
+            output_file = f"/tmp/openclaw-output-{job_id}.txt"
+            if os.path.exists(output_file):
+                with open(output_file, "r") as f:
+                    content = f.read()
+                # Last 2000 chars
+                tail = content[-2000:] if len(content) > 2000 else content
+                await _tg_send(chat_id, f"<b>Output for {job_id}:</b>\n<pre>{tail}</pre>", reply_to=msg_id)
+            else:
+                await _tg_send(chat_id, f"No output file for job {job_id}", reply_to=msg_id)
+            return {"ok": True}
+
+        # ═══════════════════════════════════════════════
+        # 5. KILL AGENT — "kill JOB_ID" or "kill all"
+        # ═══════════════════════════════════════════════
+        kill_match = _re_tg.match(r'^\s*kill\s+(.+)', text.strip(), _re_tg.IGNORECASE)
+        if kill_match:
+            target = kill_match.group(1).strip()
+            try:
+                from tmux_spawner import get_spawner
+                spawner = get_spawner()
+                if target.lower() == "all":
+                    count = spawner.kill_all()
+                    await _tg_send(chat_id, f"Killed {count} agents.", reply_to=msg_id)
+                else:
+                    # Find agent by job_id
+                    killed = False
+                    for a in spawner.list_agents():
+                        if a["job_id"] == target or target in (a.get("pane_id", ""), a.get("window_name", "")):
+                            spawner.kill_agent(a["pane_id"])
+                            killed = True
+                            break
+                    await _tg_send(chat_id, f"{'Killed' if killed else 'Not found'}: {target}", reply_to=msg_id)
+            except Exception as e:
+                await _tg_send(chat_id, f"Kill failed: {e}", reply_to=msg_id)
+            return {"ok": True}
+
+        # ═══════════════════════════════════════════════
+        # 6. NORMAL CHAT — Route through Claude for conversation
+        # ═══════════════════════════════════════════════
         try:
-            # Create message for chat endpoint
-            chat_message = {
-                "content": text,
-                "sessionKey": session_key,
-                "project_id": "telegram-bot"
-            }
-
-            # Get agent routing decision
-            route_decision = agent_router.select_agent(text)
-            chat_message["agent_id"] = route_decision["agentId"]
-
-            logger.info(f"🎯 Routed to {route_decision['agentId']}: {route_decision['reason']}")
-
-            # Process through chat endpoint logic
             session_history = load_session_history(session_key)
-
-            # Build context
             messages_for_api = [
                 {"role": msg["role"], "content": msg["content"]}
                 for msg in session_history
             ]
             messages_for_api.append({"role": "user", "content": text})
 
-            # Get Anthropic client
             client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
-            # Create system prompt
+            route_decision = agent_router.select_agent(text)
             agent_config = CONFIG.get("agents", {}).get(route_decision["agentId"], {})
             system_prompt = build_channel_system_prompt(agent_config)
-
-            # Call Claude with tools (GitHub, web search, job management)
             model = agent_config.get("model", "claude-opus-4-6")
+
             assistant_message = await call_claude_with_tools(
                 client, model, system_prompt, messages_for_api
             )
 
-            # Save to session
             session_history.append({"role": "user", "content": text})
             session_history.append({"role": "assistant", "content": assistant_message})
             save_session_history(session_key, session_history)
 
-            # Auto-extract memories from conversation
             try:
                 mm = get_memory_manager()
                 if mm:
@@ -2859,37 +3072,11 @@ async def telegram_webhook(request: Request):
             except Exception:
                 pass
 
-            logger.info(f"✅ Response generated: {assistant_message[:50]}...")
-
-            # Send response back to Telegram
-            telegram_token = CONFIG.get("channels", {}).get("telegram", {}).get("botToken", "")
-            # Resolve env var placeholders like ${TELEGRAM_BOT_TOKEN}
-            if telegram_token.startswith("${") and telegram_token.endswith("}"):
-                env_var = telegram_token[2:-1]
-                telegram_token = os.getenv(env_var, "")
-            if not telegram_token:
-                telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-            logger.info(f"🔍 DEBUG: telegram_token length={len(telegram_token)}, starts with: {telegram_token[:20] if telegram_token else 'EMPTY'}")
-            if telegram_token:
-                telegram_send_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-                telegram_payload = {
-                    "chat_id": chat_id,
-                    "text": assistant_message,
-                    "reply_to_message_id": message["message_id"]
-                }
-
-                try:
-                    async with httpx.AsyncClient(timeout=10) as client:
-                        resp = await client.post(telegram_send_url, json=telegram_payload)
-                        if resp.status_code == 200:
-                            logger.info(f"✅ Message sent to Telegram chat {chat_id}")
-                        else:
-                            logger.warning(f"⚠️  Telegram send failed: {resp.status_code}")
-                except Exception as e:
-                    logger.error(f"❌ Error sending to Telegram: {e}")
+            await _tg_send(chat_id, assistant_message, reply_to=msg_id)
 
         except Exception as e:
-            logger.error(f"Error processing Telegram message: {e}")
+            logger.error(f"Telegram chat error: {e}")
+            await _tg_send(chat_id, f"Error: {str(e)[:500]}", reply_to=msg_id)
 
         return {"ok": True}
 
@@ -2987,8 +3174,8 @@ async def slack_events(request: Request):
                         "description": text,
                         "status": "todo",
                         "agent": routing.get("agentId", "project_manager"),
-                        "created_at": datetime.utcnow().isoformat() + "Z",
-                        "updated_at": datetime.utcnow().isoformat() + "Z",
+                        "created_at": datetime.now(timezone.utc).isoformat() + "Z",
+                        "updated_at": datetime.now(timezone.utc).isoformat() + "Z",
                         "source": "slack",
                         "session_key": session_key
                     }
@@ -3095,7 +3282,7 @@ async def quota_check_endpoint(req: QuotaCheckRequest):
 
         return {
             "success": True,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "allowed": quotas_ok,
             "error": error_msg,
             "status": status
@@ -3105,7 +3292,7 @@ async def quota_check_endpoint(req: QuotaCheckRequest):
         return {
             "success": False,
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
         }
 
 
@@ -3252,7 +3439,7 @@ async def route_endpoint(req: RouteRequest):
             )
             return {
                 "success": True,
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
                 "model": req.force_model,
                 "complexity": 0,
                 "confidence": 1.0,
@@ -3299,7 +3486,7 @@ async def route_endpoint(req: RouteRequest):
                     "detail": budget_check.message,
                     "gate": budget_check.gate_name,
                     "remaining_budget": budget_check.remaining_budget,
-                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
                 }
             )
         elif budget_check.status == BudgetStatus.WARNING:
@@ -3328,7 +3515,7 @@ async def route_endpoint(req: RouteRequest):
 
         return {
             "success": True,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "model": result.model,
             "complexity": result.complexity,
             "confidence": result.confidence,
@@ -3390,7 +3577,7 @@ async def route_test_endpoint(req: RouteTestRequest):
 
         return {
             "success": True,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "results": results,
             "stats": stats,
         }
@@ -3440,7 +3627,7 @@ async def route_models_endpoint():
 
     return {
         "success": True,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "models": models_info,
         "optimalDistribution": {"haiku": "70%", "sonnet": "20%", "opus": "10%"},
         "expectedCostSavings": "60-70% reduction vs always using Sonnet",
@@ -3452,7 +3639,7 @@ async def route_health_endpoint():
     """Health check for router"""
     return {
         "success": True,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "status": "healthy",
         "models_available": 3,
         "models": ["haiku", "sonnet", "opus"],
@@ -3669,7 +3856,7 @@ async def start_workflow(request: Request):
             "workflow_id": workflow_id,
             "workflow_name": workflow_name,
             "status": "started",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     except Exception as e:
         logger.error(f"❌ Workflow start error: {e}")
@@ -3687,7 +3874,7 @@ async def get_workflow_status(workflow_id: str):
         return {
             "workflow_id": workflow_id,
             "status": status,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     except Exception as e:
         logger.error(f"❌ Workflow status error: {e}")
@@ -4289,6 +4476,24 @@ async def api_deep_research(request: Request):
             depth=body.get("depth", "medium"),
             mode=body.get("mode", "general"),
             max_sources=body.get("max_sources", 0),
+        )
+        return json.loads(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/proposals/generate")
+async def api_generate_proposal(request: Request):
+    """Generate a branded HTML client proposal."""
+    try:
+        body = await request.json()
+        from proposal_generator import generate_proposal
+        result = generate_proposal(
+            business_name=body.get("business_name", ""),
+            business_type=body.get("business_type", "other"),
+            owner_name=body.get("owner_name", ""),
+            selected_services=body.get("selected_services", []),
+            custom_notes=body.get("custom_notes", ""),
         )
         return json.loads(result)
     except Exception as e:
@@ -5235,8 +5440,8 @@ async def create_task_endpoint(request: Request):
             "description": body.get("description", ""),
             "status": body.get("status", "todo"),
             "agent": body.get("agent", ""),
-            "created_at": datetime.utcnow().isoformat() + "Z",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "created_at": datetime.now(timezone.utc).isoformat() + "Z",
+            "updated_at": datetime.now(timezone.utc).isoformat() + "Z",
         }
         tasks.append(task)
 
@@ -5262,7 +5467,7 @@ async def update_task_endpoint(task_id: str, request: Request):
         for task in tasks:
             if task["id"] == task_id:
                 task.update({k: v for k, v in body.items() if k in ["title", "description", "status", "agent"]})
-                task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                task["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
                 break
 
         with open(TASKS_FILE, 'w') as f:
@@ -5315,7 +5520,7 @@ async def dashboard_summary():
             "cache_tokens_saved": cache_stats.get("total_tokens_saved", 0),
             "cache_cost_saved": cache_stats.get("total_cost_saved_usd", 0),
             "router_cache": router_stats,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
         }
     }
 
@@ -5355,7 +5560,7 @@ async def create_workflow_endpoint(request: Request):
         "name": name,
         "steps": steps,
         "status": "created",
-        "created_at": datetime.utcnow().isoformat() + "Z",
+        "created_at": datetime.now(timezone.utc).isoformat() + "Z",
         "results": [],
         "current_step": 0
     }
@@ -5419,7 +5624,7 @@ async def create_workflow_from_template(template_name: str, request: Request):
         "template": template_name,
         "steps": steps,
         "status": "created",
-        "created_at": datetime.utcnow().isoformat() + "Z",
+        "created_at": datetime.now(timezone.utc).isoformat() + "Z",
         "results": [],
         "current_step": 0,
         "context": context[:500] if context else ""
@@ -5456,7 +5661,7 @@ async def cancel_workflow_endpoint(workflow_id: str):
     for wf in workflows:
         if wf["id"] == workflow_id:
             wf["status"] = "cancelled"
-            wf["cancelled_at"] = datetime.utcnow().isoformat() + "Z"
+            wf["cancelled_at"] = datetime.now(timezone.utc).isoformat() + "Z"
             break
     _save_workflows(workflows)
     broadcast_event({"type": "workflow_cancelled", "agent": "system",
@@ -5484,7 +5689,7 @@ async def _execute_workflow(workflow_id: str):
         return
 
     workflow["status"] = "running"
-    workflow["started_at"] = datetime.utcnow().isoformat() + "Z"
+    workflow["started_at"] = datetime.now(timezone.utc).isoformat() + "Z"
     _save_workflows(workflows)
 
     broadcast_event({"type": "workflow_started", "agent": "system",
@@ -5525,7 +5730,7 @@ async def _execute_workflow(workflow_id: str):
                 "status": "completed",
                 "response": response_text,
                 "tokens": tokens,
-                "completed_at": datetime.utcnow().isoformat() + "Z"
+                "completed_at": datetime.now(timezone.utc).isoformat() + "Z"
             }
             previous_output = response_text
 
@@ -5551,7 +5756,7 @@ async def _execute_workflow(workflow_id: str):
                 "task": step.get("task", ""),
                 "status": "failed",
                 "error": str(e),
-                "completed_at": datetime.utcnow().isoformat() + "Z"
+                "completed_at": datetime.now(timezone.utc).isoformat() + "Z"
             }
 
             workflows = _load_workflows()
@@ -5559,7 +5764,7 @@ async def _execute_workflow(workflow_id: str):
                 if wf["id"] == workflow_id:
                     wf["results"].append(step_result)
                     wf["status"] = "failed"
-                    wf["failed_at"] = datetime.utcnow().isoformat() + "Z"
+                    wf["failed_at"] = datetime.now(timezone.utc).isoformat() + "Z"
                     break
             _save_workflows(workflows)
 
@@ -5581,7 +5786,7 @@ async def _execute_workflow(workflow_id: str):
         if wf["id"] == workflow_id:
             if wf["status"] != "cancelled":
                 wf["status"] = "completed"
-                wf["completed_at"] = datetime.utcnow().isoformat() + "Z"
+                wf["completed_at"] = datetime.now(timezone.utc).isoformat() + "Z"
             break
     _save_workflows(workflows)
 
@@ -5853,6 +6058,161 @@ async def list_kill_flags():
     """List all active kill flags (for debugging)."""
     from autonomous_runner import _load_kill_flags
     return {"kill_flags": _load_kill_flags()}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# CLIENT INTAKE / LEAD CAPTURE
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/leads")
+async def capture_lead(request: Request):
+    """Capture a new client lead from intake form OR simple sales contact form."""
+    import re
+    import unicodedata
+
+    try:
+        data = await request.json()
+
+        # Support both simple (/sales) and detailed (/intake) form submissions
+        # Simple form sends: name, email, business, phone, service, message
+        # Intake form sends: business_name, business_type, owner_name, phone, email
+        is_simple = "name" in data and "business_name" not in data
+
+        if is_simple:
+            # Map simple form fields to standard schema
+            required = {
+                "business_name": (data.get("business") or data.get("name", "")).strip(),
+                "business_type": data.get("service", "other").strip() or "other",
+                "owner_name": data.get("name", "").strip(),
+                "phone": data.get("phone", "").strip(),
+                "email": data.get("email", "").strip(),
+            }
+            # Simple form only requires name + email
+            if not required["owner_name"] or not required["email"]:
+                return JSONResponse({"error": "Missing required fields: name, email"}, status_code=400)
+        else:
+            required = {
+                "business_name": data.get("business_name", "").strip(),
+                "business_type": data.get("business_type", "").strip(),
+                "owner_name": data.get("owner_name", "").strip(),
+                "phone": data.get("phone", "").strip(),
+                "email": data.get("email", "").strip(),
+            }
+            missing = [k for k, v in required.items() if not v]
+            if missing:
+                return JSONResponse(
+                    {"error": f"Missing required fields: {', '.join(missing)}"},
+                    status_code=400
+                )
+
+        # Basic email validation
+        email = required["email"]
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            return JSONResponse({"error": "Invalid email address"}, status_code=400)
+
+        # --- Build lead record ---
+        ts = datetime.now(timezone.utc)
+        ts_str = ts.strftime("%Y%m%d_%H%M%S")
+
+        # Slugify business name for filename
+        slug = required["business_name"].lower()
+        slug = unicodedata.normalize("NFKD", slug).encode("ascii", "ignore").decode()
+        slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")[:40]
+
+        lead_id = f"lead-{ts_str}-{slug}"
+
+        lead = {
+            "lead_id": lead_id,
+            "business_name": required["business_name"],
+            "business_type": required["business_type"],
+            "owner_name": required["owner_name"],
+            "phone": required["phone"],
+            "email": email,
+            "website_url": (data.get("website_url") or "").strip() or None,
+            "services": data.get("services", []),
+            "budget": (data.get("budget") or "").strip() or None,
+            "notes": (data.get("notes") or data.get("message") or "").strip() or None,
+            "source": "intake" if not is_simple else "sales_page",
+            "created_at": ts.isoformat(),
+            "status": "new",
+        }
+
+        # --- Save to disk ---
+        leads_dir = "/root/openclaw/data/leads"
+        os.makedirs(leads_dir, exist_ok=True)
+
+        lead_path = os.path.join(leads_dir, f"{ts_str}_{slug}.json")
+        with open(lead_path, "w") as f:
+            json.dump(lead, f, indent=2)
+
+        logger.info(f"New lead captured: {lead_id} ({required['business_name']})")
+
+        # --- Create an OpenClaw job for follow-up ---
+        try:
+            services_str = ", ".join(lead.get("services", [])) or "not specified"
+            budget_str = lead.get("budget") or "not specified"
+            task_desc = (
+                f"New client lead: {required['business_name']} ({required['business_type']}). "
+                f"Owner: {required['owner_name']}, Phone: {required['phone']}, Email: {email}. "
+                f"Services: {services_str}. Budget: {budget_str}. "
+                f"Follow up within 24 hours."
+            )
+            job = create_job("openclaw", task_desc, "P1")
+            lead["job_id"] = job.id
+            logger.info(f"Follow-up job created: {job.id}")
+
+            # Emit event
+            engine = get_event_engine()
+            if engine:
+                engine.emit("job.created", {
+                    "job_id": job.id,
+                    "project": "openclaw",
+                    "task": task_desc,
+                    "priority": "P1",
+                    "source": "intake_form",
+                    "lead_id": lead_id,
+                })
+        except Exception as job_err:
+            logger.warning(f"Lead saved but job creation failed: {job_err}")
+            lead["job_id"] = None
+
+        # Update saved file with job_id
+        with open(lead_path, "w") as f:
+            json.dump(lead, f, indent=2)
+
+        return {
+            "success": True,
+            "lead_id": lead_id,
+            "job_id": lead.get("job_id"),
+            "message": "Lead captured successfully",
+        }
+
+    except json.JSONDecodeError:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+    except Exception as e:
+        logger.error(f"Lead capture error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/leads")
+async def list_leads():
+    """List all captured leads (most recent first)."""
+    try:
+        leads_dir = "/root/openclaw/data/leads"
+        if not os.path.exists(leads_dir):
+            return {"leads": [], "total": 0}
+
+        leads = []
+        for fname in sorted(os.listdir(leads_dir), reverse=True):
+            if fname.endswith(".json"):
+                fpath = os.path.join(leads_dir, fname)
+                with open(fpath, "r") as f:
+                    leads.append(json.load(f))
+
+        return {"leads": leads, "total": len(leads)}
+    except Exception as e:
+        logger.error(f"List leads error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 if __name__ == "__main__":

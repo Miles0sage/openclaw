@@ -23,6 +23,76 @@ except ImportError:
 from trading_safety import check_order_safety, log_trade
 
 
+def _get_portfolio_api():
+    """Get authenticated PortfolioApi. Returns (api, error_str)."""
+    client, err = _get_client(authenticated=True)
+    if err:
+        return None, err
+    try:
+        from kalshi_python import PortfolioApi
+        return PortfolioApi(client), None
+    except Exception as e:
+        return None, str(e)
+
+
+def _kalshi_sdk_call(endpoint: str, method: str = "GET", params: dict = None, body: dict = None) -> dict:
+    """Route authenticated Kalshi API calls through the SDK's typed API classes."""
+    try:
+        portfolio, err = _get_portfolio_api()
+        if err:
+            return {"error": err}
+
+        # Portfolio endpoints
+        if endpoint == "/portfolio/balance":
+            resp = portfolio.get_balance()
+            return {"balance_cents": resp.balance, "balance_usd": f"${resp.balance / 100:.2f}"}
+
+        elif endpoint == "/portfolio/positions":
+            limit = (params or {}).get("limit", 50)
+            resp = portfolio.get_positions(limit=limit)
+            positions = resp.market_positions if hasattr(resp, 'market_positions') else (resp.positions if hasattr(resp, 'positions') else [])
+            return {"positions": [p.to_dict() if hasattr(p, 'to_dict') else str(p) for p in (positions or [])]}
+
+        elif endpoint == "/portfolio/fills":
+            limit = (params or {}).get("limit", 50)
+            resp = portfolio.get_fills(limit=limit)
+            fills = resp.fills if hasattr(resp, 'fills') else []
+            return {"fills": [f.to_dict() if hasattr(f, 'to_dict') else str(f) for f in (fills or [])]}
+
+        elif endpoint == "/portfolio/settlements":
+            limit = (params or {}).get("limit", 50)
+            resp = portfolio.get_settlements(limit=limit)
+            settlements = resp.settlements if hasattr(resp, 'settlements') else []
+            return {"settlements": [s.to_dict() if hasattr(s, 'to_dict') else str(s) for s in (settlements or [])]}
+
+        elif endpoint == "/portfolio/orders" and method == "GET":
+            resp = portfolio.get_orders()
+            orders = resp.orders if hasattr(resp, 'orders') else []
+            return {"orders": [o.to_dict() if hasattr(o, 'to_dict') else str(o) for o in (orders or [])]}
+
+        elif endpoint == "/portfolio/orders" and method == "POST":
+            from kalshi_python import CreateOrderRequest
+            req = CreateOrderRequest(**body)
+            resp = portfolio.create_order(req)
+            return resp.to_dict() if hasattr(resp, 'to_dict') else {"result": str(resp)}
+
+        elif endpoint.startswith("/portfolio/orders/") and method == "DELETE":
+            order_id = endpoint.split("/")[-1]
+            resp = portfolio.cancel_order(order_id)
+            return resp.to_dict() if hasattr(resp, 'to_dict') else {"result": str(resp)}
+
+        elif endpoint == "/portfolio/orders" and method == "DELETE":
+            from kalshi_python import BatchCancelOrdersRequest
+            resp = portfolio.batch_cancel_orders(BatchCancelOrdersRequest())
+            return resp.to_dict() if hasattr(resp, 'to_dict') else {"result": str(resp)}
+
+        else:
+            return {"error": f"Unhandled authenticated endpoint: {method} {endpoint}"}
+
+    except Exception as e:
+        return {"error": f"Kalshi SDK error: {str(e)[:500]}"}
+
+
 def _get_client(authenticated: bool = False):
     """Get Kalshi API client. Returns (client, error_str)."""
     if not KALSHI_SDK_AVAILABLE:
@@ -31,7 +101,7 @@ def _get_client(authenticated: bool = False):
     try:
         config = kalshi_python.Configuration()
         config.host = "https://api.elections.kalshi.com/trade-api/v2"
-        client = ApiInstance(configuration=config)
+        client = KalshiClient(configuration=config)
 
         if authenticated:
             key_id = os.environ.get("KALSHI_API_KEY_ID", "")
@@ -43,8 +113,7 @@ def _get_client(authenticated: bool = False):
             if not os.path.exists(key_path):
                 return None, f"Kalshi private key not found at {key_path}. Set KALSHI_PRIVATE_KEY_PATH"
 
-            private_key = open(key_path).read()
-            client.login_with_rsa(key_id, private_key)
+            client.set_kalshi_auth(key_id, key_path)
 
         return client, None
     except Exception as e:
@@ -53,25 +122,21 @@ def _get_client(authenticated: bool = False):
 
 def _kalshi_api_call(endpoint: str, method: str = "GET", params: dict = None,
                      body: dict = None, authenticated: bool = False) -> dict:
-    """Direct REST call to Kalshi API as fallback when SDK methods aren't available."""
+    """Direct REST call to Kalshi API. Uses SDK client for authenticated calls."""
     import urllib.request
     import urllib.parse
 
     base = "https://api.elections.kalshi.com/trade-api/v2"
-    url = f"{base}{endpoint}"
 
+    if authenticated:
+        # Use SDK for authenticated calls — it handles RSA signing
+        return _kalshi_sdk_call(endpoint, method, params, body)
+
+    url = f"{base}{endpoint}"
     if params:
         url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
 
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
-
-    if authenticated:
-        key_id = os.environ.get("KALSHI_API_KEY_ID", "")
-        if not key_id:
-            return {"error": "KALSHI_API_KEY_ID not set"}
-        # For authenticated calls, we need the SDK's RSA login
-        return {"error": "Authenticated calls require SDK login. Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH"}
-
     data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
 

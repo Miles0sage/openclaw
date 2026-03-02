@@ -23,7 +23,7 @@ import base64
 import subprocess
 import pathlib
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 from fastapi import FastAPI, HTTPException, Depends, Header, status
@@ -309,7 +309,7 @@ def save_secrets(secrets: Dict[str, str]) -> bool:
     try:
         data = {
             'secrets': secrets,
-            'updated_at': datetime.utcnow().isoformat()
+            'updated_at': datetime.now(timezone.utc).isoformat()
         }
         with open(SECRETS_PATH, 'w') as f:
             json.dump(data, f, indent=2)
@@ -340,7 +340,7 @@ def count_errors_and_warnings(log_path: pathlib.Path, hours: int = 1) -> tuple:
         return 0, 0
 
     try:
-        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         errors = 0
         warnings = 0
 
@@ -441,7 +441,7 @@ async def get_status(token: str = Depends(verify_token)):
             tunnel_running=tunnel_running,
             tunnel_url=tunnel_url,
             uptime_seconds=uptime,
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat()
         )
     except Exception as e:
         logger.error(f"Error getting status: {e}")
@@ -462,7 +462,7 @@ async def get_logs(lines: int = 50, token: str = Depends(verify_token)):
             gateway_logs=gateway_logs,
             tunnel_logs=tunnel_logs,
             total_lines=len(gateway_logs) + len(tunnel_logs),
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat()
         )
     except Exception as e:
         logger.error(f"Error getting logs: {e}")
@@ -502,7 +502,7 @@ async def get_config(token: str = Depends(verify_token)):
             port=config.get('port', GATEWAY_PORT),
             channels=channels,
             agents_count=len(config.get('agents', {})),
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat()
         )
     except Exception as e:
         logger.error(f"Error getting config: {e}")
@@ -567,7 +567,7 @@ async def restart_gateway(token: str = Depends(verify_token)):
         return RestartResponse(
             success=True,
             message="Gateway restart initiated. Service should be back online in 5-10 seconds.",
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat()
         )
     except subprocess.TimeoutExpired:
         logger.error("Timeout restarting gateway")
@@ -632,7 +632,7 @@ async def health_check(token: str = Depends(verify_token)):
             uptime_hours=round(uptime_hours, 2),
             errors_last_hour=errors,
             warnings_last_hour=warnings,
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat()
         )
     except Exception as e:
         logger.error(f"Error in health check: {e}")
@@ -645,7 +645,7 @@ async def basic_health():
     return {
         "status": "healthy",
         "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -698,7 +698,7 @@ async def http_exception_handler(request, exc):
         status_code=exc.status_code,
         content={
             "error": exc.detail,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     )
 
@@ -711,7 +711,7 @@ async def general_exception_handler(request, exc):
         status_code=500,
         content={
             "error": "Internal server error",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     )
 

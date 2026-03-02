@@ -8,7 +8,7 @@ whether they can be auto-approved or require human review.
 import json
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -153,7 +153,7 @@ def update_proposal_status(proposal: dict, status: str) -> dict:
     """Update proposal status in-place and log the transition."""
     old_status = proposal.get("status", "unknown")
     proposal["status"] = status
-    proposal["status_updated_at"] = datetime.utcnow().isoformat()
+    proposal["status_updated_at"] = datetime.now(timezone.utc).isoformat()
     logger.info(
         "Proposal '%s' status: %s -> %s",
         proposal.get("task", "unknown"),
@@ -205,5 +205,5 @@ def get_policy(rules: list | None = None) -> dict:
         "sensitive_tags": sorted(SENSITIVE_TAGS),
         "cheap_agents": sorted(CHEAP_AGENTS),
         "config_path": str(CONFIG_PATH),
-        "loaded_at": datetime.utcnow().isoformat(),
+        "loaded_at": datetime.now(timezone.utc).isoformat(),
     }

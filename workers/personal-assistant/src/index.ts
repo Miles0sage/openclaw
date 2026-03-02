@@ -1320,6 +1320,41 @@ const OPENCLAW_TOOLS = [
           },
         },
       },
+      // --- Proposal Generator ---
+      {
+        name: "generate_proposal",
+        description:
+          "Generate a branded HTML client proposal for OpenClaw. Creates a professional document with executive summary, service details, pricing, case studies, timeline, and terms. Saves to server. Use when a potential client needs a formal proposal.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            business_name: {
+              type: "STRING",
+              description: "Name of the client's business",
+            },
+            business_type: {
+              type: "STRING",
+              description:
+                "Type of business: restaurant, barbershop, dental, auto, realestate, other",
+            },
+            owner_name: {
+              type: "STRING",
+              description: "Name of the business owner",
+            },
+            selected_services: {
+              type: "ARRAY",
+              items: { type: "STRING" },
+              description:
+                "Services to include: receptionist ($1500), website ($2500), crm ($3000), full_package ($5500 bundle)",
+            },
+            custom_notes: {
+              type: "STRING",
+              description: "Optional custom notes or special requirements",
+            },
+          },
+          required: ["business_name", "business_type", "owner_name", "selected_services"],
+        },
+      },
     ],
   },
 ];
@@ -2024,6 +2059,20 @@ async function executeTool(
         generated_at: new Date().toISOString(),
       };
     }
+    // --- Proposal Generator ---
+    case "generate_proposal":
+      return (
+        await gatewayFetch(env, "/api/proposals/generate", {
+          method: "POST",
+          body: JSON.stringify({
+            business_name: args.business_name,
+            business_type: args.business_type,
+            owner_name: args.owner_name,
+            selected_services: args.selected_services,
+            custom_notes: args.custom_notes,
+          }),
+        })
+      ).json();
     default:
       return { error: `Unknown tool: ${name}` };
   }
@@ -2144,6 +2193,7 @@ CAPABILITIES: You have live access to the OpenClaw agency via 73 function calls.
 - **Sports Betting**: Full pipeline: predictions + odds + EV + Kelly sizing (sports_betting) — recommend, bankroll, dashboard
 - **Prediction Tracker**: Log predictions, grade against actual NBA scores, track accuracy/ROI (prediction_tracker) — log, check, record, yesterday
 - **Deep Research**: Multi-step autonomous research engine (deep_research) — breaks questions into sub-Qs, researches in parallel, synthesizes report. Modes: general, market, technical, academic, news, due_diligence
+- **Proposal Generator**: Generate branded HTML client proposals (generate_proposal) — tailored to business type, includes pricing, case studies, timeline, terms. Services: receptionist ($1500), website ($2500), crm ($3000), full_package ($5500)
 - **Environment**: Manage env vars and .env files
 - **Memory**: Search and save persistent memory
 - **Agents**: List, spawn, and monitor agents
@@ -2178,6 +2228,7 @@ ROUTING:
 - When Miles asks about a GitHub repo, call github_repo_info.
 - When Miles asks to search the web or look something up, call web_search or research_task.
 - When Miles asks for deep research, analysis, "look into X thoroughly", "research X", "investigate", "do a deep dive on", or any complex multi-faceted question, use deep_research. Pick the right mode: market (for competitors/business), technical (for tools/frameworks), academic (for papers/studies), news (for recent events), due_diligence (for companies/products). Use perplexity_research only for quick single-question lookups. Use web_search for simple fact checks.
+- When Miles asks to generate a proposal, create a proposal for a client, or quote a business, use generate_proposal. Ask for business name, type, owner name, and which services they want if not provided.
 - When Miles asks to read/edit/write a file, use file_read/file_edit/file_write.
 - When Miles asks to run a command, use shell_execute.
 - When Miles asks about git status/commits/push, use git_operations.

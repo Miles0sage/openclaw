@@ -13,7 +13,7 @@ import httpx
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, Tuple
 from enum import Enum
 from dataclasses import dataclass, asdict
@@ -160,7 +160,7 @@ class ApprovalClient:
             "estimated_cost": estimated_cost,
             "estimated_duration_ms": estimated_duration_ms,
             "context": context or {},
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
         }
 
         if self.fallback_mode:

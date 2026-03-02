@@ -23,7 +23,7 @@ import os
 import logging
 import uuid
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, List, Any, Callable, Tuple
 from dataclasses import dataclass, asdict, field
 from enum import Enum
@@ -77,7 +77,7 @@ class ReviewFeedback:
     quality_score: int  # 1-10
     reviewer_agent: str
     round_number: int
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     raw_response: str = ""
     cost_tokens: int = 0
 
@@ -92,7 +92,7 @@ class RevisionRecord:
     round_number: int
     author_agent: str
     content: str
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     issues_addressed: int = 0
     cost_tokens: int = 0
 
@@ -341,7 +341,7 @@ class ReviewCycleEngine:
         rounds = max_rounds or self._max_rounds
 
         review_id = f"rev_{uuid.uuid4().hex[:12]}"
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         cycle = ReviewCycle(
             review_id=review_id,
@@ -423,7 +423,7 @@ class ReviewCycleEngine:
             return {"error": f"Review {review_id} already in terminal state: {cycle.status}"}
 
         cycle.status = ReviewStatus.CANCELLED
-        cycle.updated_at = datetime.utcnow().isoformat()
+        cycle.updated_at = datetime.now(timezone.utc).isoformat()
         self._persist_review(cycle)
 
         logger.info("Review cycle %s cancelled at round %d", review_id, cycle.current_round)
@@ -470,7 +470,7 @@ class ReviewCycleEngine:
                     cycle.feedbacks.append(feedback)
                     cycle.quality_scores.append(feedback.quality_score)
                     cycle.total_cost_tokens += feedback.cost_tokens
-                    cycle.updated_at = datetime.utcnow().isoformat()
+                    cycle.updated_at = datetime.now(timezone.utc).isoformat()
 
                     # Add to conversation thread
                     cycle.conversation_thread.append({
@@ -486,7 +486,7 @@ class ReviewCycleEngine:
                         cycle.revisions.append(revision)
                         cycle.current_content = revision.content
                         cycle.total_cost_tokens += revision.cost_tokens
-                        cycle.updated_at = datetime.utcnow().isoformat()
+                        cycle.updated_at = datetime.now(timezone.utc).isoformat()
 
                         cycle.conversation_thread.append({
                             "role": "user",
@@ -556,7 +556,7 @@ class ReviewCycleEngine:
         except Exception as e:
             cycle.status = ReviewStatus.FAILED
             cycle.escalation_reason = f"Error during review: {str(e)}"
-            cycle.updated_at = datetime.utcnow().isoformat()
+            cycle.updated_at = datetime.now(timezone.utc).isoformat()
             self._persist_review(cycle)
             logger.exception("Review %s FAILED: %s", cycle.review_id, e)
             raise

@@ -13,7 +13,7 @@ import json
 import uuid
 import sqlite3
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from dataclasses import dataclass, asdict
@@ -192,7 +192,7 @@ class RequestLogger:
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
                 
-                timestamp = datetime.utcnow().isoformat() + "Z"
+                timestamp = datetime.now(timezone.utc).isoformat() + "Z"
                 
                 cursor.execute("""
                     INSERT INTO error_logs (trace_id, error_type, error_message, stack_trace, timestamp)
@@ -310,7 +310,7 @@ class RequestLogger:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
-                start_date = (datetime.utcnow() - timedelta(days=days)).isoformat() + "Z"
+                start_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat() + "Z"
                 
                 # Daily totals
                 cursor.execute("""
@@ -374,7 +374,7 @@ class RequestLogger:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
-                start_date = (datetime.utcnow() - timedelta(days=days)).isoformat() + "Z"
+                start_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat() + "Z"
                 
                 # Error breakdown
                 cursor.execute("""
@@ -456,7 +456,7 @@ class RequestLogger:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
-                start_date = (datetime.utcnow() - timedelta(days=days)).isoformat() + "Z"
+                start_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat() + "Z"
                 
                 cursor.execute("""
                     SELECT
@@ -537,7 +537,7 @@ def log_request(
     
     log_entry = RequestLog(
         trace_id=trace_id,
-        timestamp=datetime.utcnow().isoformat() + "Z",
+        timestamp=datetime.now(timezone.utc).isoformat() + "Z",
         channel=channel,
         user_id=user_id,
         session_key=session_key or user_id,

@@ -32,7 +32,7 @@ TMUX_SESSION = "openclaw-agents"
 WORKTREE_BASE = "/root/openclaw/.worktrees"
 LOG_FILE = "/root/openclaw/data/tmux_agents.log"
 DEFAULT_REPO = "/root/openclaw"
-CLAUDE_CMD = "claude"  # Claude Code CLI
+CLAUDE_CMD = "/root/.local/bin/claude"  # Claude Code CLI (full path for tmux)
 # Full tool access mode for spawned agents.
 # --allowedTools with wildcards gives full tool access without interactive prompts.
 # --dangerously-skip-permissions doesn't work as root, so we use allowedTools instead.

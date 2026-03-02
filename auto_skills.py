@@ -8,7 +8,7 @@ import os
 import json
 import re
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger("openclaw.auto_skills")
@@ -382,7 +382,7 @@ def _build_skill_content(
     lines.append(f"- **Agent**: `{agent}`")
     lines.append(f"- **Project**: `{project}`")
     lines.append(f"- **Cost**: ${cost:.4f}")
-    lines.append(f"- **Extracted**: {datetime.utcnow().strftime('%Y-%m-%d')}")
+    lines.append(f"- **Extracted**: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}")
     lines.append("")
 
     return "\n".join(lines)

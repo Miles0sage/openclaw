@@ -8,7 +8,7 @@ Integrates with sports_model.py (predict + betting) and nba_api (actual scores).
 import json
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PREDICTIONS_DIR = Path("/root/openclaw/data/predictions")
@@ -68,7 +68,7 @@ def _log_predictions(date: str, bankroll: float) -> str:
     # Build log entry
     entry = {
         "date": target_date,
-        "logged_at": datetime.utcnow().isoformat() + "Z",
+        "logged_at": datetime.now(timezone.utc).isoformat() + "Z",
         "predictions": [
             {
                 "home": p.get("home", ""),
@@ -293,7 +293,7 @@ def _check_results(date: str) -> str:
 
     # Save results back to file
     entry["results"] = {
-        "graded_at": datetime.utcnow().isoformat() + "Z",
+        "graded_at": datetime.now(timezone.utc).isoformat() + "Z",
         "predictions": graded_predictions,
         "bets": graded_bets,
         "summary": summary,

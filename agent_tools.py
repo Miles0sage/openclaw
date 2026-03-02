@@ -1099,6 +1099,29 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    # ═══════════════════════════════════════════════════════════════
+    # PROPOSAL GENERATOR
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "generate_proposal",
+        "description": "Generate a branded HTML client proposal for OpenClaw. Creates a professional proposal document with executive summary, service details, pricing, case studies, timeline, and terms. Saves to data/proposals/. Use when a potential client needs a formal proposal.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "business_name": {"type": "string", "description": "Name of the client's business"},
+                "business_type": {"type": "string", "enum": ["restaurant", "barbershop", "dental", "auto", "realestate", "other"], "description": "Type of business (used to tailor the proposal content)"},
+                "owner_name": {"type": "string", "description": "Name of the business owner"},
+                "selected_services": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["receptionist", "website", "crm", "full_package"]},
+                    "description": "Services to include: receptionist ($1500), website ($2500), crm ($3000), full_package ($5500 bundle)"
+                },
+                "custom_notes": {"type": "string", "description": "Optional custom notes or special requirements to include in the proposal"},
+            },
+            "required": ["business_name", "business_type", "owner_name", "selected_services"],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -1318,6 +1341,16 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             return deep_research(tool_input["query"], tool_input.get("depth", "medium"),
                                  tool_input.get("mode", "general"),
                                  tool_input.get("max_sources", 0))
+        # ═ Proposal Generator
+        elif tool_name == "generate_proposal":
+            from proposal_generator import generate_proposal
+            return generate_proposal(
+                business_name=tool_input["business_name"],
+                business_type=tool_input["business_type"],
+                owner_name=tool_input["owner_name"],
+                selected_services=tool_input["selected_services"],
+                custom_notes=tool_input.get("custom_notes", ""),
+            )
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:

@@ -6,7 +6,7 @@ Stores budget state in D1 database or local JSON
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 from dataclasses import dataclass, asdict
@@ -154,7 +154,7 @@ class CostGatesDB:
     def get_daily_spending(self, date: str = None, project: str = None) -> float:
         """Get spending for a specific day"""
         if date is None:
-            date = datetime.utcnow().strftime("%Y-%m-%d")
+            date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
@@ -166,7 +166,7 @@ class CostGatesDB:
     def get_monthly_spending(self, year_month: str = None, project: str = None) -> float:
         """Get spending for a specific month"""
         if year_month is None:
-            year_month = datetime.utcnow().strftime("%Y-%m")
+            year_month = datetime.now(timezone.utc).strftime("%Y-%m")
         
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
@@ -178,7 +178,7 @@ class CostGatesDB:
     def record_daily_spending(self, project: str, agent: str, cost: float, date: str = None):
         """Record daily spending"""
         if date is None:
-            date = datetime.utcnow().strftime("%Y-%m-%d")
+            date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
@@ -191,7 +191,7 @@ class CostGatesDB:
     def record_monthly_spending(self, project: str, agent: str, cost: float, year_month: str = None):
         """Record monthly spending"""
         if year_month is None:
-            year_month = datetime.utcnow().strftime("%Y-%m")
+            year_month = datetime.now(timezone.utc).strftime("%Y-%m")
         
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
@@ -333,7 +333,7 @@ class CostGates:
         cost = self.calculate_cost(model, tokens_input, tokens_output)
         
         if task_id is None:
-            task_id = f"{project}:{agent}:{datetime.utcnow().timestamp()}"
+            task_id = f"{project}:{agent}:{datetime.now(timezone.utc).timestamp()}"
         
         # Check per-task gate
         per_task_gate = self.gates["per_task"]
@@ -408,8 +408,8 @@ class CostGates:
     
     def get_budget_status(self, project: str = None) -> Dict[str, Any]:
         """Get current budget status"""
-        today = datetime.utcnow().strftime("%Y-%m-%d")
-        this_month = datetime.utcnow().strftime("%Y-%m")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        this_month = datetime.now(timezone.utc).strftime("%Y-%m")
         
         daily_spending = self.db.get_daily_spending(date=today, project=project)
         monthly_spending = self.db.get_monthly_spending(year_month=this_month, project=project)
