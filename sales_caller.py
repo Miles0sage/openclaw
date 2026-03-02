@@ -27,8 +27,8 @@ logger = logging.getLogger("sales_caller")
 # ═══════════════════════════════════════════════════════════════
 
 VAPI_API_KEY = os.getenv("VAPI_API_KEY", "2fb71a28-8c1e-49b3-bb38-1ab220c8262b")
-VAPI_PHONE_NUMBER_ID = os.getenv("VAPI_PHONE_NUMBER_ID", "")  # Miles needs to set this — it's the Vapi phone number resource ID, not the phone number itself
-ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "iP95p4xoKVk5Rjd9KycE")  # Chris — Charming, Down-to-Earth
+VAPI_PHONE_NUMBER_ID = os.getenv("VAPI_PHONE_NUMBER_ID", "de6aa877-4949-4973-ac9b-0bdfc1a89044")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "iP95p4xoKVk53GoZ742B")  # ElevenLabs turbo v2.5 voice (same as Barber CRM assistant)
 VAPI_BASE_URL = "https://api.vapi.ai"
 CALL_LOG_DIR = "/root/openclaw/data/calls"
 LEADS_DIR = "/root/openclaw/data/leads"
