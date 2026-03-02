@@ -751,7 +751,7 @@ if not AUTH_TOKEN:
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl", "/visionclaw"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
@@ -1461,6 +1461,16 @@ async def sales_page():
             return HTMLResponse(content=f.read())
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Sales page not found</h1>", status_code=404)
+
+
+@app.get("/visionclaw")
+async def visionclaw_page():
+    """Serve the VisionClaw open-source smart glasses page."""
+    try:
+        with open("/root/openclaw/static/visionclaw/index.html", "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Page not found</h1>", status_code=404)
 
 
 @app.get("/nightowl")
@@ -3882,6 +3892,99 @@ async def root_websocket(websocket: WebSocket):
 @app.websocket("/ws")
 async def ws_websocket(websocket: WebSocket):
     await handle_websocket(websocket)
+
+
+@app.websocket("/ws/glasses")
+async def glasses_websocket(websocket: WebSocket):
+    """VisionClaw smart glasses WebSocket — receives camera frames + audio, returns AI responses."""
+    await websocket.accept()
+    device_id = f"glasses-{uuid.uuid4().hex[:8]}"
+    logger.info(f"[VISIONCLAW] Device connected: {device_id}")
+
+    # Notify owner
+    try:
+        tg_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        if tg_token:
+            async with httpx.AsyncClient(timeout=5) as client:
+                await client.post(
+                    f"https://api.telegram.org/bot{tg_token}/sendMessage",
+                    json={"chat_id": "8475962905", "text": f"👓 VisionClaw glasses connected: {device_id}"}
+                )
+    except Exception:
+        pass
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type", "")
+
+            if msg_type == "handshake":
+                logger.info(f"[VISIONCLAW] {device_id} handshake: {data.get('version')} caps={data.get('capabilities')}")
+                await websocket.send_json({"type": "ack", "device_id": device_id, "status": "connected"})
+
+            elif msg_type == "frame":
+                # Camera frame received — send to vision model
+                import base64 as b64mod
+                frame_b64 = data.get("data", "")
+                resolution = data.get("resolution", "unknown")
+                frame_size = data.get("size", 0)
+                logger.info(f"[VISIONCLAW] Frame from {device_id}: {resolution}, {frame_size} bytes")
+
+                # Save latest frame for debug
+                os.makedirs("/root/openclaw/data/visionclaw", exist_ok=True)
+                try:
+                    frame_bytes = b64mod.b64decode(frame_b64)
+                    with open(f"/root/openclaw/data/visionclaw/latest_frame.jpg", "wb") as f:
+                        f.write(frame_bytes)
+                except Exception:
+                    pass
+
+                # TODO: Send to Gemini Vision or Groq for analysis
+                # For now, acknowledge
+                await websocket.send_json({
+                    "type": "ack",
+                    "frame_received": True,
+                    "resolution": resolution,
+                })
+
+            elif msg_type == "audio":
+                # Audio chunk — send to STT
+                logger.info(f"[VISIONCLAW] Audio from {device_id}: {data.get('duration_ms', 0)}ms")
+                # TODO: Buffer audio chunks, send to Groq Whisper when silence detected
+                await websocket.send_json({"type": "ack", "audio_received": True})
+
+            elif msg_type == "gesture":
+                gesture = data.get("gesture", "unknown")
+                logger.info(f"[VISIONCLAW] Gesture from {device_id}: {gesture}")
+
+                if gesture == "double_tap":
+                    # Trigger: capture + analyze current scene
+                    await websocket.send_json({"type": "hud", "text": "Analyzing...", "duration_ms": 3000})
+                elif gesture == "head_nod":
+                    await websocket.send_json({"type": "hud", "text": "Confirmed", "duration_ms": 1000})
+
+            elif msg_type == "command":
+                cmd = data.get("command", "")
+                logger.info(f"[VISIONCLAW] Command from {device_id}: {cmd}")
+                # Voice command from STT — process as agent query
+                await websocket.send_json({"type": "processing", "command": cmd})
+
+            else:
+                logger.warning(f"[VISIONCLAW] Unknown message type from {device_id}: {msg_type}")
+
+    except Exception as e:
+        logger.info(f"[VISIONCLAW] Device disconnected: {device_id} ({e})")
+    finally:
+        try:
+            tg_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+            if tg_token:
+                async with httpx.AsyncClient(timeout=5) as client:
+                    await client.post(
+                        f"https://api.telegram.org/bot{tg_token}/sendMessage",
+                        json={"chat_id": "8475962905", "text": f"👓 VisionClaw disconnected: {device_id}"}
+                    )
+        except Exception:
+            pass
 
 
 async def _keepalive_ping(websocket: WebSocket, connection_id: str):
