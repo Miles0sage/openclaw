@@ -18,6 +18,7 @@ import time
 from fastapi import FastAPI, WebSocket, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import anthropic
@@ -737,6 +738,9 @@ app.include_router(client_auth_router)
 # Include GitHub PR integration routes
 app.include_router(github_router)
 
+# Serve static files (QR codes, sales pages, etc.)
+app.mount("/static", StaticFiles(directory="/root/openclaw/static"), name="static")
+
 # Include email notification routes
 app.include_router(email_router)
 # Authentication token - MUST be set in environment (via .env or systemd)
@@ -747,11 +751,11 @@ if not AUTH_TOKEN:
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -1457,6 +1461,79 @@ async def sales_page():
             return HTMLResponse(content=f.read())
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Sales page not found</h1>", status_code=404)
+
+
+@app.get("/nightowl")
+async def nightowl_page():
+    """Serve the NightOwl Security landing page."""
+    try:
+        with open("/root/openclaw/static/nightowl/index.html", "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Page not found</h1>", status_code=404)
+
+
+@app.post("/api/security/scan")
+async def security_scan_api(request: Request):
+    """Accept a security scan request from NightOwl website."""
+    try:
+        data = await request.json()
+        target_url = data.get("url", "").strip()
+        email = data.get("email", "").strip()
+        scan_type = data.get("scan_type", "quick")
+
+        if not target_url or not email:
+            return JSONResponse({"error": "URL and email are required"}, status_code=400)
+
+        scan_id = f"scan-{uuid.uuid4().hex[:12]}"
+
+        # Log the scan request
+        scan_log = {
+            "scan_id": scan_id,
+            "target": target_url,
+            "email": email,
+            "scan_type": scan_type,
+            "status": "queued",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        os.makedirs("/root/openclaw/data/scans", exist_ok=True)
+        with open("/root/openclaw/data/scans/scans.jsonl", "a") as f:
+            f.write(json.dumps(scan_log) + "\n")
+
+        # Send Telegram notification about new scan request
+        try:
+            tg_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+            if tg_token:
+                msg = f"🦉 NightOwl scan request!\n\nTarget: {target_url}\nType: {scan_type}\nEmail: {email}\nID: {scan_id}"
+                async with httpx.AsyncClient(timeout=5) as client:
+                    await client.post(
+                        f"https://api.telegram.org/bot{tg_token}/sendMessage",
+                        json={"chat_id": "8475962905", "text": msg}
+                    )
+        except Exception:
+            pass
+
+        # Create a job to run the actual scan
+        try:
+            from job_manager import add_job
+            add_job({
+                "project": "nightowl",
+                "task": f"Run {scan_type} security scan on {target_url} and email results to {email}. Scan ID: {scan_id}",
+                "priority": "P1",
+            })
+        except Exception:
+            pass
+
+        return JSONResponse({
+            "scan_id": scan_id,
+            "status": "queued",
+            "message": f"Scan queued. Results will be emailed to {email}.",
+        })
+
+    except Exception as e:
+        logger.error(f"Security scan API error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/terms")
