@@ -36,6 +36,7 @@ SAFE_COMMAND_PREFIXES = [
     "echo ", "pwd", "whoami", "date", "env ",
     "tar ", "zip ", "unzip ", "gzip ",
     "polymarket ",
+    "cd ",
 ]
 
 # Commands that are NEVER allowed
@@ -264,6 +265,32 @@ AGENT_TOOLS = [
                 "limit": {"type": "integer", "description": "Max results (default 5)"}
             },
             "required": ["query"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "rebuild_semantic_index",
+        "description": "Rebuild the semantic memory search index. Call after adding many new memories or memory files.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "flush_memory_before_compaction",
+        "description": "Flush pending important facts to MEMORY.md before context compaction. Call when you detect context is >50% and want to preserve critical decisions.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of important facts/decisions to save"
+                }
+            },
+            "required": ["items"],
             "additionalProperties": False
         }
     },
@@ -1234,6 +1261,10 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             )
         elif tool_name == "search_memory":
             return _search_memory(tool_input["query"], tool_input.get("limit", 5))
+        elif tool_name == "rebuild_semantic_index":
+            return _rebuild_semantic_index()
+        elif tool_name == "flush_memory_before_compaction":
+            return _flush_memory_before_compaction(tool_input.get("items", []))
         elif tool_name == "send_slack_message":
             return _send_slack_message(tool_input["message"], tool_input.get("channel"))
         # ═ Agency management tools
@@ -1698,7 +1729,21 @@ def _save_memory(content: str, tags: list = None, importance: int = 5) -> str:
 
 
 def _search_memory(query: str, limit: int = 5) -> str:
-    """Search memories by keyword matching. Supabase-first, JSONL fallback."""
+    """Search memories using semantic search (meaning-based) + keyword fallback."""
+    # Try semantic search first
+    try:
+        from semantic_memory import semantic_search
+        results = semantic_search(query, limit)
+        if results:
+            lines = []
+            for r in results:
+                score_pct = int(r["score"] * 100)
+                lines.append(f"[{r['id']}] (imp={r['importance']}, sim={score_pct}%) {r['source']}: {r['content'][:80]}")
+            return f"Found {len(results)} semantic matches:\n" + "\n".join(lines)
+    except Exception as e:
+        logger.debug(f"Semantic search failed, falling back to keyword: {e}")
+
+    # Fallback to keyword search (original logic)
     query_lower = query.lower()
     matches = []
 
@@ -1742,6 +1787,31 @@ def _search_memory(query: str, limit: int = 5) -> str:
         return f"No memories matching '{query}'"
     lines = [f"[{m['id']}] (imp={m.get('importance',5)}) {m['content'][:100]}" for m in matches[:limit]]
     return f"Found {len(matches)} memories:\n" + "\n".join(lines)
+
+
+def _rebuild_semantic_index() -> str:
+    """Rebuild semantic memory search index."""
+    try:
+        from semantic_memory import rebuild_index
+        rebuild_index()
+        return "Semantic memory index rebuilt successfully"
+    except ImportError:
+        return "Semantic memory module not available"
+    except Exception as e:
+        return f"Error rebuilding semantic index: {e}"
+
+
+def _flush_memory_before_compaction(items: list) -> str:
+    """Flush pending items to MEMORY.md before context compaction."""
+    try:
+        from memory_compaction import flush_pending
+        result = flush_pending(items)
+        count = result.get("flushed_count", 0)
+        return f"Flushed {count} items to MEMORY.md: {result.get('file', '?')}"
+    except ImportError:
+        return "Memory compaction module not available"
+    except Exception as e:
+        return f"Error flushing memory: {e}"
 
 
 def _kill_job(job_id: str) -> str:
