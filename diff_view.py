@@ -1,3 +1,4 @@
+# Generates git-style unified diffs for compact change visualization
 """
 diff_view.py — Generate git-style unified diffs for code edits.
 
