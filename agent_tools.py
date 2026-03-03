@@ -2315,26 +2315,41 @@ def _file_edit(path: str, old_string: str, new_string: str, replace_all: bool = 
 
 
 def _glob_files(pattern: str, path: str = "/root", max_results: int = 50) -> str:
-    """Find files matching a glob pattern."""
-    import glob as glob_mod
+    """Find files matching a glob pattern using subprocess find for performance."""
+    import fnmatch as _fnmatch
+    import subprocess as _sp
 
     try:
         # Skip directories that produce massive results
-        skip_dirs = {"node_modules", ".git", "__pycache__", ".next", "dist", "build", ".cache"}
-        search_pattern = os.path.join(path, pattern)
+        skip_dirs = {"node_modules", ".git", "__pycache__", ".next", "dist", "build", ".cache", ".worktrees"}
 
-        # Use iglob iterator so we can cap the scan early
-        matches = []
-        scan_limit = max_results * 20  # Scan at most 20x the requested results
-        for i, m in enumerate(glob_mod.iglob(search_pattern, recursive=True)):
-            if i >= scan_limit:
-                break
-            # Skip files inside heavy directories
-            parts = set(Path(m).parts)
-            if parts & skip_dirs:
-                continue
-            if os.path.isfile(m):
-                matches.append(m)
+        # Extract the filename pattern from the glob (e.g. "**/*.py" -> "*.py")
+        # Use 'find' with -prune to avoid walking into huge dirs
+        parts = pattern.replace("\\", "/").split("/")
+        name_pattern = parts[-1] if parts else pattern
+
+        # Build find command with prune for skip dirs
+        prune_args = []
+        for d in skip_dirs:
+            prune_args.extend(["-name", d, "-o"])
+        # Remove trailing -o
+        if prune_args:
+            prune_args = prune_args[:-1]
+
+        # find <path> ( -name node_modules -o -name .git ... ) -prune -o -name "*.py" -type f -print
+        cmd = ["find", path, "("] + prune_args + [")", "-prune", "-o",
+               "-name", name_pattern, "-type", "f", "-print"]
+
+        result = _sp.run(cmd, capture_output=True, text=True, timeout=10)
+        all_files = [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]
+
+        # If pattern had directory components (e.g. "src/**/*.ts"), filter by full glob
+        if len(parts) > 1 and parts[0] != "**":
+            import glob as glob_mod
+            full_pattern = os.path.join(path, pattern)
+            all_files = [f for f in all_files if glob_mod.fnmatch.fnmatch(f, full_pattern)]
+
+        matches = all_files[:max_results * 5]  # cap before sorting
 
         if not matches:
             return f"No files matching '{pattern}' in {path}"

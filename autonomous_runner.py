@@ -2088,6 +2088,7 @@ class AutonomousRunner:
         # Check for existing checkpoint to resume from
         existing_checkpoint = get_latest_checkpoint(job_id)
         resume_from_phase = None
+        phase_order = ["research", "plan", "execute", "verify", "deliver"]
         if existing_checkpoint:
             resume_from_phase = existing_checkpoint["phase"]
             logger.info(
@@ -2095,46 +2096,69 @@ class AutonomousRunner:
                 f"step={existing_checkpoint['step_index']} — will resume"
             )
 
+        def _should_skip(phase_name: str) -> bool:
+            """Skip phases that completed before the checkpoint phase."""
+            if not resume_from_phase:
+                return False
+            try:
+                resume_idx = phase_order.index(resume_from_phase)
+                current_idx = phase_order.index(phase_name)
+                return current_idx < resume_idx
+            except ValueError:
+                return False
+
         try:
             # ---- Phase 1: RESEARCH ----
-            research = await self._run_phase_with_retry(
-                "research",
-                lambda: _research_phase(job, agent_key, progress, guardrails=guardrails),
-                progress,
-            )
-            result["phases"]["research"] = {"status": "done", "length": len(research)}
+            if _should_skip("research"):
+                logger.info(f"Job {job_id}: Skipping research (resuming from {resume_from_phase})")
+                research = "(resumed — research phase skipped)"
+                result["phases"]["research"] = {"status": "skipped"}
+            else:
+                research = await self._run_phase_with_retry(
+                    "research",
+                    lambda: _research_phase(job, agent_key, progress, guardrails=guardrails),
+                    progress,
+                )
+                result["phases"]["research"] = {"status": "done", "length": len(research)}
 
             if progress.cancelled:
                 raise CancelledError(job_id)
 
             # ---- Phase 2: PLAN ----
-            # Trim research context for plan phase (full context was used during research;
-            # plan only needs the summary, not the raw tool output)
-            research_for_plan = _trim_context(research, max_tokens=2000)
-            plan = await self._run_phase_with_retry(
-                "plan",
-                lambda: _plan_phase(job, agent_key, research_for_plan, progress, guardrails=guardrails),
-                progress,
-            )
-            result["phases"]["plan"] = {
-                "status": "done",
-                "steps": len(plan.steps),
-            }
+            if _should_skip("plan"):
+                logger.info(f"Job {job_id}: Skipping plan (resuming from {resume_from_phase})")
+                # Create a minimal plan so execute phase has something to work with
+                plan = ExecutionPlan(steps=[
+                    PlanStep(description=job["task"], tools=["file_read", "file_edit", "shell_execute"])
+                ])
+                result["phases"]["plan"] = {"status": "skipped"}
+            else:
+                research_for_plan = _trim_context(research, max_tokens=2000)
+                plan = await self._run_phase_with_retry(
+                    "plan",
+                    lambda: _plan_phase(job, agent_key, research_for_plan, progress, guardrails=guardrails),
+                    progress,
+                )
+                result["phases"]["plan"] = {
+                    "status": "done",
+                    "steps": len(plan.steps),
+                }
 
             if progress.cancelled:
                 raise CancelledError(job_id)
 
             # ---- Phase 3: EXECUTE ----
-            # Trim research further for execute phase — the plan already encodes
-            # the research findings as concrete steps; research is only kept for
-            # high-level context (file paths, patterns, etc.)
             research_for_execute = _trim_context(research, max_tokens=1500)
-            update_job_status(job_id, "code_generated")
-            exec_results = await self._run_phase_with_retry(
-                "execute",
-                lambda: _execute_phase(job, agent_key, plan, research_for_execute, progress, guardrails=guardrails),
-                progress,
-            )
+            if not _should_skip("execute"):
+                update_job_status(job_id, "code_generated")
+                exec_results = await self._run_phase_with_retry(
+                    "execute",
+                    lambda: _execute_phase(job, agent_key, plan, research_for_execute, progress, guardrails=guardrails),
+                    progress,
+                )
+            else:
+                logger.info(f"Job {job_id}: Skipping execute (resuming from {resume_from_phase})")
+                exec_results = [{"status": "skipped"}]
 
             failed_steps = [r for r in exec_results if r.get("status") == "failed"]
             result["phases"]["execute"] = {
@@ -2147,11 +2171,15 @@ class AutonomousRunner:
                 raise CancelledError(job_id)
 
             # ---- Phase 4: VERIFY ----
-            verify_result = await self._run_phase_with_retry(
-                "verify",
-                lambda: _verify_phase(job, agent_key, exec_results, progress, guardrails=guardrails),
-                progress,
-            )
+            if not _should_skip("verify"):
+                verify_result = await self._run_phase_with_retry(
+                    "verify",
+                    lambda: _verify_phase(job, agent_key, exec_results, progress, guardrails=guardrails),
+                    progress,
+                )
+            else:
+                logger.info(f"Job {job_id}: Skipping verify (resuming from {resume_from_phase})")
+                verify_result = {"status": "skipped"}
             result["phases"]["verify"] = verify_result
 
             if progress.cancelled:
