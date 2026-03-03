@@ -481,6 +481,7 @@ def sports_predict(action: str, sport: str = "nba", team: str = "",
             teams = _get_all_teams()
             season = _current_season()
             predictions = []
+            seen_matchups = set()  # Dedup: NBA API can return duplicate game rows
 
             for game in games[:limit]:
                 if "error" in game:
@@ -488,6 +489,12 @@ def sports_predict(action: str, sport: str = "nba", team: str = "",
 
                 home_id = game["home_team_id"]
                 away_id = game["away_team_id"]
+
+                # Skip duplicate matchups (same home/away pair)
+                matchup_key = (home_id, away_id)
+                if matchup_key in seen_matchups:
+                    continue
+                seen_matchups.add(matchup_key)
                 home_info = teams.get(home_id, {})
                 away_info = teams.get(away_id, {})
 
@@ -678,13 +685,17 @@ def _feature_desc(name: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 def sports_betting(action: str, sport: str = "nba", bankroll: float = 100.0,
-                   min_ev: float = 0.01, limit: int = 10) -> str:
+                   min_ev: float = 0.01, limit: int = 10, min_prob: float = 0.45) -> str:
     """Full betting pipeline: predict + odds + EV + Kelly sizing.
 
     Actions:
         recommend — Full pipeline: predictions + odds + EV + Kelly-sized picks
         bankroll  — Kelly-sized bet recommendations for a given bankroll
         dashboard — Summary of all active opportunities across sports
+
+    Args:
+        min_prob: Minimum model probability to recommend a bet (default 0.45).
+                  Filters out pure underdog value plays that lose too frequently.
     """
     try:
         if action == "recommend":
@@ -694,6 +705,7 @@ def sports_betting(action: str, sport: str = "nba", bankroll: float = 100.0,
                 return json.dumps(compare_result)
 
             recommendations = []
+            seen_game_bets = set()  # Dedup: one recommendation per (game, team) pair
             for comp in compare_result.get("comparisons", []):
                 if not comp.get("has_odds"):
                     continue
@@ -702,12 +714,24 @@ def sports_betting(action: str, sport: str = "nba", bankroll: float = 100.0,
                 for key, val in comp.items():
                     if isinstance(val, dict) and val.get("is_plus_ev"):
                         team = key.replace("_odds", "")
+                        game_name = comp["game"]
+
+                        # Skip duplicate (game, team) combos
+                        dedup_key = (game_name, team)
+                        if dedup_key in seen_game_bets:
+                            continue
+                        seen_game_bets.add(dedup_key)
+
+                        # Skip low-probability underdog bets that lose too often
+                        if val["model_prob"] < min_prob:
+                            continue
+
                         kelly_pct = val["kelly_fraction"]
                         bet_size = round(bankroll * kelly_pct, 2)
 
                         if bet_size >= 1.0:  # Only recommend bets >= $1
                             recommendations.append({
-                                "game": comp["game"],
+                                "game": game_name,
                                 "bet_on": team,
                                 "book": val["book"],
                                 "odds": val["decimal"],
@@ -740,7 +764,7 @@ def sports_betting(action: str, sport: str = "nba", bankroll: float = 100.0,
 
         elif action == "bankroll":
             # Just the Kelly sizing recommendations
-            rec_result = json.loads(sports_betting("recommend", sport, bankroll, min_ev, limit))
+            rec_result = json.loads(sports_betting("recommend", sport, bankroll, min_ev, limit, min_prob))
             if "error" in rec_result:
                 return json.dumps(rec_result)
 

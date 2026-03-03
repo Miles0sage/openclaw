@@ -65,33 +65,49 @@ def _log_predictions(date: str, bankroll: float) -> str:
     bet_data = json.loads(bet_raw)
     recommendations = bet_data.get("recommendations", [])
 
+    # Deduplicate predictions by (home, away) matchup
+    seen_preds = set()
+    deduped_predictions = []
+    for p in predictions:
+        if "error" in p:
+            continue
+        key = (p.get("home", ""), p.get("away", ""))
+        if key in seen_preds:
+            continue
+        seen_preds.add(key)
+        deduped_predictions.append({
+            "home": p.get("home", ""),
+            "away": p.get("away", ""),
+            "predicted_winner": p.get("predicted_winner", ""),
+            "home_win_prob": p.get("home_win_prob", 0),
+            "away_win_prob": p.get("away_win_prob", 0),
+            "confidence": p.get("confidence", 0),
+        })
+
+    # Deduplicate recommendations by (game, bet_on)
+    seen_recs = set()
+    deduped_recommendations = []
+    for r in recommendations:
+        key = (r.get("game", ""), r.get("bet_on", ""))
+        if key in seen_recs:
+            continue
+        seen_recs.add(key)
+        deduped_recommendations.append({
+            "game": r.get("game", ""),
+            "bet_on": r.get("bet_on", ""),
+            "odds": r.get("best_odds", r.get("odds", 0)),
+            "model_prob": r.get("model_prob", 0),
+            "ev_pct": r.get("ev_pct", 0),
+            "bet_size": r.get("bet_size", r.get("kelly_bet", 0)),
+            "expected_profit": r.get("expected_profit", 0),
+        })
+
     # Build log entry
     entry = {
         "date": target_date,
         "logged_at": datetime.now(timezone.utc).isoformat() + "Z",
-        "predictions": [
-            {
-                "home": p.get("home", ""),
-                "away": p.get("away", ""),
-                "predicted_winner": p.get("predicted_winner", ""),
-                "home_win_prob": p.get("home_win_prob", 0),
-                "away_win_prob": p.get("away_win_prob", 0),
-                "confidence": p.get("confidence", 0),
-            }
-            for p in predictions if "error" not in p
-        ],
-        "recommendations": [
-            {
-                "game": r.get("game", ""),
-                "bet_on": r.get("bet_on", ""),
-                "odds": r.get("best_odds", r.get("odds", 0)),
-                "model_prob": r.get("model_prob", 0),
-                "ev_pct": r.get("ev_pct", 0),
-                "bet_size": r.get("bet_size", r.get("kelly_bet", 0)),
-                "expected_profit": r.get("expected_profit", 0),
-            }
-            for r in recommendations
-        ],
+        "predictions": deduped_predictions,
+        "recommendations": deduped_recommendations,
     }
 
     # Save — idempotent, overwrites same day
@@ -189,12 +205,21 @@ def _check_results(date: str) -> str:
             "date": target_date,
         })
 
+    # Dedup predictions on load (safety net for pre-fix files)
+    seen_pred_keys = set()
+    deduped_preds = []
+    for p in entry.get("predictions", []):
+        key = (p.get("home", ""), p.get("away", ""))
+        if key not in seen_pred_keys:
+            seen_pred_keys.add(key)
+            deduped_preds.append(p)
+
     # Grade predictions
     graded_predictions = []
     picks_correct = 0
     picks_total = 0
 
-    for pred in entry.get("predictions", []):
+    for pred in deduped_preds:
         home = pred.get("home", "")
         away = pred.get("away", "")
         predicted_winner = pred.get("predicted_winner", "")
@@ -243,19 +268,32 @@ def _check_results(date: str) -> str:
     total_wagered = 0.0
     total_profit = 0.0
 
+    seen_bet_keys = set()  # Dedup graded bets by (game, bet_on)
     for rec in entry.get("recommendations", []):
         bet_on = rec.get("bet_on", "")
+        game_name = rec.get("game", "")
         odds = rec.get("odds", 0)
         bet_size = rec.get("bet_size", 0)
 
-        # Find if the bet team won
+        # Skip duplicate bet entries
+        bet_key = (game_name, bet_on)
+        if bet_key in seen_bet_keys:
+            continue
+        seen_bet_keys.add(bet_key)
+
+        # Find the specific game this bet belongs to, then check winner
         won = None
         for result in actual_results:
-            if _match_team(bet_on, result["winner"]):
-                won = True
-                break
-            if _match_team(bet_on, result["home_team"]) or _match_team(bet_on, result["away_team"]):
-                won = False
+            # Match by BOTH teams in the game, not just the bet team
+            game_teams_match = (
+                (_match_team(bet_on, result["home_team"]) or _match_team(bet_on, result["away_team"])) and
+                (game_name == "" or any(
+                    _match_team(t, result["home_team"]) or _match_team(t, result["away_team"])
+                    for t in game_name.replace(" @ ", " vs ").replace(" vs ", "|").split("|")
+                ))
+            )
+            if game_teams_match:
+                won = _match_team(bet_on, result["winner"])
                 break
 
         if won is not None:

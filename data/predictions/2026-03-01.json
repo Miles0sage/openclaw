@@ -1,0 +1,135 @@
+{
+  "date": "2026-03-01",
+  "logged_at": "2026-03-01T21:46:15.797213Z",
+  "predictions": [
+    {
+      "home": "New York Knicks",
+      "away": "San Antonio Spurs",
+      "predicted_winner": "New York Knicks",
+      "home_win_prob": 0.633,
+      "away_win_prob": 0.367,
+      "confidence": 0.633
+    },
+    {
+      "home": "Brooklyn Nets",
+      "away": "Cleveland Cavaliers",
+      "predicted_winner": "Cleveland Cavaliers",
+      "home_win_prob": 0.0976,
+      "away_win_prob": 0.9024,
+      "confidence": 0.902
+    },
+    {
+      "home": "Chicago Bulls",
+      "away": "Milwaukee Bucks",
+      "predicted_winner": "Milwaukee Bucks",
+      "home_win_prob": 0.4515,
+      "away_win_prob": 0.5485,
+      "confidence": 0.548
+    },
+    {
+      "home": "Denver Nuggets",
+      "away": "Minnesota Timberwolves",
+      "predicted_winner": "Denver Nuggets",
+      "home_win_prob": 0.8965,
+      "away_win_prob": 0.1035,
+      "confidence": 0.896
+    },
+    {
+      "home": "Indiana Pacers",
+      "away": "Memphis Grizzlies",
+      "predicted_winner": "Indiana Pacers",
+      "home_win_prob": 0.8873,
+      "away_win_prob": 0.1127,
+      "confidence": 0.887
+    },
+    {
+      "home": "Atlanta Hawks",
+      "away": "Portland Trail Blazers",
+      "predicted_winner": "Atlanta Hawks",
+      "home_win_prob": 0.5563,
+      "away_win_prob": 0.4437,
+      "confidence": 0.556
+    },
+    {
+      "home": "Orlando Magic",
+      "away": "Detroit Pistons",
+      "predicted_winner": "Detroit Pistons",
+      "home_win_prob": 0.2438,
+      "away_win_prob": 0.7562,
+      "confidence": 0.756
+    },
+    {
+      "home": "Boston Celtics",
+      "away": "Philadelphia 76ers",
+      "predicted_winner": "Boston Celtics",
+      "home_win_prob": 0.6851,
+      "away_win_prob": 0.3149,
+      "confidence": 0.685
+    }
+  ],
+  "recommendations": [
+    {
+      "game": "Milwaukee Bucks @ Chicago Bulls",
+      "bet_on": "Chicago Bulls",
+      "odds": 8.2,
+      "model_prob": 0.4515,
+      "ev_pct": 270.23,
+      "bet_size": 9.38,
+      "expected_profit": 25.35
+    },
+    {
+      "game": "Minnesota Timberwolves @ Denver Nuggets",
+      "bet_on": "Denver Nuggets",
+      "odds": 2.23,
+      "model_prob": 0.8965,
+      "ev_pct": 99.92,
+      "bet_size": 20.31,
+      "expected_profit": 20.29
+    },
+    {
+      "game": "Memphis Grizzlies @ Indiana Pacers",
+      "bet_on": "Indiana Pacers",
+      "odds": 2.04,
+      "model_prob": 0.8873,
+      "ev_pct": 81.01,
+      "bet_size": 19.47,
+      "expected_profit": 15.77
+    },
+    {
+      "game": "Portland Trail Blazers @ Atlanta Hawks",
+      "bet_on": "Portland Trail Blazers",
+      "odds": 3.25,
+      "model_prob": 0.4437,
+      "ev_pct": 44.2,
+      "bet_size": 4.91,
+      "expected_profit": 2.17
+    },
+    {
+      "game": "Cleveland Cavaliers @ Brooklyn Nets",
+      "bet_on": "Cleveland Cavaliers",
+      "odds": 1.59,
+      "model_prob": 0.9024,
+      "ev_pct": 43.48,
+      "bet_size": 18.42,
+      "expected_profit": 8.01
+    },
+    {
+      "game": "Philadelphia 76ers @ Boston Celtics",
+      "bet_on": "Philadelphia 76ers",
+      "odds": 4.4,
+      "model_prob": 0.3149,
+      "ev_pct": 38.56,
+      "bet_size": 2.84,
+      "expected_profit": 1.1
+    },
+    {
+      "game": "Detroit Pistons @ Orlando Magic",
+      "bet_on": "Detroit Pistons",
+      "odds": 1.54,
+      "model_prob": 0.7562,
+      "ev_pct": 16.45,
+      "bet_size": 7.62,
+      "expected_profit": 1.25
+    }
+  ]
+}

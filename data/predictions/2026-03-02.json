@@ -1,0 +1,161 @@
+{
+  "date": "2026-03-02",
+  "logged_at": "2026-03-02T06:53:01.511772Z",
+  "predictions": [
+    {
+      "home": "Washington Wizards",
+      "away": "Houston Rockets",
+      "predicted_winner": "Houston Rockets",
+      "home_win_prob": 0.179,
+      "away_win_prob": 0.821,
+      "confidence": 0.821
+    },
+    {
+      "home": "Milwaukee Bucks",
+      "away": "Boston Celtics",
+      "predicted_winner": "Boston Celtics",
+      "home_win_prob": 0.0678,
+      "away_win_prob": 0.9322,
+      "confidence": 0.932
+    },
+    {
+      "home": "Utah Jazz",
+      "away": "Denver Nuggets",
+      "predicted_winner": "Denver Nuggets",
+      "home_win_prob": 0.2725,
+      "away_win_prob": 0.7275,
+      "confidence": 0.728
+    },
+    {
+      "home": "Golden State Warriors",
+      "away": "Los Angeles Clippers",
+      "predicted_winner": "Golden State Warriors",
+      "home_win_prob": 0.6556,
+      "away_win_prob": 0.3444,
+      "confidence": 0.656
+    }
+  ],
+  "recommendations": [
+    {
+      "game": "Houston Rockets @ Washington Wizards",
+      "bet_on": "Washington Wizards",
+      "odds": 10.0,
+      "model_prob": 0.179,
+      "ev_pct": 79.0,
+      "bet_size": 2.19,
+      "expected_profit": 1.73
+    },
+    {
+      "game": "Denver Nuggets @ Utah Jazz",
+      "bet_on": "Utah Jazz",
+      "odds": 5.9,
+      "model_prob": 0.2725,
+      "ev_pct": 60.78,
+      "bet_size": 3.1,
+      "expected_profit": 1.88
+    },
+    {
+      "game": "Los Angeles Clippers @ Golden State Warriors",
+      "bet_on": "Golden State Warriors",
+      "odds": 2.18,
+      "model_prob": 0.6556,
+      "ev_pct": 42.92,
+      "bet_size": 9.09,
+      "expected_profit": 3.9
+    },
+    {
+      "game": "Boston Celtics @ Milwaukee Bucks",
+      "bet_on": "Boston Celtics",
+      "odds": 1.38,
+      "model_prob": 0.9322,
+      "ev_pct": 28.64,
+      "bet_size": 18.84,
+      "expected_profit": 5.4
+    }
+  ],
+  "results": {
+    "graded_at": "2026-03-03T17:45:47.467370+00:00Z",
+    "predictions": [
+      {
+        "home": "Washington Wizards",
+        "away": "Houston Rockets",
+        "predicted_winner": "Houston Rockets",
+        "actual_winner": "Houston Rockets",
+        "home_score": 118,
+        "away_score": 123,
+        "correct": true
+      },
+      {
+        "home": "Milwaukee Bucks",
+        "away": "Boston Celtics",
+        "predicted_winner": "Boston Celtics",
+        "actual_winner": "Boston Celtics",
+        "home_score": 81,
+        "away_score": 108,
+        "correct": true
+      },
+      {
+        "home": "Utah Jazz",
+        "away": "Denver Nuggets",
+        "predicted_winner": "Denver Nuggets",
+        "actual_winner": "Denver Nuggets",
+        "home_score": 125,
+        "away_score": 128,
+        "correct": true
+      },
+      {
+        "home": "Golden State Warriors",
+        "away": "Los Angeles Clippers",
+        "predicted_winner": "Golden State Warriors",
+        "actual_winner": "UNMATCHED",
+        "home_score": 0,
+        "away_score": 0,
+        "correct": null
+      }
+    ],
+    "bets": [
+      {
+        "game": "Houston Rockets @ Washington Wizards",
+        "bet_on": "Washington Wizards",
+        "odds": 10.0,
+        "bet_size": 2.19,
+        "won": false,
+        "profit": -2.19
+      },
+      {
+        "game": "Denver Nuggets @ Utah Jazz",
+        "bet_on": "Utah Jazz",
+        "odds": 5.9,
+        "bet_size": 3.1,
+        "won": false,
+        "profit": -3.1
+      },
+      {
+        "game": "Los Angeles Clippers @ Golden State Warriors",
+        "bet_on": "Golden State Warriors",
+        "odds": 2.18,
+        "bet_size": 9.09,
+        "won": false,
+        "profit": -9.09
+      },
+      {
+        "game": "Boston Celtics @ Milwaukee Bucks",
+        "bet_on": "Boston Celtics",
+        "odds": 1.38,
+        "bet_size": 18.84,
+        "won": true,
+        "profit": 7.16
+      }
+    ],
+    "summary": {
+      "picks_correct": 3,
+      "picks_total": 3,
+      "picks_pct": 100.0,
+      "bets_won": 1,
+      "bets_total": 4,
+      "total_wagered": 33.22,
+      "total_profit": -7.22,
+      "roi_pct": -21.7
+    }
+  }
+}

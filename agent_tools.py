@@ -11,6 +11,7 @@ import json
 import logging
 import shutil
 import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 import httpx
@@ -1212,6 +1213,35 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    # ═══════════════════════════════════════════════════════════════
+    # SMS TOOLS (Twilio)
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "send_sms",
+        "description": "Send an SMS text message via Twilio. Use to notify Miles, send alerts, or communicate with clients. Rate limited to 10/hour.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Phone number in E.164 format (e.g. +15551234567)"},
+                "body": {"type": "string", "description": "Message text (max 1600 chars)"},
+            },
+            "required": ["to", "body"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "sms_history",
+        "description": "Get recent SMS messages sent or received. Use to check delivery status or see conversation history.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "direction": {"type": "string", "enum": ["sent", "received", "all"], "description": "Filter by direction (default: all)"},
+                "limit": {"type": "integer", "description": "Max messages to return (default: 10)"},
+            },
+            "required": [],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -1267,6 +1297,11 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             return _flush_memory_before_compaction(tool_input.get("items", []))
         elif tool_name == "send_slack_message":
             return _send_slack_message(tool_input["message"], tool_input.get("channel"))
+        # ═ SMS tools
+        elif tool_name == "send_sms":
+            return _send_sms(tool_input["to"], tool_input["body"])
+        elif tool_name == "sms_history":
+            return _get_sms_history(tool_input.get("direction", "all"), tool_input.get("limit", 10))
         # ═ Agency management tools
         elif tool_name == "kill_job":
             return _kill_job(tool_input["job_id"])
@@ -1701,6 +1736,9 @@ def _save_memory(content: str, tags: list = None, importance: int = 5) -> str:
     mem_id = str(uuid.uuid4())[:8]
     now = datetime.now(timezone.utc).isoformat()
 
+    db_id = mem_id
+    saved_to_supabase = False
+
     # Try Supabase first
     try:
         sb = _sb_memory()
@@ -1714,18 +1752,28 @@ def _save_memory(content: str, tags: list = None, importance: int = 5) -> str:
             result = sb["insert"]("memories", row)
             if result:
                 db_id = result[0].get("id", mem_id) if isinstance(result, list) else mem_id
-                return f"Memory saved (id={db_id}): {content[:80]}"
+                saved_to_supabase = True
     except Exception:
         pass
 
-    # JSONL fallback
+    # ALWAYS write to JSONL (semantic search indexes this file, not Supabase)
     mem_file = os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "memories.jsonl")
     os.makedirs(os.path.dirname(mem_file), exist_ok=True)
-    record = {"id": mem_id, "content": content, "tags": tags or [], "importance": importance,
+    record = {"id": str(db_id), "content": content, "tags": tags or [], "importance": importance,
               "timestamp": now}
     with open(mem_file, "a") as f:
         f.write(json.dumps(record) + "\n")
-    return f"Memory saved (id={mem_id}): {content[:80]}"
+
+    # Invalidate semantic index so next search picks up new memory
+    try:
+        idx_file = os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "semantic_index.pkl")
+        if os.path.exists(idx_file):
+            os.remove(idx_file)
+    except Exception:
+        pass
+
+    source = "supabase+jsonl" if saved_to_supabase else "jsonl"
+    return f"Memory saved (id={db_id}, {source}): {content[:80]}"
 
 
 def _search_memory(query: str, limit: int = 5) -> str:
@@ -1939,6 +1987,130 @@ def _send_slack_message(message: str, channel: str = None) -> str:
         return f"Message sent to Slack ({resp.status_code})"
     except Exception as e:
         return f"Error: {e}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SMS TOOLS — Twilio send/receive
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Rate limiter: track sends per hour
+_sms_send_log: list[float] = []
+_SMS_RATE_LIMIT = 10  # max sends per hour
+_SMS_LOG_FILE = os.path.join(os.getenv("DATA_DIR", "/root/openclaw/data"), "sms_log.jsonl")
+
+# Shared in-memory inbox for received SMS — gateway appends here on each inbound Twilio webhook.
+# Agents can read it via the sms_history tool. maxlen=100 caps memory usage.
+received_sms_inbox: deque = deque(maxlen=100)
+
+
+def _send_sms(to: str, body: str) -> str:
+    """Send an SMS via Twilio with rate limiting."""
+    import re as regex
+    # Validate E.164 format
+    if not regex.match(r'^\+[1-9]\d{1,14}$', to):
+        return f"Error: Invalid phone number '{to}'. Must be E.164 format (e.g. +15551234567)"
+
+    if len(body) > 1600:
+        return f"Error: Message too long ({len(body)} chars). Max is 1600."
+
+    # Check rate limit
+    now = time.time()
+    _sms_send_log[:] = [t for t in _sms_send_log if now - t < 3600]
+    if len(_sms_send_log) >= _SMS_RATE_LIMIT:
+        return f"Rate limited: {len(_sms_send_log)}/{_SMS_RATE_LIMIT} SMS sent in the last hour. Try again later."
+
+    # Check Twilio credentials
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+    from_number = os.getenv("TWILIO_PHONE_NUMBER")
+
+    if not all([account_sid, auth_token, from_number]):
+        missing = []
+        if not account_sid: missing.append("TWILIO_ACCOUNT_SID")
+        if not auth_token: missing.append("TWILIO_AUTH_TOKEN")
+        if not from_number: missing.append("TWILIO_PHONE_NUMBER")
+        return f"Error: Missing Twilio credentials: {', '.join(missing)}. Set them in .env"
+
+    try:
+        # Call Twilio Messages REST API directly via httpx (no SDK required)
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+        resp = httpx.post(
+            url,
+            data={"To": to, "From": from_number, "Body": body},
+            auth=(account_sid, auth_token),
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        _sms_send_log.append(now)
+
+        # Log to file
+        _log_sms("sent", to, from_number, body, data.get("sid", ""))
+
+        return f"SMS sent to {to} (SID: {data.get('sid', '?')}, status: {data.get('status', '?')})"
+    except httpx.HTTPStatusError as e:
+        error_body = e.response.text[:200]
+        return f"Error sending SMS (HTTP {e.response.status_code}): {error_body}"
+    except Exception as e:
+        return f"Error sending SMS: {e}"
+
+
+def _get_sms_history(direction: str = "all", limit: int = 10) -> str:
+    """Get recent SMS history from log file."""
+    try:
+        if not os.path.exists(_SMS_LOG_FILE):
+            return "No SMS history yet."
+
+        messages = []
+        with open(_SMS_LOG_FILE, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        msg = json.loads(line)
+                        if direction == "all" or msg.get("direction") == direction:
+                            messages.append(msg)
+                    except json.JSONDecodeError:
+                        pass
+
+        # Return most recent
+        messages = messages[-limit:]
+        if not messages:
+            return f"No {direction} SMS messages found."
+
+        lines = [f"SMS History ({len(messages)} messages):"]
+        for msg in messages:
+            ts = msg.get("timestamp", "?")
+            d = msg.get("direction", "?")
+            frm = msg.get("from", "?")
+            to = msg.get("to", "?")
+            body = msg.get("body", "")[:100]
+            lines.append(f"  [{ts}] {d.upper()} {frm} → {to}: {body}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error reading SMS history: {e}"
+
+
+def _log_sms(direction: str, to: str, from_num: str, body: str, sid: str = ""):
+    """Append SMS to log file and, for received messages, to the in-memory inbox deque."""
+    try:
+        os.makedirs(os.path.dirname(_SMS_LOG_FILE), exist_ok=True)
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "direction": direction,
+            "from": from_num,
+            "to": to,
+            "body": body,
+            "sid": sid,
+        }
+        with open(_SMS_LOG_FILE, 'a') as f:
+            f.write(json.dumps(entry) + "\n")
+        # Mirror received messages into the shared in-memory deque so agents can
+        # query the inbox without re-reading the log file every time.
+        if direction == "received":
+            received_sms_inbox.appendleft(entry)
+    except Exception:
+        pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════

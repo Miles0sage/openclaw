@@ -59,9 +59,14 @@ DEFAULT_POLL_INTERVAL = 10        # seconds between job queue checks
 DEFAULT_MAX_CONCURRENT = 3        # max parallel job executions (VPS: 4 CPU / 8GB RAM)
 DEFAULT_MAX_RETRIES = 3           # retries per phase on failure
 DEFAULT_BUDGET_LIMIT_USD = 5.0    # per-job cost cap (legacy fallback — guardrails enforce priority-based caps)
-MAX_TOOL_ITERATIONS = 25          # safety cap on agent tool loops per step
-TOOL_NUDGE_THRESHOLD = 15         # after this many iterations, nudge agent to finish up
+MAX_TOOL_ITERATIONS = 15          # safety cap on agent tool loops per step
+TOOL_NUDGE_THRESHOLD = 10         # after this many iterations, nudge agent to finish up
 MAX_PLAN_STEPS = 10               # safety cap on plan step count (fewer = less iteration burn)
+
+# Agent SDK integration — uses Claude Code's native tool execution engine instead of
+# our manual tool-use loop. Benefits: native context compaction, better tool handling,
+# hooks support, 80.9% SWE-bench accuracy. Toggle off with OPENCLAW_USE_SDK=0.
+USE_SDK = os.environ.get("OPENCLAW_USE_SDK", "1") == "1"
 
 logger = logging.getLogger("autonomous_runner")
 
@@ -287,6 +292,35 @@ def _load_project_context(project: str) -> str:
     return "\n\n".join(parts)
 
 
+def _extract_and_save_discoveries(agent_output: str, job_id: str, project: str):
+    """Extract DISCOVERY: lines from agent output and save to blackboard.
+
+    Inspired by Cursor's update_memory pattern — agents save patterns they
+    find during execution so future agents benefit.
+    """
+    discoveries = []
+    for line in agent_output.split("\n"):
+        stripped = line.strip()
+        if stripped.upper().startswith("DISCOVERY:"):
+            discovery = stripped[len("DISCOVERY:"):].strip()
+            if discovery:
+                discoveries.append(discovery)
+
+    for discovery in discoveries[:5]:  # Cap at 5 per step
+        try:
+            blackboard_write(
+                key=f"discovery_{job_id}_{uuid.uuid4().hex[:6]}",
+                value=discovery,
+                project=project,
+                job_id=job_id,
+                agent="executor",
+                ttl_seconds=604800,  # 7 days
+            )
+            logger.info(f"Saved discovery for {job_id}: {discovery[:80]}")
+        except Exception as e:
+            logger.debug(f"Failed to save discovery: {e}")
+
+
 def _build_context_bundle(step: PlanStep, research: str, previous_results: list) -> str:
     """Build a focused context bundle for the execute phase.
 
@@ -486,10 +520,172 @@ def _select_agent_for_job(job: dict) -> tuple[str, str]:
     return dept.primary_agent, dept_name
 
 
+# ---------------------------------------------------------------------------
+# Agent SDK execution path — replaces manual tool-use loop with Claude Code's
+# native agentic execution engine. Falls back to legacy path on import error.
+# ---------------------------------------------------------------------------
+
+async def _call_agent_sdk(
+    prompt: str,
+    system_prompt: str = "",
+    job_id: str = "",
+    phase: str = "",
+    priority: str = "P2",
+    guardrails: "JobGuardrails | None" = None,
+    workspace: str = "",
+    max_turns: int = 0,
+) -> dict:
+    """
+    Execute an agent task using the Claude Agent SDK.
+
+    The SDK spawns a Claude Code subprocess with full tool access (Bash, Read,
+    Write, Edit, Glob, Grep) and native context compaction. This replaces our
+    manual Anthropic API tool-use loop with Claude Code's battle-tested agentic
+    engine, which achieves 80.9% on SWE-bench.
+
+    Returns: {"text": str, "tokens": int, "tool_calls": list[dict], "cost_usd": float}
+    """
+    try:
+        from claude_agent_sdk import query as sdk_query
+        from claude_agent_sdk import ClaudeAgentOptions
+    except ImportError:
+        logger.error("claude_agent_sdk not installed — falling back to legacy path")
+        raise  # Let caller handle fallback
+
+    # Select model based on priority
+    if priority == "P3":
+        model = "haiku"
+    else:
+        model = "sonnet"
+
+    # Determine max turns from phase if not specified
+    if max_turns <= 0:
+        phase_turns = {
+            "research": 15,
+            "plan": 10,
+            "execute": 30,
+            "verify": 10,
+            "deliver": 10,
+        }
+        max_turns = phase_turns.get(phase, 20)
+
+    # Determine working directory
+    cwd = workspace if workspace else "/root/openclaw"
+
+    # Build the full prompt with system context
+    full_prompt = prompt
+    if system_prompt:
+        full_prompt = f"{system_prompt}\n\n---\n\n{prompt}"
+
+    # Remove CLAUDECODE env var to prevent "nested session" detection.
+    # The SDK subprocess inherits os.environ, and CLAUDECODE triggers
+    # "Claude Code cannot be launched inside another Claude Code session".
+    saved_claudecode = os.environ.pop("CLAUDECODE", None)
+
+    try:
+        logger.info(
+            f"SDK call: job={job_id} phase={phase} model={model} "
+            f"max_turns={max_turns} cwd={cwd}"
+        )
+
+        options = ClaudeAgentOptions(
+            model=model,
+            permission_mode="acceptEdits",
+            max_turns=max_turns,
+            cwd=cwd,
+        )
+
+        # Collect results from async iterator
+        all_tool_calls = []
+        final_text = ""
+        total_cost = 0.0
+        total_tokens = 0
+        turn_count = 0
+
+        async for message in sdk_query(
+            prompt=full_prompt,
+            options=options,
+        ):
+            msg_type = type(message).__name__
+
+            if msg_type == "AssistantMessage":
+                # Track tool calls from assistant messages.
+                # SDK returns content as list of SDK objects (ToolUseBlock,
+                # TextBlock, ThinkingBlock) — NOT dicts.
+                content = getattr(message, "content", None)
+                if content and isinstance(content, list):
+                    for block in content:
+                        # SDK blocks are typed objects (ToolUseBlock, TextBlock,
+                        # ThinkingBlock) without a .type string attr. Check class name.
+                        block_cls = type(block).__name__
+                        if block_cls == "ToolUseBlock" or (hasattr(block, "name") and hasattr(block, "input") and hasattr(block, "id")):
+                            tool_name = getattr(block, "name", "unknown")
+                            tool_input = getattr(block, "input", {})
+                            all_tool_calls.append({
+                                "tool": tool_name,
+                                "input": tool_input,
+                                "result": "(sdk-managed)",
+                            })
+                            _log_phase(job_id, phase, {
+                                "event": "sdk_tool_call",
+                                "tool": tool_name,
+                                "input": {k: str(v)[:200] for k, v in tool_input.items()} if isinstance(tool_input, dict) else {},
+                            })
+                turn_count += 1
+
+            elif msg_type == "ResultMessage":
+                # Final result — extract all metrics
+                final_text = getattr(message, "result", "") or ""
+                total_cost = getattr(message, "total_cost_usd", 0.0) or 0.0
+                num_turns = getattr(message, "num_turns", 0) or 0
+                is_error = getattr(message, "is_error", False)
+
+                # Extract token usage
+                usage = getattr(message, "usage", {}) or {}
+                if isinstance(usage, dict):
+                    total_tokens = usage.get("output_tokens", 0) + usage.get("input_tokens", 0)
+
+                logger.info(
+                    f"SDK result: job={job_id} phase={phase} turns={num_turns} "
+                    f"cost=${total_cost:.4f} tools={len(all_tool_calls)} "
+                    f"error={is_error}"
+                )
+
+                if is_error:
+                    logger.warning(f"SDK returned error for {job_id}/{phase}: {final_text[:500]}")
+
+        # Update guardrails with SDK cost
+        if guardrails and total_cost > 0:
+            guardrails.cost_usd += total_cost
+
+        # Log cost event
+        if total_cost > 0:
+            log_cost_event(
+                project=job_id.split("-")[0] if job_id else "openclaw",
+                agent=f"sdk_{model}",
+                model=f"claude-{model}-sdk",
+                tokens_input=total_tokens // 2,  # Approximate split
+                tokens_output=total_tokens // 2,
+                cost=total_cost,
+            )
+
+        return {
+            "text": final_text,
+            "tokens": total_tokens,
+            "tool_calls": all_tool_calls,
+            "cost_usd": total_cost,
+        }
+
+    finally:
+        # Restore CLAUDECODE env var
+        if saved_claudecode is not None:
+            os.environ["CLAUDECODE"] = saved_claudecode
+
+
 async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                       tools: list = None, job_id: str = "", phase: str = "",
                       guardrails: "JobGuardrails | None" = None,
-                      department: str = "") -> dict:
+                      department: str = "", priority: str = "P2") -> dict:
     """
     Call an agent model. Wraps the synchronous call_model_for_agent in an
     executor so it doesn't block the event loop. If tools are provided,
@@ -497,9 +693,10 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
     until it stops requesting tool calls.
 
     CRITICAL: When tools are required (execute, verify, deliver phases),
-    we ALWAYS use Claude Haiku with Anthropic provider, since only Anthropic
-    supports native tool_use. Non-Anthropic agents (Kimi, MiniMax, Deepseek)
-    are used for text-only phases (research, plan).
+    we use Anthropic provider since only Anthropic supports native tool_use.
+    P3 jobs use Claude Haiku (cheap), all other priorities use Claude Sonnet
+    (better quality). Non-Anthropic agents (Kimi, MiniMax, Deepseek) are
+    used for text-only phases (research, plan).
 
     Returns: {"text": str, "tokens": int, "tool_calls": list[dict], "cost_usd": float}
     """
@@ -520,19 +717,82 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
     all_tool_calls = []
     final_text = ""
 
-    # When tools are required, use Claude Haiku (Anthropic) for actual execution.
+    # When tools are required, use Anthropic for actual execution.
     # Only Anthropic natively supports tool_use content blocks that we can dispatch
     # to execute_tool(). Non-Anthropic providers (Kimi/deepseek, MiniMax/minimax)
     # write tool calls as prose/code in their text response, which never executes.
+    # Model selection: P3 -> Haiku (cheap), P0/P1/P2 -> Sonnet (better quality).
     if tools:
+        # --- SDK path: use Claude Agent SDK for tool execution when enabled ---
+        if USE_SDK:
+            try:
+                # Build system prompt with department context
+                base_system = (
+                    "You are an autonomous AI agent executing a task step-by-step using tools. "
+                    "When you need to perform an action (read/write files, run shell commands, "
+                    "git operations, etc.), you MUST use the provided tools — do NOT describe "
+                    "actions in text. Call tools directly. After all actions are complete, "
+                    "summarize what was done and the outcome."
+                )
+                if department and department in DEPARTMENTS:
+                    dept = DEPARTMENTS[department]
+                    sdk_system = f"{dept.system_prompt}\n\n{base_system}"
+                else:
+                    sdk_system = base_system
+
+                # Prepend conversation context into the prompt if available
+                sdk_prompt = prompt
+                if conversation:
+                    context_parts = []
+                    for msg in conversation[-6:]:  # Last 3 exchanges max
+                        role = msg.get("role", "user")
+                        content = msg.get("content", "")
+                        if isinstance(content, str) and content.strip():
+                            context_parts.append(f"[Previous {role}]: {content[:1000]}")
+                    if context_parts:
+                        sdk_prompt = "CONTEXT FROM PREVIOUS STEPS:\n" + "\n".join(context_parts) + "\n\n---\n\n" + prompt
+
+                # Determine workspace: extract from prompt (most accurate, contains
+                # project root or worktree path), fall back to job workspace dir
+                sdk_workspace = ""
+                ws_match = re.search(r"WORKSPACE DIRECTORY[^:]*:\s*(\S+)", prompt)
+                if ws_match and os.path.isdir(ws_match.group(1)):
+                    sdk_workspace = ws_match.group(1)
+                elif job_id:
+                    job_run_dir = JOB_RUNS_DIR / job_id / "workspace"
+                    if job_run_dir.exists():
+                        sdk_workspace = str(job_run_dir)
+
+                result = await _call_agent_sdk(
+                    prompt=sdk_prompt,
+                    system_prompt=sdk_system,
+                    job_id=job_id,
+                    phase=phase,
+                    priority=priority,
+                    guardrails=guardrails,
+                    workspace=sdk_workspace,
+                )
+                return result
+
+            except ImportError:
+                logger.warning("Agent SDK not available — falling back to legacy tool-use loop")
+            except Exception as sdk_err:
+                logger.error(f"Agent SDK failed for {job_id}/{phase}: {sdk_err} — falling back to legacy")
+
+        # --- Legacy path: manual Anthropic/Gemini tool-use loop ---
         # For tool-executing phases (execute, verify, deliver), use a provider with
         # native tool_use support. Anthropic and Gemini both support it.
         if effective_provider not in ("anthropic", "gemini"):
+            # P3 (low priority) jobs use Haiku (cheap), everything else uses Sonnet (better quality)
+            if priority == "P3":
+                tool_model = "claude-haiku-4-5-20251001"
+            else:
+                tool_model = "claude-sonnet-4-5-20250929"
             logger.info(
                 f"Tool execution required but provider='{effective_provider}' doesn't support tool_use. "
-                f"Switching to claude-haiku-4-5-20251001 for phase={phase}, assigned_agent={agent_key}"
+                f"Switching to {tool_model} (priority={priority}) for phase={phase}, assigned_agent={agent_key}"
             )
-            effective_model = "claude-haiku-4-5-20251001"
+            effective_model = tool_model
             effective_provider = "anthropic"
 
         # Minimal system prompt for job execution context.
@@ -924,7 +1184,8 @@ async def _research_phase(job: dict, agent_key: str, progress: JobProgress,
     tools = _filter_tools_for_phase(Phase.RESEARCH)
     result = await _call_agent(agent_key, prompt, tools=tools,
                                job_id=job["id"], phase="research",
-                               guardrails=guardrails, department=department)
+                               guardrails=guardrails, department=department,
+                               priority=job.get("priority", "P2"))
 
     progress.cost_usd += result["cost_usd"]
     progress.phase_status = "done"
@@ -982,7 +1243,8 @@ async def _plan_phase(job: dict, agent_key: str, research: str,
     tools = _filter_tools_for_phase(Phase.PLAN)
     result = await _call_agent(agent_key, prompt, tools=tools,
                                job_id=job["id"], phase="plan",
-                               guardrails=guardrails)
+                               guardrails=guardrails,
+                               priority=job.get("priority", "P2"))
 
     progress.cost_usd += result["cost_usd"]
 
@@ -1009,7 +1271,8 @@ async def _plan_phase(job: dict, agent_key: str, research: str,
         )
         retry_result = await _call_agent(agent_key, retry_prompt, tools=tools,
                                           job_id=job["id"], phase="plan",
-                                          guardrails=guardrails)
+                                          guardrails=guardrails,
+                                          priority=job.get("priority", "P2"))
         progress.cost_usd += retry_result["cost_usd"]
         retry_text = retry_result["text"].strip()
         for attempt_str in [retry_text, _extract_json_block(retry_text)]:
@@ -1138,6 +1401,39 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
             f"SUGGESTED TOOLS: {', '.join(step.tool_hints)}\n\n"
         )
 
+        # --- Stolen patterns from Devin, Cursor, Windsurf ---
+
+        # Pattern 1 (Devin): Think before critical decisions
+        prompt += (
+            "## THINK BEFORE ACTING\n"
+            "Before making any of these moves, STOP and reason through it explicitly:\n"
+            "- Deleting or overwriting existing code\n"
+            "- Multi-file changes that could break imports\n"
+            "- Choosing between two valid approaches\n"
+            "- When you're stuck or an approach isn't working after 2 attempts\n"
+            "Write your reasoning as: THINK: [your analysis]. Then proceed.\n\n"
+        )
+
+        # Pattern 2 (Windsurf): Live plan adaptation
+        prompt += (
+            "## PLAN ADAPTATION\n"
+            f"You are on step {step.index + 1} of {len(plan.steps)}. "
+            "If this step doesn't match reality (file doesn't exist, approach won't work, "
+            "prerequisite is missing), DO NOT blindly follow it. Instead:\n"
+            "1. State what's different from expected\n"
+            "2. Adapt the approach to what actually works\n"
+            "3. Complete the step's intent, not its exact wording\n\n"
+        )
+
+        # Pattern 3 (Cursor): Surface discoveries for memory
+        prompt += (
+            "## CAPTURE DISCOVERIES\n"
+            "If you discover something important while working (a pattern in the codebase, "
+            "a gotcha, a useful file path, an API quirk), note it at the end of your response as:\n"
+            "DISCOVERY: [what you found]\n"
+            "These get saved for future agent runs.\n\n"
+        )
+
         prompt += (
             f"Execute this step now using the available tools. "
             f"When done, summarize what you did and the outcome."
@@ -1150,7 +1446,8 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                 result = await _call_agent(step_agent, prompt, tools=tools,
                                            job_id=job["id"], phase="execute",
                                            guardrails=guardrails,
-                                           department=department)
+                                           department=department,
+                                           priority=job.get("priority", "P2"))
                 progress.cost_usd += result["cost_usd"]
 
                 # Budget check (legacy fallback — guardrails are the primary check)
@@ -1167,6 +1464,12 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                 step.status = "done"
                 step.result = result["text"][:5000]
                 step.attempts = attempt + 1
+
+                # Pattern 3 (Cursor): Extract and save discoveries from agent output
+                _extract_and_save_discoveries(
+                    result["text"], job["id"], job.get("project", "unknown")
+                )
+
                 step_result = {
                     "step": step.index,
                     "status": "done",
@@ -1260,6 +1563,17 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
         guardrails.set_phase("verify")
 
     project = job.get("project", "unknown")
+    workspace = progress.workspace
+
+    # Map projects to repo paths (same as deliver phase)
+    project_paths = {
+        "barber-crm":    "/root/Barber-CRM",
+        "delhi-palace":  "/root/Delhi-Palace",
+        "openclaw":      "/root/openclaw",
+        "prestress-calc":"/root/Mathcad-Scripts",
+        "concrete-canoe":"/root/concrete-canoe-project2026",
+    }
+    repo_path = project_paths.get(project, f"/root/{project}")
 
     # Build summary of what was done
     steps_summary = "\n".join(
@@ -1277,12 +1591,16 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
         f"PROJECT: {project}\n"
         f"DEPARTMENT: {department or 'general'}\n"
         f"TASK: {job['task']}\n\n"
+        f"WORKSPACE DIRECTORY: {workspace}\n"
+        f"PROJECT PATH: {repo_path}\n"
+        f"IMPORTANT: The actual project files are at {repo_path}, NOT in the workspace sandbox.\n"
+        f"Use file_read and grep_search against {repo_path}/ paths to verify changes.\n\n"
         f"EXECUTION RESULTS:\n{steps_summary}\n\n"
         f"Verification checklist:\n"
-        f"1. Use shell_execute to run any relevant tests (pytest, jest, vitest, etc.)\n"
-        f"2. Use shell_execute to run linting if applicable\n"
-        f"3. Use file_read to spot-check created/modified files for correctness\n"
-        f"4. Use grep_search to check for common issues (TODO, FIXME, console.log, etc.)\n"
+        f"1. Use shell_execute to run any relevant tests (pytest, jest, vitest, etc.) from {repo_path}\n"
+        f"2. Use shell_execute to run linting if applicable from {repo_path}\n"
+        f"3. Use file_read to spot-check created/modified files at {repo_path}/ for correctness\n"
+        f"4. Use grep_search to check for common issues (TODO, FIXME, console.log, etc.) in {repo_path}/\n"
         f"{dept_verify}\n"
         f"Respond with a JSON object:\n"
         f'{{"passed": true/false, "summary": "...", "issues": ["issue1", "issue2"]}}\n'
@@ -1292,7 +1610,8 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
     tools = _filter_tools_for_phase(Phase.VERIFY)
     result = await _call_agent(agent_key, prompt, tools=tools,
                                job_id=job["id"], phase="verify",
-                               guardrails=guardrails, department=department)
+                               guardrails=guardrails, department=department,
+                               priority=job.get("priority", "P2"))
 
     progress.cost_usd += result["cost_usd"]
 
@@ -1466,7 +1785,8 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
     tools = _filter_tools_for_phase(Phase.DELIVER)
     result = await _call_agent(agent_key, prompt, tools=tools,
                                job_id=job["id"], phase="deliver",
-                               guardrails=guardrails)
+                               guardrails=guardrails,
+                               priority=job.get("priority", "P2"))
 
     progress.cost_usd += result["cost_usd"]
 
@@ -2297,7 +2617,7 @@ class AutonomousRunner:
                 logger.info(f"Job {job_id}: Skipping plan (resuming from {resume_from_phase})")
                 # Create a minimal plan so execute phase has something to work with
                 plan = ExecutionPlan(steps=[
-                    PlanStep(description=job["task"], tools=["file_read", "file_edit", "shell_execute"])
+                    PlanStep(index=0, description=job["task"], tool_hints=["file_read", "file_edit", "shell_execute"])
                 ])
                 result["phases"]["plan"] = {"status": "skipped"}
             else:
@@ -2586,7 +2906,7 @@ class AutonomousRunner:
         except Exception as si_err:
             logger.warning(f"Failed to log self-improve metric: {si_err}")
 
-        # Save reflexion for future jobs
+        # Save reflexion for future jobs (structured v2)
         try:
             elapsed_secs = time.time() - (getattr(progress, '_start_time', None) or time.time())
             outcome = "success" if result.get("success") else "failed"
@@ -2596,8 +2916,9 @@ class AutonomousRunner:
                 outcome=outcome,
                 duration_seconds=abs(elapsed_secs),
                 department=department,
+                run_result=result,
             )
-            logger.info(f"Job {job_id}: Reflexion saved (outcome={outcome}, dept={department})")
+            logger.info(f"Job {job_id}: Reflexion saved (outcome={outcome}, dept={department}, structured=yes)")
         except Exception as ref_err:
             logger.warning(f"Failed to save reflexion: {ref_err}")
 
