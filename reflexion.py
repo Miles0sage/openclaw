@@ -2,12 +2,15 @@
 OpenClaw Reflexion Loop — Self-improving agent memory
 
 After each job, stores a reflection. Before new jobs, injects relevant past reflections.
+Primary backend: Supabase | Fallback: JSON files on disk
 """
 import os
 import json
-import glob
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger("reflexion")
 
 REFLECTIONS_DIR = Path("/root/openclaw/data/reflections")
 
@@ -16,76 +19,143 @@ def ensure_dir():
     REFLECTIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+# ---------------------------------------------------------------------------
+# Supabase helpers
+# ---------------------------------------------------------------------------
+
+def _sb():
+    try:
+        from supabase_client import table_insert, table_select, is_connected
+        return {"insert": table_insert, "select": table_select, "connected": is_connected}
+    except Exception:
+        return None
+
+
+def _use_supabase() -> bool:
+    try:
+        sb = _sb()
+        return sb is not None and sb["connected"]()
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Core functions
+# ---------------------------------------------------------------------------
+
 def save_reflection(job_id: str, job_data: dict, outcome: str, duration_seconds: float = 0):
     """Save a post-job reflection. Called after job completes."""
     ensure_dir()
 
-    reflection = {
-        "job_id": job_id,
-        "project": job_data.get("project", "unknown"),
-        "task": job_data.get("task", ""),
-        "outcome": outcome,  # "success" or "failed"
-        "duration_seconds": duration_seconds,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "tags": list(_extract_tags(job_data.get("task", ""))),
-    }
+    tags = list(_extract_tags(job_data.get("task", "")))
 
-    # Generate reflection prompt
     if outcome == "success":
-        reflection["learnings"] = [
+        learnings = [
             f"Task '{job_data.get('task', '')[:100]}' completed successfully",
             f"Project: {job_data.get('project', 'unknown')}",
             f"Duration: {duration_seconds:.0f}s",
         ]
     else:
-        reflection["learnings"] = [
+        learnings = [
             f"Task '{job_data.get('task', '')[:100]}' FAILED",
             f"Project: {job_data.get('project', 'unknown')}",
             "Review logs for error details",
         ]
 
+    reflection = {
+        "job_id": job_id,
+        "project": job_data.get("project", "unknown"),
+        "task": job_data.get("task", ""),
+        "outcome": outcome,
+        "duration_seconds": duration_seconds,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tags": tags,
+        "learnings": learnings,
+    }
+
+    # Try Supabase first
+    if _use_supabase():
+        sb = _sb()
+        row = {
+            "job_id": job_id,
+            "project": reflection["project"],
+            "task": reflection["task"],
+            "outcome": outcome,
+            "reflection": json.dumps(learnings),
+            "lessons": learnings,
+            "cost_usd": job_data.get("cost_usd", 0),
+            "duration_seconds": int(duration_seconds),
+            "created_at": reflection["timestamp"],
+        }
+        result = sb["insert"]("reflections", row)
+        if result:
+            logger.info(f"Reflection saved (Supabase): {job_id}")
+            return job_id
+
+    # JSON file fallback
     filepath = REFLECTIONS_DIR / f"{job_id}.json"
     with open(filepath, "w") as f:
         json.dump(reflection, f, indent=2)
-
+    logger.info(f"Reflection saved (file): {filepath}")
     return filepath
 
 
 def search_reflections(task_description: str, project: str = None, limit: int = 3) -> list:
-    """Find relevant past reflections for a new task. Used to inject context before jobs."""
+    """Find relevant past reflections for a new task."""
+
+    # Try Supabase first — get all reflections and score locally
+    if _use_supabase():
+        sb = _sb()
+        query = "order=created_at.desc"
+        if project:
+            query = f"project=eq.{project}&{query}"
+        rows = sb["select"]("reflections", query, limit=200)
+        if rows:
+            return _score_and_rank(rows, task_description, project, limit)
+
+    # File fallback
     ensure_dir()
-
-    tags = _extract_tags(task_description)
     all_reflections = []
-
     for filepath in REFLECTIONS_DIR.glob("*.json"):
         try:
             with open(filepath) as f:
                 ref = json.load(f)
+            all_reflections.append(ref)
         except (json.JSONDecodeError, IOError):
             continue
 
-        # Score relevance
+    return _score_and_rank(all_reflections, task_description, project, limit)
+
+
+def _score_and_rank(reflections: list, task_description: str, project: str, limit: int) -> list:
+    """Score reflections by relevance to a task and return top matches."""
+    tags = _extract_tags(task_description)
+    scored = []
+
+    for ref in reflections:
         score = 0
-        ref_tags = set(ref.get("tags", []))
-        score += len(tags & ref_tags) * 2  # tag overlap
+        # Tag overlap (Supabase rows use 'lessons' array, file rows use 'tags')
+        ref_tags = set(ref.get("tags", []) or [])
+        if not ref_tags:
+            ref_tags = _extract_tags(ref.get("task", ""))
+        score += len(tags & ref_tags) * 2
 
         if project and ref.get("project") == project:
-            score += 3  # same project bonus
+            score += 3
 
-        # Keyword overlap in task description
         task_words = set(task_description.lower().split())
         ref_words = set(ref.get("task", "").lower().split())
         score += len(task_words & ref_words)
 
         if score > 0:
             ref["_relevance_score"] = score
-            all_reflections.append(ref)
+            # Normalize learnings field
+            if "learnings" not in ref and "lessons" in ref:
+                ref["learnings"] = ref["lessons"]
+            scored.append(ref)
 
-    # Sort by relevance, then recency
-    all_reflections.sort(key=lambda r: (r["_relevance_score"], r.get("timestamp", "")), reverse=True)
-
-    return all_reflections[:limit]
+    scored.sort(key=lambda r: (r.get("_relevance_score", 0), r.get("timestamp", r.get("created_at", ""))), reverse=True)
+    return scored[:limit]
 
 
 def format_reflections_for_prompt(reflections: list) -> str:
@@ -97,8 +167,9 @@ def format_reflections_for_prompt(reflections: list) -> str:
     for ref in reflections:
         outcome_label = "SUCCESS" if ref.get("outcome") == "success" else "FAILED"
         lines.append(f"\n### [{outcome_label}] {ref.get('task', 'Unknown task')[:120]}")
-        lines.append(f"Project: {ref.get('project', '?')} | Duration: {ref.get('duration_seconds', 0):.0f}s")
-        for learning in ref.get("learnings", []):
+        dur = ref.get("duration_seconds", 0)
+        lines.append(f"Project: {ref.get('project', '?')} | Duration: {dur:.0f}s" if dur else f"Project: {ref.get('project', '?')}")
+        for learning in ref.get("learnings", ref.get("lessons", [])):
             lines.append(f"- {learning}")
 
     lines.append("\nUse these past experiences to inform your approach. Avoid repeating past failures.")
@@ -107,11 +178,24 @@ def format_reflections_for_prompt(reflections: list) -> str:
 
 def get_stats() -> dict:
     """Get reflection statistics."""
+    if _use_supabase():
+        sb = _sb()
+        rows = sb["select"]("reflections", "", limit=5000)
+        if rows is not None:
+            total = len(rows)
+            successes = sum(1 for r in rows if r.get("outcome") == "success")
+            failures = total - successes
+            return {
+                "total_reflections": total,
+                "successes": successes,
+                "failures": failures,
+                "success_rate": f"{successes/total*100:.1f}%" if total > 0 else "N/A",
+            }
+
+    # File fallback
     ensure_dir()
     total = 0
     successes = 0
-    failures = 0
-
     for filepath in REFLECTIONS_DIR.glob("*.json"):
         try:
             with open(filepath) as f:
@@ -119,38 +203,42 @@ def get_stats() -> dict:
             total += 1
             if ref.get("outcome") == "success":
                 successes += 1
-            else:
-                failures += 1
         except Exception:
             continue
 
     return {
         "total_reflections": total,
         "successes": successes,
-        "failures": failures,
+        "failures": total - successes,
         "success_rate": f"{successes/total*100:.1f}%" if total > 0 else "N/A",
     }
 
 
 def list_reflections(project: str = None, limit: int = 50) -> list:
     """List all reflections, optionally filtered by project."""
+    if _use_supabase():
+        sb = _sb()
+        query = "order=created_at.desc"
+        if project:
+            query = f"project=eq.{project}&{query}"
+        rows = sb["select"]("reflections", query, limit=limit)
+        if rows is not None:
+            return rows
+
+    # File fallback
     ensure_dir()
     results = []
-
     for filepath in sorted(REFLECTIONS_DIR.glob("*.json"), reverse=True):
         try:
             with open(filepath) as f:
                 ref = json.load(f)
         except (json.JSONDecodeError, IOError):
             continue
-
         if project and ref.get("project") != project:
             continue
-
         results.append(ref)
         if len(results) >= limit:
             break
-
     return results
 
 

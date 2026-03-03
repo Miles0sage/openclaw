@@ -83,13 +83,34 @@ class _MetricsStub:
 
 metrics = _MetricsStub()
 
-# Inline memory manager with JSONL persistence
+# Inline memory manager — Supabase-first, JSONL fallback
 class _MemoryManagerStub:
     def __init__(self):
         self._file = os.path.join(DATA_DIR, "memories.jsonl")
         os.makedirs(os.path.dirname(self._file), exist_ok=True)
+        self._sb = None
+
+    def _get_sb(self):
+        if self._sb is None:
+            try:
+                from supabase_client import table_insert, table_select, table_update, is_connected
+                self._sb = {"insert": table_insert, "select": table_select, "update": table_update, "connected": is_connected}
+            except Exception:
+                self._sb = False
+        return self._sb if self._sb else None
+
+    def _use_sb(self) -> bool:
+        try:
+            sb = self._get_sb()
+            return sb is not None and sb["connected"]()
+        except Exception:
+            return False
 
     def count(self) -> int:
+        if self._use_sb():
+            rows = self._get_sb()["select"]("memories", "select=id", limit=5000)
+            if rows is not None:
+                return len(rows)
         if not os.path.exists(self._file): return 0
         with open(self._file) as f:
             return sum(1 for line in f if line.strip())
@@ -102,6 +123,10 @@ class _MemoryManagerStub:
         pass
 
     def get_recent(self, limit: int = 20) -> list:
+        if self._use_sb():
+            rows = self._get_sb()["select"]("memories", "order=created_at.desc", limit=limit)
+            if rows is not None:
+                return rows
         if not os.path.exists(self._file): return []
         memories = []
         with open(self._file) as f:
@@ -113,15 +138,36 @@ class _MemoryManagerStub:
         return sorted(memories, key=lambda m: m.get("timestamp", ""), reverse=True)[:limit]
 
     def get_by_tag(self, tag: str) -> list:
+        if self._use_sb():
+            rows = self._get_sb()["select"]("memories", f"tags=cs.{{{tag}}}&order=created_at.desc", limit=100)
+            if rows is not None:
+                return rows
         return [m for m in self.get_recent(limit=100) if tag in m.get("tags", [])]
 
     def add_memory(self, content: str, tags: list = None, source: str = "manual", importance: int = 5, remind_at: str = None) -> str:
         import uuid
         mem_id = str(uuid.uuid4())[:8]
+        now = datetime.now(timezone.utc).isoformat()
+
+        if self._use_sb():
+            row = {
+                "content": content,
+                "importance": importance,
+                "tags": tags or [],
+                "created_at": now,
+            }
+            if remind_at:
+                row["remind_at"] = remind_at
+            result = self._get_sb()["insert"]("memories", row)
+            if result:
+                db_id = result[0].get("id", mem_id) if isinstance(result, list) else mem_id
+                return str(db_id)
+
+        # JSONL fallback
         record = {
             "id": mem_id, "content": content, "tags": tags or [],
             "source": source, "importance": importance,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": now
         }
         if remind_at:
             record["remind_at"] = remind_at
@@ -133,6 +179,14 @@ class _MemoryManagerStub:
     def get_due_reminders(self) -> list:
         """Get memories with remind_at in the past that haven't been reminded yet."""
         now = datetime.now(timezone.utc).isoformat()
+        if self._use_sb():
+            rows = self._get_sb()["select"](
+                "memories",
+                f"remind_at=not.is.null&reminded=eq.false&remind_at=lte.{now}&order=remind_at.asc",
+                limit=50,
+            )
+            if rows is not None:
+                return rows
         due = []
         for m in self.get_recent(limit=200):
             if m.get("remind_at") and not m.get("reminded", True):
@@ -141,7 +195,12 @@ class _MemoryManagerStub:
         return due
 
     def mark_reminded(self, mem_id: str):
-        """Mark a reminder as sent by rewriting the JSONL file."""
+        """Mark a reminder as sent."""
+        if self._use_sb():
+            result = self._get_sb()["update"]("memories", f"id=eq.{mem_id}", {"reminded": True})
+            if result:
+                return
+        # JSONL fallback
         if not os.path.exists(self._file):
             return
         lines = []

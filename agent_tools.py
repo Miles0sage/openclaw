@@ -1655,26 +1655,77 @@ def _get_events(limit: int = 10, event_type: str = None) -> str:
         return f"Error: {e}"
 
 
+def _sb_memory():
+    """Lazy import supabase_client for memory operations."""
+    try:
+        from supabase_client import table_insert, table_select, is_connected
+        return {"insert": table_insert, "select": table_select, "connected": is_connected}
+    except Exception:
+        return None
+
+
 def _save_memory(content: str, tags: list = None, importance: int = 5) -> str:
-    """Save to persistent JSONL memory store."""
+    """Save to Supabase memories table, JSONL fallback."""
     import uuid
+    mem_id = str(uuid.uuid4())[:8]
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Try Supabase first
+    try:
+        sb = _sb_memory()
+        if sb and sb["connected"]():
+            row = {
+                "content": content,
+                "importance": importance,
+                "tags": tags or [],
+                "created_at": now,
+            }
+            result = sb["insert"]("memories", row)
+            if result:
+                db_id = result[0].get("id", mem_id) if isinstance(result, list) else mem_id
+                return f"Memory saved (id={db_id}): {content[:80]}"
+    except Exception:
+        pass
+
+    # JSONL fallback
     mem_file = os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "memories.jsonl")
     os.makedirs(os.path.dirname(mem_file), exist_ok=True)
-    mem_id = str(uuid.uuid4())[:8]
     record = {"id": mem_id, "content": content, "tags": tags or [], "importance": importance,
-              "timestamp": datetime.now(timezone.utc).isoformat()}
+              "timestamp": now}
     with open(mem_file, "a") as f:
         f.write(json.dumps(record) + "\n")
     return f"Memory saved (id={mem_id}): {content[:80]}"
 
 
 def _search_memory(query: str, limit: int = 5) -> str:
-    """Search memories by keyword matching."""
+    """Search memories by keyword matching. Supabase-first, JSONL fallback."""
+    query_lower = query.lower()
+    matches = []
+
+    # Try Supabase first
+    try:
+        sb = _sb_memory()
+        if sb and sb["connected"]():
+            rows = sb["select"]("memories", "order=created_at.desc", limit=500)
+            if rows:
+                for m in rows:
+                    content_str = m.get("content", "").lower()
+                    tags_list = m.get("tags", []) or []
+                    tags_str = " ".join(tags_list).lower()
+                    if query_lower in content_str or query_lower in tags_str:
+                        matches.append(m)
+                matches.sort(key=lambda m: m.get("importance", 5), reverse=True)
+                if not matches:
+                    return f"No memories matching '{query}'"
+                lines = [f"[{m.get('id','?')}] (imp={m.get('importance',5)}) {m['content'][:100]}" for m in matches[:limit]]
+                return f"Found {len(matches)} memories:\n" + "\n".join(lines)
+    except Exception:
+        pass
+
+    # JSONL fallback
     mem_file = os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data"), "memories.jsonl")
     if not os.path.exists(mem_file):
         return "No memories found"
-    query_lower = query.lower()
-    matches = []
     with open(mem_file) as f:
         for line in f:
             line = line.strip()

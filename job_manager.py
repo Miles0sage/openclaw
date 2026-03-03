@@ -1,6 +1,9 @@
 """
 Autonomous Job Queue Manager for OpenClaw
-Manages job lifecycle: pending → analyzing → pr_created → approved → merged
+==========================================
+Manages job lifecycle: pending -> analyzing -> code_generated -> pr_ready -> done
+Primary backend: Supabase (real-time, queryable, multi-device)
+Fallback: JSONL file (if Supabase is unreachable)
 """
 
 import fcntl
@@ -9,7 +12,6 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-import subprocess
 import logging
 
 logger = logging.getLogger("job_manager")
@@ -19,34 +21,37 @@ JOBS_DIR = Path(os.path.join(DATA_DIR, "jobs"))
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
 JOBS_FILE = JOBS_DIR / "jobs.jsonl"
 
-class Job:
-    def __init__(self, project: str, task: str, priority: str = "P1"):
-        self.id = f"job-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{str(uuid.uuid4())[:8]}"
-        self.project = project
-        self.task = task
-        self.priority = priority
-        self.status = "pending"  # pending → analyzing → code_generated → pr_created → approved → merged → done
-        self.created_at = datetime.now(timezone.utc).isoformat()
-        self.pr_url = None
-        self.branch_name = None
-        self.approved_by = None
-        self.completed_at = None
-        self.analysis = {}
-        self.generated_code = {}
+# ---------------------------------------------------------------------------
+# Supabase backend
+# ---------------------------------------------------------------------------
 
-    def to_dict(self):
+def _sb():
+    """Lazy import supabase_client to avoid circular imports."""
+    try:
+        from supabase_client import table_insert, table_select, table_update, table_delete, is_connected
         return {
-            "id": self.id,
-            "project": self.project,
-            "task": self.task,
-            "priority": self.priority,
-            "status": self.status,
-            "created_at": self.created_at,
-            "pr_url": self.pr_url,
-            "branch_name": self.branch_name,
-            "approved_by": self.approved_by,
-            "completed_at": self.completed_at,
+            "insert": table_insert,
+            "select": table_select,
+            "update": table_update,
+            "delete": table_delete,
+            "connected": is_connected,
         }
+    except Exception:
+        return None
+
+
+def _use_supabase() -> bool:
+    """Check if Supabase is available and connected."""
+    try:
+        sb = _sb()
+        return sb is not None and sb["connected"]()
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# JSONL fallback (kept for resilience)
+# ---------------------------------------------------------------------------
 
 def _locked_read_jobs() -> list:
     """Read all jobs from JSONL with file locking."""
@@ -81,6 +86,10 @@ def _locked_append_job(job_dict: dict):
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
 VALID_PRIORITIES = {"P0", "P1", "P2", "P3"}
 VALID_PROJECTS = {
     "barber-crm", "openclaw", "delhi-palace",
@@ -94,13 +103,7 @@ class JobValidationError(ValueError):
 
 
 def validate_job(project: str, task: str, priority: str = "P1") -> None:
-    """Validate job inputs. Raises JobValidationError on bad input.
-
-    Checks:
-        - task is non-empty and <= 5000 chars
-        - priority is one of P0-P3
-        - project is a known project name
-    """
+    """Validate job inputs. Raises JobValidationError on bad input."""
     if not task or not task.strip():
         raise JobValidationError("Task description cannot be empty")
     if len(task) > 5000:
@@ -113,16 +116,80 @@ def validate_job(project: str, task: str, priority: str = "P1") -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Job model
+# ---------------------------------------------------------------------------
+
+class Job:
+    def __init__(self, project: str, task: str, priority: str = "P1"):
+        self.id = f"job-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{str(uuid.uuid4())[:8]}"
+        self.project = project
+        self.task = task
+        self.priority = priority
+        self.status = "pending"
+        self.created_at = datetime.now(timezone.utc).isoformat()
+        self.pr_url = None
+        self.branch_name = None
+        self.approved_by = None
+        self.completed_at = None
+        self.analysis = {}
+        self.generated_code = {}
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "project": self.project,
+            "task": self.task,
+            "priority": self.priority,
+            "status": self.status,
+            "created_at": self.created_at,
+            "pr_url": self.pr_url,
+            "branch_name": self.branch_name,
+            "approved_by": self.approved_by,
+            "completed_at": self.completed_at,
+        }
+
+
+# ---------------------------------------------------------------------------
+# CRUD operations (Supabase-first, JSONL fallback)
+# ---------------------------------------------------------------------------
+
 def create_job(project: str, task: str, priority: str = "P1") -> Job:
-    """Create a new job and add to queue. Validates inputs first."""
+    """Create a new job and add to queue."""
     validate_job(project, task, priority)
     job = Job(project, task, priority)
-    _locked_append_job(job.to_dict())
-    logger.info(f"Job created: {job.id} - {task}")
+    job_dict = job.to_dict()
+
+    if _use_supabase():
+        sb = _sb()
+        result = sb["insert"]("jobs", {
+            "id": job_dict["id"],
+            "project": job_dict["project"],
+            "task": job_dict["task"],
+            "priority": job_dict["priority"],
+            "status": job_dict["status"],
+            "created_at": job_dict["created_at"],
+        })
+        if result:
+            logger.info(f"Job created (Supabase): {job.id}")
+        else:
+            logger.warning(f"Supabase insert failed, falling back to JSONL")
+            _locked_append_job(job_dict)
+    else:
+        _locked_append_job(job_dict)
+        logger.info(f"Job created (JSONL): {job.id}")
+
     return job
 
+
 def get_job(job_id: str) -> dict:
-    """Get job by ID"""
+    """Get job by ID."""
+    if _use_supabase():
+        sb = _sb()
+        rows = sb["select"]("jobs", f"id=eq.{job_id}", limit=1)
+        if rows:
+            return rows[0]
+    # Fallback
     for job in _locked_read_jobs():
         if job["id"] == job_id:
             return job
@@ -130,7 +197,17 @@ def get_job(job_id: str) -> dict:
 
 
 def get_pending_jobs(limit: int = 10):
-    """Get pending jobs up to the given limit (default 10)."""
+    """Get pending jobs, ordered by priority then creation time."""
+    if _use_supabase():
+        sb = _sb()
+        rows = sb["select"](
+            "jobs",
+            "status=eq.pending&order=priority.asc,created_at.asc",
+            limit=limit,
+        )
+        if rows is not None:
+            return rows
+    # Fallback
     jobs = []
     for job in _locked_read_jobs():
         if job["status"] == "pending":
@@ -141,45 +218,72 @@ def get_pending_jobs(limit: int = 10):
 
 
 def update_job_status(job_id: str, status: str, **kwargs):
-    """Update job status with file locking to prevent corruption."""
+    """Update job status."""
+    now = datetime.now(timezone.utc).isoformat()
+    updates = {"status": status, "updated_at": now}
+    updates.update(kwargs)
+
+    if status in ("approved", "merged", "done"):
+        updates["completed_at"] = now
+    if status == "analyzing":
+        updates["started_at"] = now
+
+    if _use_supabase():
+        sb = _sb()
+        result = sb["update"]("jobs", f"id=eq.{job_id}", updates)
+        if result:
+            logger.info(f"Job {job_id} -> {status} (Supabase)")
+            return
+        logger.warning(f"Supabase update failed for {job_id}, falling back to JSONL")
+
+    # JSONL fallback
     if not JOBS_FILE.exists():
         return
-
-    # Exclusive lock for read-modify-write
     with open(JOBS_FILE, "r+") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         try:
             jobs = [json.loads(line) for line in f if line.strip()]
             for job in jobs:
                 if job["id"] == job_id:
-                    job["status"] = status
-                    for key, value in kwargs.items():
-                        job[key] = value
-                    if status in ["approved", "merged", "done"]:
-                        job["completed_at"] = datetime.now(timezone.utc).isoformat()
+                    job.update(updates)
             f.seek(0)
             f.truncate()
             for job in jobs:
                 f.write(json.dumps(job) + "\n")
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
-
-    logger.info(f"Job {job_id} -> {status}")
+    logger.info(f"Job {job_id} -> {status} (JSONL)")
 
 
 def list_jobs(status: str = "all"):
-    """List jobs, optionally filtered by status.
+    """List jobs, optionally filtered by status."""
+    if _use_supabase():
+        sb = _sb()
+        query = "order=created_at.desc"
+        if status != "all":
+            query = f"status=eq.{status}&{query}"
+        rows = sb["select"]("jobs", query, limit=200)
+        if rows is not None:
+            return rows
 
-    Args:
-        status: Filter by job status (e.g. 'pending', 'done', 'analyzing').
-                Use 'all' to return everything (default).
-    """
+    # Fallback
     jobs = _locked_read_jobs()
     if status != "all":
         jobs = [j for j in jobs if j.get("status") == status]
     return jobs
 
+
+def set_kill_flag(job_id: str) -> bool:
+    """Set kill flag on a job (used by kill_job MCP tool)."""
+    update_job_status(job_id, "killed_manual")
+    return True
+
+
 if __name__ == "__main__":
-    # Test
-    job = create_job("barber-crm", "Fix RLS vulnerabilities", "P0")
+    job = create_job("openclaw", "Test Supabase job manager", "P3")
     print(f"Created job: {job.id}")
+    fetched = get_job(job.id)
+    print(f"Fetched: {fetched['id']} status={fetched['status']}")
+    update_job_status(job.id, "done")
+    fetched = get_job(job.id)
+    print(f"After update: status={fetched['status']}")
