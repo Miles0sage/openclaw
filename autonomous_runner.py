@@ -600,10 +600,14 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                         messages=messages[-10:],
                     )
 
-                # Rolling window: keep system prompt (messages[0]) + last 19 turns
-                # to prevent unbounded message growth in long tool loops
+                # Rolling window: keep original prompt + last N turns.
+                # Must preserve assistant/user alternation — start tail from
+                # an assistant message so tool_use precedes tool_result.
                 if len(messages) > 20:
-                    messages = [messages[0]] + messages[-19:]
+                    tail = messages[-18:]  # even count = complete pairs
+                    if tail and tail[0].get("role") == "user":
+                        tail = tail[1:]  # drop orphaned tool_result
+                    messages = [messages[0]] + tail
 
             else:
                 # Anthropic tool-use path (original)
@@ -727,10 +731,14 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                         messages=messages[-10:],
                     )
 
-                # Rolling window: keep system prompt (messages[0]) + last 19 turns
-                # to prevent unbounded message growth in long tool loops
+                # Rolling window: keep original prompt + last N turns.
+                # Must preserve assistant/user alternation — start tail from
+                # an assistant message so tool_use precedes tool_result.
                 if len(messages) > 20:
-                    messages = [messages[0]] + messages[-19:]
+                    tail = messages[-18:]  # even count = complete pairs
+                    if tail and tail[0].get("role") == "user":
+                        tail = tail[1:]  # drop orphaned tool_result
+                    messages = [messages[0]] + tail
 
         return {
             "text": final_text,
