@@ -72,6 +72,18 @@ _DEVOPS_PROMPT = (
     "Check Vercel deployment status. Manage env vars safely — never commit secrets."
 )
 
+_CODE_REVIEW_PROMPT = (
+    "You are a Code Review specialist. Read all changed files thoroughly before "
+    "commenting. Flag logic errors, missing edge cases, and architectural violations. "
+    "Provide actionable feedback with concrete fix suggestions. Don't nitpick style."
+)
+
+_DEBUGGING_PROMPT = (
+    "You are a Debugging specialist. Build a mental model of the system first. "
+    "Identify what changed recently. Trace the execution path. Narrow down the root "
+    "cause systematically — don't guess. Check logs, stack traces, and state transitions."
+)
+
 # ---------------------------------------------------------------------------
 # Verify instructions per department
 # ---------------------------------------------------------------------------
@@ -87,6 +99,8 @@ _BACKEND_VERIFY = (
 _SECURITY_VERIFY = "List all findings with severity ratings."
 _DATA_VERIFY = "Verify queries return expected row counts. Check RLS policies."
 _DEVOPS_VERIFY = "Check deployment status. Verify env vars are set."
+_CODE_REVIEW_VERIFY = "Verify all flagged issues have severity ratings and fix suggestions."
+_DEBUGGING_VERIFY = "Verify the root cause was identified and the fix addresses it without regressions."
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +175,30 @@ DEPARTMENTS: dict[str, DepartmentConfig] = {
         system_prompt=_DEVOPS_PROMPT,
         verify_instruction=_DEVOPS_VERIFY,
     ),
+    "code_review": DepartmentConfig(
+        name="code_review",
+        primary_agent="code_reviewer",
+        fallback_agent="elite_coder",
+        keywords=[
+            "review", "pr", "pull request", "audit", "code smell", "technical debt",
+            "code quality", "lint", "best practice", "pattern", "anti-pattern",
+        ],
+        file_patterns=["**/*.ts", "**/*.tsx", "**/*.py", "**/*.js"],
+        system_prompt=_CODE_REVIEW_PROMPT,
+        verify_instruction=_CODE_REVIEW_VERIFY,
+    ),
+    "debugging": DepartmentConfig(
+        name="debugging",
+        primary_agent="debugger",
+        fallback_agent="elite_coder",
+        keywords=[
+            "bug", "error", "crash", "race condition", "leak", "stack trace",
+            "debug", "broken", "failing", "exception", "traceback", "segfault",
+        ],
+        file_patterns=["**/*.log", "**/*.py", "**/*.ts"],
+        system_prompt=_DEBUGGING_PROMPT,
+        verify_instruction=_DEBUGGING_VERIFY,
+    ),
 }
 
 # Reverse mapping: agent_pref -> department name
@@ -170,6 +208,10 @@ AGENT_TO_DEPARTMENT = {
     "hacker_agent": "security",
     "database_agent": "data",
     "project_manager": "devops",
+    "code_reviewer": "code_review",
+    "architecture_designer": "backend",  # no dedicated dept, routes through backend
+    "test_generator": "backend",          # same — tests route through backend
+    "debugger": "debugging",
 }
 
 
@@ -417,6 +459,36 @@ def load_devops_knowledge(project: str) -> str:
     return "\n\n".join(parts)
 
 
+def load_code_review_knowledge(project: str) -> str:
+    """Load code review context for a project."""
+    root = PROJECT_ROOTS.get(project, "")
+    if not root:
+        return ""
+    parts = []
+    claude_md = _read_claude_md(root)
+    if claude_md:
+        parts.append(f"PROJECT GUIDE:\n{claude_md}")
+    git_log = _get_git_log(root, count=10)
+    if git_log:
+        parts.append(git_log)
+    return "\n\n".join(parts)
+
+
+def load_debugging_knowledge(project: str) -> str:
+    """Load debugging context for a project."""
+    root = PROJECT_ROOTS.get(project, "")
+    if not root:
+        return ""
+    parts = []
+    claude_md = _read_claude_md(root)
+    if claude_md:
+        parts.append(f"PROJECT GUIDE:\n{claude_md}")
+    git_log = _get_git_log(root, count=5)
+    if git_log:
+        parts.append(git_log)
+    return "\n\n".join(parts)
+
+
 # Map department name -> knowledge loader function
 KNOWLEDGE_LOADERS = {
     "frontend": load_frontend_knowledge,
@@ -424,6 +496,8 @@ KNOWLEDGE_LOADERS = {
     "security": load_security_knowledge,
     "data": load_data_knowledge,
     "devops": load_devops_knowledge,
+    "code_review": load_code_review_knowledge,
+    "debugging": load_debugging_knowledge,
 }
 
 

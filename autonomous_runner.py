@@ -36,7 +36,20 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from agent_tools import execute_tool, AGENT_TOOLS
+from agent_tools import execute_tool as _raw_execute_tool, AGENT_TOOLS
+try:
+    from tool_router import get_registry as _get_tool_registry, PhaseViolationError
+except ImportError:
+    _get_tool_registry = None
+    PhaseViolationError = None
+
+
+def _execute_tool_routed(tool_name: str, tool_input: dict, phase: str = "", job_id: str = "") -> str:
+    """Execute tool through ToolRegistry (phase-gated + audited) with fallback."""
+    if _get_tool_registry is not None:
+        registry = _get_tool_registry()
+        return registry.execute_tool(tool_name, tool_input, phase=phase, job_id=job_id)
+    return _raw_execute_tool(tool_name, tool_input)
 from alerts import send_telegram
 from blackboard import write as blackboard_write, get_context_for_prompt as blackboard_context, cleanup_expired as blackboard_cleanup
 from checkpoint import save_checkpoint, get_latest_checkpoint, clear_checkpoints
@@ -67,6 +80,10 @@ MAX_PLAN_STEPS = 10               # safety cap on plan step count (fewer = less 
 # our manual tool-use loop. Benefits: native context compaction, better tool handling,
 # hooks support, 80.9% SWE-bench accuracy. Toggle off with OPENCLAW_USE_SDK=0.
 USE_SDK = os.environ.get("OPENCLAW_USE_SDK", "1") == "1"
+
+# OpenCode executor — uses Go-based OpenCode CLI for ~90% cost savings.
+# Falls back to Agent SDK on failure. Toggle off with OPENCLAW_USE_OPENCODE=0.
+USE_OPENCODE = os.environ.get("OPENCLAW_USE_OPENCODE", "1") == "1"
 
 logger = logging.getLogger("autonomous_runner")
 
@@ -451,18 +468,24 @@ def _merge_worktree_changes(job_id: str, project_root: str) -> bool:
 def _filter_tools_for_phase(phase: Phase, agent_key: str = None) -> list:
     """Return the AGENT_TOOLS definitions filtered for a given phase.
 
+    Uses ToolRegistry for phase gating (canonical source of truth).
     If agent_key is provided, further restricts to the agent's tool profile
     (intersection of phase tools and agent allowlist).
     """
-    allowed = {
-        Phase.RESEARCH: RESEARCH_TOOLS,
-        Phase.PLAN:     PLAN_TOOLS,
-        Phase.EXECUTE:  EXECUTE_TOOLS,
-        Phase.VERIFY:   VERIFY_TOOLS,
-        Phase.DELIVER:  DELIVER_TOOLS,
-    }.get(phase, EXECUTE_TOOLS)
-
-    phase_tools = [t for t in AGENT_TOOLS if t["name"] in allowed]
+    try:
+        from tool_router import get_registry
+        registry = get_registry()
+        phase_tools = registry.get_tools_for_phase(phase.value)
+    except ImportError:
+        # Fallback to inline whitelists if tool_router not available
+        allowed = {
+            Phase.RESEARCH: RESEARCH_TOOLS,
+            Phase.PLAN:     PLAN_TOOLS,
+            Phase.EXECUTE:  EXECUTE_TOOLS,
+            Phase.VERIFY:   VERIFY_TOOLS,
+            Phase.DELIVER:  DELIVER_TOOLS,
+        }.get(phase, EXECUTE_TOOLS)
+        phase_tools = [t for t in AGENT_TOOLS if t["name"] in allowed]
 
     # Apply agent-specific tool profile if available
     if agent_key:
@@ -514,6 +537,11 @@ def _select_agent_for_job(job: dict) -> tuple[str, str]:
     task_lower = job.get("task", "").lower()
     complex_kw = ["refactor", "architecture", "multi-file", "rewrite", "overhaul", "redesign"]
     is_complex = any(kw in task_lower for kw in complex_kw)
+
+    # Special routing for test generation tasks
+    test_kw = ["test", "tests", "testing", "coverage", "spec", "e2e", "unit test"]
+    if any(kw in task_lower for kw in test_kw) and dept_name in ("frontend", "backend"):
+        return "test_generator", dept_name
 
     if is_complex and dept.fallback_agent:
         return dept.fallback_agent, dept_name
@@ -723,6 +751,48 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
     # write tool calls as prose/code in their text response, which never executes.
     # Model selection: P3 -> Haiku (cheap), P0/P1/P2 -> Sonnet (better quality).
     if tools:
+        # --- OpenCode path: cheap execution via OpenCode CLI (~90% savings) ---
+        if USE_OPENCODE:
+            try:
+                from opencode_executor import execute_with_fallback
+
+                # Build system prompt with department context
+                oc_system = ""
+                if department and department in DEPARTMENTS:
+                    dept = DEPARTMENTS[department]
+                    oc_system = dept.system_prompt
+                else:
+                    oc_system = (
+                        "You are an autonomous AI agent executing a task step-by-step. "
+                        "Read/write files, run shell commands, and complete the task."
+                    )
+
+                # Determine workspace
+                oc_workspace = ""
+                ws_match = re.search(r"WORKSPACE DIRECTORY[^:]*:\s*(\S+)", prompt)
+                if ws_match and os.path.isdir(ws_match.group(1)):
+                    oc_workspace = ws_match.group(1)
+                elif job_id:
+                    job_run_dir = JOB_RUNS_DIR / job_id / "workspace"
+                    if job_run_dir.exists():
+                        oc_workspace = str(job_run_dir)
+
+                result = await execute_with_fallback(
+                    prompt=prompt,
+                    workspace=oc_workspace or "/root/openclaw",
+                    job_id=job_id,
+                    phase=phase,
+                    priority=priority,
+                    guardrails=guardrails,
+                    system_prompt=oc_system,
+                )
+                return result
+
+            except ImportError:
+                logger.warning("opencode_executor not available — falling back to SDK/legacy")
+            except Exception as oc_err:
+                logger.warning(f"OpenCode path failed for {job_id}/{phase}: {oc_err} — trying SDK")
+
         # --- SDK path: use Claude Agent SDK for tool execution when enabled ---
         if USE_SDK:
             try:
@@ -921,7 +991,9 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
 
                     _log_phase(job_id, phase, {"event": "tool_call", "tool": tool_name, "input": tool_input})
 
-                    result_str = await loop.run_in_executor(None, execute_tool, tool_name, tool_input)
+                    result_str = await loop.run_in_executor(
+                        None, _execute_tool_routed, tool_name, tool_input, phase, job_id
+                    )
 
                     all_tool_calls.append({"tool": tool_name, "input": tool_input, "result": result_str[:2000]})
                     _log_phase(job_id, phase, {"event": "tool_result", "tool": tool_name, "result": result_str[:500]})
@@ -1024,7 +1096,7 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
 
                     # Run tool in executor (some tools do subprocess/IO)
                     result_str = await loop.run_in_executor(
-                        None, execute_tool, tool_name, tool_input
+                        None, _execute_tool_routed, tool_name, tool_input, phase, job_id
                     )
 
                     all_tool_calls.append({
@@ -1930,7 +2002,7 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
                 f"Auto-deploying job {progress.job_id} to Vercel from {ws_path}"
             )
             raw_deploy = await asyncio.get_running_loop().run_in_executor(
-                None, execute_tool, "vercel_deploy", {
+                None, _execute_tool_routed, "vercel_deploy", {
                     "action": "deploy",
                     "project_path": str(ws_path),
                 }
