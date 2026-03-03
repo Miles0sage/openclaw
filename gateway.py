@@ -337,7 +337,7 @@ load_dotenv()
 # Slack Configuration
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "")
 SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
-SLACK_REPORT_CHANNEL = os.getenv("SLACK_REPORT_CHANNEL", "#general")
+SLACK_REPORT_CHANNEL = os.getenv("SLACK_REPORT_CHANNEL", "C0AFE4QHKH7")
 
 # Setup logging
 _LOG_LEVEL = os.getenv("OPENCLAW_LOG_LEVEL", "INFO").upper()

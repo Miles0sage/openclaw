@@ -37,17 +37,9 @@ from pathlib import Path
 from typing import Optional
 
 from agent_tools import execute_tool as _raw_execute_tool, AGENT_TOOLS
-try:
-    from tool_router import get_registry as _get_tool_registry, PhaseViolationError
-except ImportError:
-    _get_tool_registry = None
-    PhaseViolationError = None
+from tool_router import get_registry as _get_tool_registry, PhaseViolationError
 
-try:
-    from ide_session import create_session, save_session, load_session, delete_session
-    HAS_IDE_SESSION = True
-except ImportError:
-    HAS_IDE_SESSION = False
+from ide_session import create_session, save_session, load_session, delete_session
 
 try:
     from repo_map import generate_compact_map
@@ -86,6 +78,7 @@ DEFAULT_MAX_RETRIES = 3           # retries per phase on failure
 DEFAULT_BUDGET_LIMIT_USD = 5.0    # per-job cost cap (legacy fallback — guardrails enforce priority-based caps)
 MAX_TOOL_ITERATIONS = 15          # safety cap on agent tool loops per step
 TOOL_NUDGE_THRESHOLD = 10         # after this many iterations, nudge agent to finish up
+LOOP_DETECT_THRESHOLD = 3         # same tool+args called this many times → force break
 MAX_PLAN_STEPS = 10               # safety cap on plan step count (fewer = less iteration burn)
 
 # Agent SDK integration — uses Claude Code's native tool execution engine instead of
@@ -96,7 +89,7 @@ USE_SDK = os.environ.get("OPENCLAW_USE_SDK", "1") == "1"
 # Oz executor — uses Warp Oz CLI for multi-model orchestration (GPT-5.2, Claude 4.6, Gemini 3 Pro).
 # Auto-selects best model per task. Falls back to OpenCode/SDK on failure.
 # Toggle off with OPENCLAW_USE_OZ=0.
-USE_OZ = os.environ.get("OPENCLAW_USE_OZ", "0") == "1"  # Disabled: needs WARP_API_KEY
+USE_OZ = os.environ.get("OPENCLAW_USE_OZ", "1") == "1"  # Warp cloud agents (run-cloud)
 
 # OpenCode executor — uses Go-based OpenCode CLI for ~90% cost savings.
 # Falls back to Agent SDK on failure. Toggle off with OPENCLAW_USE_OPENCODE=0.
@@ -522,21 +515,9 @@ def _filter_tools_for_phase(phase: Phase, agent_key: str = None, compact: bool =
     (intersection of phase tools and agent allowlist).
     If compact=True, shortens descriptions to save tokens.
     """
-    try:
-        from tool_router import get_registry
-        registry = get_registry()
-        phase_tools = registry.get_tools_for_phase(phase.value)
-    except ImportError:
-        # Fallback to inline whitelists if tool_router not available
-        allowed = {
-            Phase.RESEARCH:    RESEARCH_TOOLS,
-            Phase.PLAN:        PLAN_TOOLS,
-            Phase.EXECUTE:     EXECUTE_TOOLS,
-            Phase.CODE_REVIEW: CODE_REVIEW_TOOLS,
-            Phase.VERIFY:      VERIFY_TOOLS,
-            Phase.DELIVER:     DELIVER_TOOLS,
-        }.get(phase, EXECUTE_TOOLS)
-        phase_tools = [t for t in AGENT_TOOLS if t["name"] in allowed]
+    from tool_router import get_registry
+    registry = get_registry()
+    phase_tools = registry.get_tools_for_phase(phase.value)
 
     # Apply agent-specific tool profile if available
     if agent_key:
@@ -997,6 +978,11 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
         iterations = 0
         use_gemini = effective_provider == "gemini"
 
+        # Loop detection: track (tool_name, input_hash) → count.
+        # If same call repeated LOOP_DETECT_THRESHOLD times, force-break.
+        _tool_call_counts: dict[str, int] = {}
+        _loop_detected = False
+
         while iterations < MAX_TOOL_ITERATIONS:
             iterations += 1
 
@@ -1095,8 +1081,23 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
 
                     tool_results.append({"type": "tool_result", "tool_use_id": tc_id, "content": result_str})
 
+                    # --- Loop detection: track repeated tool calls ---
+                    call_sig = f"{tool_name}:{hash(str(sorted(tool_input.items()) if isinstance(tool_input, dict) else str(tool_input)))}"
+                    _tool_call_counts[call_sig] = _tool_call_counts.get(call_sig, 0) + 1
+                    if _tool_call_counts[call_sig] >= LOOP_DETECT_THRESHOLD:
+                        _loop_detected = True
+                        logger.warning(
+                            f"Loop detected for {job_id}/{phase}: {tool_name} called {_tool_call_counts[call_sig]}x with same args"
+                        )
+
                 messages.append({"role": "assistant", "content": serialized_content})
                 messages.append({"role": "user", "content": tool_results})
+
+                # Force-break on loop detection
+                if _loop_detected:
+                    logger.warning(f"Force-breaking tool loop for {job_id}/{phase} after {iterations} iterations (repeated calls detected)")
+                    final_text += "\n\n[STOPPED: Repeated tool call detected — moving to next step]"
+                    break
 
                 # Save checkpoint after successful tool execution
                 if job_id:
@@ -1212,6 +1213,15 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                         "content": result_str,
                     })
 
+                    # --- Loop detection: track repeated tool calls ---
+                    call_sig = f"{tool_name}:{hash(str(sorted(tool_input.items()) if isinstance(tool_input, dict) else str(tool_input)))}"
+                    _tool_call_counts[call_sig] = _tool_call_counts.get(call_sig, 0) + 1
+                    if _tool_call_counts[call_sig] >= LOOP_DETECT_THRESHOLD:
+                        _loop_detected = True
+                        logger.warning(
+                            f"Loop detected for {job_id}/{phase}: {tool_name} called {_tool_call_counts[call_sig]}x with same args"
+                        )
+
                 # Nudge agent to wrap up if approaching iteration limit
                 if iterations == TOOL_NUDGE_THRESHOLD and tool_results:
                     nudge = (
@@ -1237,6 +1247,12 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
 
                 messages.append({"role": "assistant", "content": serialized_content})
                 messages.append({"role": "user", "content": tool_results})
+
+                # Force-break on loop detection
+                if _loop_detected:
+                    logger.warning(f"Force-breaking tool loop for {job_id}/{phase} after {iterations} iterations (repeated calls detected)")
+                    final_text += "\n\n[STOPPED: Repeated tool call detected — moving to next step]"
+                    break
 
                 # Save checkpoint after successful tool execution
                 if job_id:
@@ -1358,6 +1374,9 @@ async def _research_phase(job: dict, agent_key: str, progress: JobProgress,
         f"2. Use glob_files and grep_search to find relevant existing code\n"
         f"3. Use file_read to examine key files\n"
         f"4. Use github_repo_info to check open issues/PRs if relevant\n\n"
+        f"STOP CONDITIONS: Stop researching when you have enough context to plan. "
+        f"Do NOT exhaustively read every file — 3-5 key files is usually enough. "
+        f"If a search returns no results, move on — don't retry with slight variations.\n\n"
         f"After researching, provide a structured summary:\n"
         f"- RELEVANT FILES: List the files that need to change or are related\n"
         f"- EXISTING PATTERNS: Key patterns/conventions in the codebase\n"
@@ -1622,6 +1641,18 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
             "a gotcha, a useful file path, an API quirk), note it at the end of your response as:\n"
             "DISCOVERY: [what you found]\n"
             "These get saved for future agent runs.\n\n"
+        )
+
+        # Pattern 4: Stop conditions to prevent iteration loops
+        prompt += (
+            "## STOP CONDITIONS\n"
+            "STOP and move on if ANY of these are true:\n"
+            "- You've tried the same approach twice without progress\n"
+            "- A file or resource doesn't exist after checking twice\n"
+            "- A command fails with the same error on retry\n"
+            "- You're reading the same files repeatedly without making changes\n"
+            "- The step is complete (don't keep polishing — move on)\n"
+            "Do NOT loop. If stuck, state what went wrong and stop.\n\n"
         )
 
         prompt += (
@@ -2091,6 +2122,8 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
         f"5. If the task was read-only (no files modified), verify the output content is accurate\n"
         f"\nIMPORTANT: Only fail verification for issues in THIS task's changes. Pre-existing issues are NOT blockers.\n"
         f"{dept_verify}\n"
+        f"STOP CONDITIONS: Run each check ONCE. Do NOT re-run tests or re-read files "
+        f"you already checked. If a test fails, note it and move on — don't try to fix it here.\n\n"
         f"Respond with a JSON object:\n"
         f'{{"passed": true/false, "summary": "...", "issues": ["issue1", "issue2"]}}\n'
         f"Do NOT include markdown fences or any text outside the JSON."
@@ -2268,7 +2301,9 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
         f"6. Send a slack message summarizing what was done\n\n"
         f"Respond with a JSON object when done:\n"
         f'{{"delivered": true, "commit_hash": "...", "pushed": true, "deployed": true/false, "summary": "..."}}\n'
-        f"Do NOT include markdown fences or any text outside the JSON."
+        f"Do NOT include markdown fences or any text outside the JSON.\n\n"
+        f"STOP CONDITIONS: Run each delivery step ONCE. If git push fails, note it and stop — "
+        f"don't retry endlessly. If there are no changes to commit, skip to sending the Slack message."
     )
 
     tools = _filter_tools_for_phase(Phase.DELIVER)
@@ -2816,10 +2851,45 @@ class AutonomousRunner:
             logger.warning("AutonomousRunner is already running")
             return
 
+        # Recover orphaned jobs from previous gateway process
+        await self._recover_orphaned_jobs()
+
         self._running = True
         self._semaphore = asyncio.Semaphore(self.max_concurrent)
         self._poll_task = asyncio.create_task(self._poll_loop())
         logger.info("AutonomousRunner STARTED — polling for jobs")
+
+    async def _recover_orphaned_jobs(self):
+        """Reset jobs stuck in intermediate statuses back to pending.
+
+        When the gateway restarts, in-flight jobs are orphaned in statuses
+        like 'analyzing', 'code_generated', or 'running'. Reset them so
+        the poll loop can pick them up again.
+        """
+        orphan_statuses = ["running", "analyzing", "code_generated"]  # running is primary; legacy statuses for backwards compat
+        try:
+            from supabase_client import table_select, table_update
+            for status in orphan_statuses:
+                rows = await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda s=status: table_select("jobs", f"status=eq.{s}", limit=50),
+                )
+                for row in rows:
+                    job_id = row["id"]
+                    logger.warning(
+                        f"Recovering orphaned job {job_id} "
+                        f"(was '{status}' → resetting to 'pending')"
+                    )
+                    await asyncio.get_running_loop().run_in_executor(
+                        None,
+                        lambda jid=job_id: table_update(
+                            "jobs", f"id=eq.{jid}",
+                            {"status": "pending", "started_at": None, "error": None},
+                        ),
+                    )
+            logger.info("Orphan recovery complete")
+        except Exception as e:
+            logger.error(f"Orphan recovery failed (non-fatal): {e}")
 
     def notify_new_job(self):
         """Signal the poll loop that a new job is available, waking it immediately."""
@@ -3035,16 +3105,15 @@ class AutonomousRunner:
         _save_progress(progress)
 
         # Update job status to running
-        update_job_status(job_id, "analyzing")
+        update_job_status(job_id, "running")
 
         # Initialize IDE session for context tracking across phases
         ide_session = None
-        if HAS_IDE_SESSION:
-            try:
-                ide_session = load_session(job_id) or create_session(job_id, project, str(workspace))
-                logger.info(f"Job {job_id}: IDE session {'resumed' if ide_session.updated_at != ide_session.created_at else 'created'}")
-            except Exception as sess_err:
-                logger.warning(f"Job {job_id}: IDE session init failed: {sess_err}")
+        try:
+            ide_session = load_session(job_id) or create_session(job_id, project, str(workspace))
+            logger.info(f"Job {job_id}: IDE session {'resumed' if ide_session.updated_at != ide_session.created_at else 'created'}")
+        except Exception as sess_err:
+            logger.warning(f"Job {job_id}: IDE session init failed: {sess_err}")
 
         # Generate repo-map for project context (saves agents 10-15 min exploration)
         if HAS_REPO_MAP:
@@ -3169,7 +3238,6 @@ class AutonomousRunner:
                 save_session(ide_session)
             research_for_execute = _trim_context(research, max_tokens=1500)
             if not _should_skip("execute"):
-                update_job_status(job_id, "code_generated")
                 exec_results = await self._run_phase_with_retry(
                     "execute",
                     lambda: _execute_phase(job, agent_key, plan, research_for_execute, progress, guardrails=guardrails, department=department),
