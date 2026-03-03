@@ -156,8 +156,10 @@ class TmuxSpawner:
         elif not work_dir:
             work_dir = DEFAULT_REPO
 
-        # Escape prompt for shell (write to temp file to avoid escaping nightmares)
-        prompt_file = f"/tmp/openclaw-prompt-{job_id}.txt"
+        # Escape prompt for shell (write to file to avoid escaping nightmares)
+        agent_outputs_dir = "/root/openclaw/data/agent_outputs"
+        os.makedirs(agent_outputs_dir, exist_ok=True)
+        prompt_file = f"{agent_outputs_dir}/openclaw-prompt-{job_id}.txt"
         with open(prompt_file, "w") as f:
             f.write(prompt)
 
@@ -165,8 +167,8 @@ class TmuxSpawner:
         # When Claude hits --max-turns, it exits with code 1. Instead of
         # treating this as failure, we continue where it left off (up to
         # MAX_CONTINUATIONS times). This lets complex tasks run 150+ turns.
-        script_file = f"/tmp/openclaw-agent-{job_id}.sh"
-        output_file = f"/tmp/openclaw-output-{job_id}.txt"
+        script_file = f"{agent_outputs_dir}/openclaw-agent-{job_id}.sh"
+        output_file = f"{agent_outputs_dir}/openclaw-output-{job_id}.txt"
         max_turns = 30  # per continuation chunk
         max_continuations = 5  # total attempts = max_turns * max_continuations = 150 turns
         with open(script_file, "w") as sf:
@@ -178,6 +180,13 @@ class TmuxSpawner:
             sf.write(f'echo "[AGENT_START] $(date)" >> {LOG_FILE}\n')
             sf.write(f'echo "Agent {job_id} starting in {work_dir}..."\n')
             sf.write(f'> {output_file}\n')  # truncate output file
+            # Heartbeat: background subshell writes heartbeat every 30s for watchdog
+            heartbeat_dir = "/root/openclaw/data/agent_outputs/heartbeats"
+            heartbeat_file = f"{heartbeat_dir}/heartbeat-{job_id}"
+            sf.write(f'mkdir -p {heartbeat_dir}\n')
+            sf.write(f'( while true; do date +%s > {heartbeat_file}; sleep 30; done ) &\n')
+            sf.write(f'HEARTBEAT_PID=$!\n')
+            sf.write(f'trap "kill $HEARTBEAT_PID 2>/dev/null; rm -f {heartbeat_file}" EXIT\n')
             sf.write(f'PROMPT_FILE="{prompt_file}"\n')
             sf.write(f'MAX_CONTINUATIONS={max_continuations}\n')
             sf.write(f'ATTEMPT=0\n')
@@ -358,7 +367,7 @@ class TmuxSpawner:
             return result.stdout
         # Pane gone — try the saved output file
         if job_id:
-            output_file = f"/tmp/openclaw-output-{job_id}.txt"
+            output_file = f"/root/openclaw/data/agent_outputs/openclaw-output-{job_id}.txt"
             if os.path.exists(output_file):
                 with open(output_file, "r") as f:
                     return f.read()
@@ -403,7 +412,7 @@ class TmuxSpawner:
         self._cleanup_worktree(job_id, repo_path)
 
         # Clean up prompt file
-        prompt_file = f"/tmp/openclaw-prompt-{job_id}.txt"
+        prompt_file = f"/root/openclaw/data/agent_outputs/openclaw-prompt-{job_id}.txt"
         if os.path.exists(prompt_file):
             os.remove(prompt_file)
 

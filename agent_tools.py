@@ -1154,6 +1154,37 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    # ═══════════════════════════════════════════════════════════════
+    # Blackboard shared state tools
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "blackboard_read",
+        "description": "Read a shared state entry from the blackboard. Use to check context from previous jobs (files changed, patterns, outcomes).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Entry key to read"},
+                "project": {"type": "string", "description": "Project scope (e.g. 'openclaw', 'barber-crm')"},
+            },
+            "required": ["key"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "blackboard_write",
+        "description": "Write a shared state entry to the blackboard. Use to share findings (files changed, patterns discovered, outcomes) with future jobs.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Entry key (e.g. 'auth_pattern', 'files_changed')"},
+                "value": {"type": "string", "description": "Entry value (any string, often JSON)"},
+                "project": {"type": "string", "description": "Project scope"},
+                "ttl_seconds": {"type": "integer", "description": "Auto-expire after this many seconds (0 = never, default: 604800 = 7 days)"},
+            },
+            "required": ["key", "value"],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -1397,6 +1428,31 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             if result.get("success"):
                 return f"Call initiated to {result['business_name']} ({result['phone']}). Call ID: {result['call_id']}"
             return f"Call failed: {result.get('error', 'unknown error')}"
+        # ═ Blackboard shared state
+        elif tool_name == "blackboard_read":
+            from blackboard import read as bb_read, list_by_project as bb_list
+            key = tool_input.get("key", "")
+            project = tool_input.get("project", "")
+            if key:
+                val = bb_read(key, project=project)
+                return val if val else f"No entry found for key='{key}' project='{project}'"
+            else:
+                entries = bb_list(project)
+                if not entries:
+                    return f"No blackboard entries for project='{project}'"
+                lines = [f"Blackboard entries for {project}:"]
+                for e in entries[:10]:
+                    lines.append(f"  {e['key']}: {e['value'][:200]}")
+                return "\n".join(lines)
+        elif tool_name == "blackboard_write":
+            from blackboard import write as bb_write
+            bb_write(
+                key=tool_input["key"],
+                value=tool_input["value"],
+                project=tool_input.get("project", ""),
+                ttl_seconds=tool_input.get("ttl_seconds", 604800),
+            )
+            return f"Written to blackboard: {tool_input['key']}"
         elif tool_name == "find_leads":
             import asyncio
             from lead_finder import find_leads

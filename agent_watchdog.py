@@ -32,8 +32,9 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 TMUX_SESSION = "openclaw-agents"
-OUTPUT_DIR = "/tmp"
-LOG_FILE = "/tmp/openclaw_watchdog.log"
+OUTPUT_DIR = "/root/openclaw/data/agent_outputs"
+HEARTBEAT_DIR = "/root/openclaw/data/agent_outputs/heartbeats"
+LOG_FILE = "/root/openclaw/data/agent_outputs/openclaw_watchdog.log"
 STALL_TIMEOUT_SECS = 600  # 10 minutes without output = stalled
 POLL_INTERVAL_SECS = 30   # check every 30 seconds in daemon mode
 MAX_OUTPUT_TAIL = 50       # lines to include in completion reports
@@ -104,6 +105,40 @@ def _get_job_id_from_window(name: str) -> str:
     if name.startswith("agent-"):
         return name[6:]
     return name
+
+
+def _get_heartbeat_file(job_id: str) -> Path:
+    """Get the heartbeat file path for a job."""
+    return Path(f"{HEARTBEAT_DIR}/heartbeat-{job_id}")
+
+
+def _get_heartbeat_mtime(job_id: str) -> float:
+    """Get the last modification time of a job's heartbeat file."""
+    path = _get_heartbeat_file(job_id)
+    if path.exists():
+        return path.stat().st_mtime
+    return 0.0
+
+
+def write_heartbeat(job_id: str):
+    """Write/touch a heartbeat file for a job (called by tmux_spawner)."""
+    Path(HEARTBEAT_DIR).mkdir(parents=True, exist_ok=True)
+    path = _get_heartbeat_file(job_id)
+    path.write_text(str(time.time()))
+
+
+def _check_process_alive(pid: str) -> bool:
+    """Check if a process is alive and not a zombie."""
+    try:
+        result = subprocess.run(
+            ["ps", "-p", pid, "-o", "state="],
+            capture_output=True, text=True, timeout=5,
+        )
+        state = result.stdout.strip()
+        # Z = zombie, empty = not found
+        return bool(state) and state[0] != "Z"
+    except Exception:
+        return False
 
 
 def _get_output_file(job_id: str) -> Path:
@@ -199,10 +234,18 @@ def check_agents() -> list[dict]:
         job_id = _get_job_id_from_window(w["name"])
         output_file = _get_output_file(job_id)
         output_mtime = _get_output_mtime(job_id)
-        stale_secs = now - output_mtime if output_mtime > 0 else 0
+        heartbeat_mtime = _get_heartbeat_mtime(job_id)
+        output_stale = now - output_mtime if output_mtime > 0 else 0
+        heartbeat_stale = now - heartbeat_mtime if heartbeat_mtime > 0 else 0
+
+        # Use the most recent signal (output or heartbeat)
+        stale_secs = min(output_stale, heartbeat_stale) if heartbeat_mtime > 0 else output_stale
 
         output_tail = _get_output_tail(job_id, lines=30)
         completion = _check_agent_completed(output_tail)
+
+        # Check process state
+        process_alive = _check_process_alive(w["pid"]) if not w["dead"] else False
 
         agent_info = {
             "job_id": job_id,
@@ -210,23 +253,30 @@ def check_agents() -> list[dict]:
             "pane_id": w["pane_id"],
             "pid": w["pid"],
             "dead": w["dead"],
+            "process_alive": process_alive,
             "output_file": str(output_file),
             "output_exists": output_file.exists(),
             "output_size": output_file.stat().st_size if output_file.exists() else 0,
             "stale_secs": int(stale_secs),
+            "output_stale_secs": int(output_stale),
+            "heartbeat_stale_secs": int(heartbeat_stale) if heartbeat_mtime > 0 else -1,
             "status": completion["status"],
             "success": completion["success"],
         }
 
-        # Detect stalls
+        # Improved stall detection: ALL three signals must be stale
+        # 1. Output file not updated  2. Heartbeat not updated  3. Process not active
         if (
             completion["status"] == "running"
             and not w["dead"]
-            and stale_secs > STALL_TIMEOUT_SECS
+            and output_stale > STALL_TIMEOUT_SECS
+            and (heartbeat_stale > STALL_TIMEOUT_SECS or heartbeat_mtime == 0)
+            and not process_alive
         ):
             agent_info["status"] = "stalled"
             logger.warning(
-                f"Agent {job_id} STALLED — no output for {int(stale_secs)}s "
+                f"Agent {job_id} STALLED — output stale {int(output_stale)}s, "
+                f"heartbeat stale {int(heartbeat_stale)}s, process dead "
                 f"(threshold: {STALL_TIMEOUT_SECS}s)"
             )
 
@@ -260,11 +310,32 @@ def handle_results(agents: list[dict], kill_stalled: bool = True):
         elif agent["status"] == "stalled" and kill_stalled:
             logger.warning(f"KILLING stalled agent {job_id}")
             _tmux("kill-window", "-t", f"{TMUX_SESSION}:{agent['window']}")
-            _update_job_status(job_id, "failed")
-            _send_telegram(
-                f"*Agent Stalled & Killed* `{job_id}`\n"
-                f"No output for {agent['stale_secs']}s"
-            )
+
+            # Check for checkpoint — if exists, requeue for resume; otherwise mark failed
+            has_checkpoint = False
+            try:
+                sys.path.insert(0, "/root/openclaw")
+                from checkpoint import get_latest_checkpoint
+                cp = get_latest_checkpoint(job_id)
+                has_checkpoint = cp is not None
+            except Exception:
+                pass
+
+            if has_checkpoint:
+                logger.info(f"Agent {job_id} has checkpoint — requeuing for resume")
+                _update_job_status(job_id, "pending")
+                _send_telegram(
+                    f"*Agent Stalled & Requeued* `{job_id}`\n"
+                    f"No output for {agent['stale_secs']}s\n"
+                    f"Checkpoint found — will resume from last state"
+                )
+            else:
+                _update_job_status(job_id, "failed")
+                _send_telegram(
+                    f"*Agent Stalled & Killed* `{job_id}`\n"
+                    f"No output for {agent['stale_secs']}s\n"
+                    f"No checkpoint — marked as failed"
+                )
 
         elif agent["dead"]:
             logger.info(f"Agent {job_id} pane is dead (already exited)")
@@ -293,9 +364,28 @@ def print_status():
     print()
 
 
+def _cleanup_old_outputs(max_age_days: int = 7):
+    """Delete agent output files older than max_age_days."""
+    output_dir = Path(OUTPUT_DIR)
+    if not output_dir.exists():
+        return
+    cutoff = time.time() - (max_age_days * 86400)
+    cleaned = 0
+    for f in output_dir.iterdir():
+        if f.is_file() and f.name.startswith("openclaw-") and f.stat().st_mtime < cutoff:
+            try:
+                f.unlink()
+                cleaned += 1
+            except Exception:
+                pass
+    if cleaned:
+        logger.info(f"Cleaned up {cleaned} output files older than {max_age_days} days")
+
+
 def daemon_loop():
     """Continuous monitoring loop."""
     logger.info(f"Watchdog daemon started (poll={POLL_INTERVAL_SECS}s, stall={STALL_TIMEOUT_SECS}s)")
+    cleanup_counter = 0
     while True:
         try:
             agents = check_agents()
@@ -310,6 +400,19 @@ def daemon_loop():
                 )
 
             handle_results(agents, kill_stalled=True)
+
+            # Run cleanup every ~100 polls (~50 minutes)
+            cleanup_counter += 1
+            if cleanup_counter >= 100:
+                _cleanup_old_outputs()
+                # Also clean up expired blackboard entries
+                try:
+                    sys.path.insert(0, "/root/openclaw")
+                    from blackboard import cleanup_expired
+                    cleanup_expired()
+                except Exception:
+                    pass
+                cleanup_counter = 0
 
         except Exception as e:
             logger.error(f"Watchdog error: {e}")

@@ -26,12 +26,12 @@ case "${1:-}" in
     tmux list-windows -t "$SESSION" -F "#{window_name}  #{window_activity_string}  #{pane_pid}" 2>/dev/null || echo "No agents running"
     echo ""
     echo "Active output files:"
-    ls -lt /tmp/openclaw-output-*.txt 2>/dev/null | head -10 || echo "  (none)"
+    ls -lt /root/openclaw/data/agent_outputs/openclaw-output-*.txt 2>/dev/null | head -10 || echo "  (none)"
     ;;
 
   output)
     JOB_ID="${2:?Usage: autonomous.sh output JOB_ID}"
-    OUTPUT_FILE="/tmp/openclaw-output-${JOB_ID}.txt"
+    OUTPUT_FILE="/root/openclaw/data/agent_outputs/openclaw-output-${JOB_ID}.txt"
     if [ -f "$OUTPUT_FILE" ]; then
       tail -100 "$OUTPUT_FILE"
     else
@@ -77,14 +77,14 @@ case "${1:-}" in
 
     # Generate job ID
     JOB_ID="auto-$(date +%s)-$$"
-    OUTPUT_FILE="/tmp/openclaw-output-${JOB_ID}.txt"
-    PROMPT_FILE="/tmp/openclaw-prompt-${JOB_ID}.txt"
-    SCRIPT_FILE="/tmp/openclaw-agent-${JOB_ID}.sh"
+    OUTPUT_FILE="/root/openclaw/data/agent_outputs/openclaw-output-${JOB_ID}.txt"
+    PROMPT_FILE="/root/openclaw/data/agent_outputs/openclaw-prompt-${JOB_ID}.txt"
+    SCRIPT_FILE="/root/openclaw/data/agent_outputs/openclaw-agent-${JOB_ID}.sh"
 
     # Save prompt to file (avoids shell escaping nightmares)
     echo "$PROMPT" > "$PROMPT_FILE"
 
-    # Build agent script
+    # Build agent script with continuation loop (matches tmux_spawner.py pattern)
     cat > "$SCRIPT_FILE" << 'AGENTSCRIPT'
 #!/usr/bin/env bash
 unset CLAUDECODE
@@ -92,11 +92,44 @@ unset CLAUDE_CODE_SESSION
 cd /root/openclaw
 echo "[AGENT_START] $(date)" >> LOG_PLACEHOLDER
 echo "Agent JOB_PLACEHOLDER starting..."
-CLAUDE_PLACEHOLDER -p ALLOWED_PLACEHOLDER --output-format text "$(cat PROMPT_PLACEHOLDER)" 2>&1 | tee OUTPUT_PLACEHOLDER
-EXIT_CODE=$?
+> OUTPUT_PLACEHOLDER
+
+MAX_CONTINUATIONS=5
+ATTEMPT=0
+FINAL_EXIT=1
+
+while [ $ATTEMPT -lt $MAX_CONTINUATIONS ]; do
+  ATTEMPT=$((ATTEMPT + 1))
+  echo "[CONTINUATION $ATTEMPT/$MAX_CONTINUATIONS] $(date)"
+  CLAUDE_PLACEHOLDER -p ALLOWED_PLACEHOLDER --max-turns 30 --output-format text "$(cat PROMPT_PLACEHOLDER)" 2>&1 | tee -a OUTPUT_PLACEHOLDER
+  FINAL_EXIT=$?
+
+  if [ $FINAL_EXIT -eq 0 ]; then
+    echo "[AGENT_COMPLETED] Task finished on attempt $ATTEMPT"
+    break
+  fi
+
+  if [ $FINAL_EXIT -eq 1 ] && [ $ATTEMPT -lt $MAX_CONTINUATIONS ]; then
+    echo "[TURN_LIMIT_HIT] Continuing from where we left off..."
+    PROGRESS=$(tail -80 OUTPUT_PLACEHOLDER)
+    cat > PROMPT_PLACEHOLDER << CONTINUE_EOF
+You were working on a task and hit the turn limit. Continue where you left off.
+
+Your recent progress:
+$PROGRESS
+
+Continue the task. Do NOT restart from scratch. Pick up exactly where you stopped.
+When fully done, output "TASK_COMPLETE" on the last line.
+CONTINUE_EOF
+  else
+    echo "[AGENT_FAILED] Exit code $FINAL_EXIT on attempt $ATTEMPT"
+    break
+  fi
+done
+
 echo ""
-echo "[AGENT_EXIT code=$EXIT_CODE]"
-echo "[AGENT_DONE] job=JOB_PLACEHOLDER exit=$EXIT_CODE $(date)" >> LOG_PLACEHOLDER
+echo "[AGENT_EXIT code=$FINAL_EXIT attempts=$ATTEMPT]"
+echo "[AGENT_DONE] job=JOB_PLACEHOLDER exit=$FINAL_EXIT attempts=$ATTEMPT $(date)" >> LOG_PLACEHOLDER
 echo "Agent finished. Pane stays open 5min for review..."
 sleep 300
 AGENTSCRIPT

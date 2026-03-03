@@ -17,7 +17,7 @@ Architecture:
     - Each job runs in its own asyncio Task with isolated context
     - Agents are called via call_model_for_agent() with tool_use
     - Tools are executed via execute_tool() from agent_tools.py
-    - Progress logged to /tmp/openclaw_job_runs/{job_id}/
+    - Progress logged to data/jobs/runs/{job_id}/
     - Costs tracked per phase via cost_tracker.py
 """
 
@@ -37,7 +37,9 @@ from typing import Optional
 
 from agent_tools import execute_tool, AGENT_TOOLS
 from alerts import send_telegram
-from job_manager import get_job, update_job_status, list_jobs, get_pending_jobs
+from blackboard import write as blackboard_write, get_context_for_prompt as blackboard_context, cleanup_expired as blackboard_cleanup
+from checkpoint import save_checkpoint, get_latest_checkpoint, clear_checkpoints
+from job_manager import get_job, update_job_status, list_jobs, get_pending_jobs, validate_job, JobValidationError
 from reflexion import save_reflection, search_reflections, format_reflections_for_prompt
 # Cost tracking — import from cost_tracker (single source of truth)
 from cost_tracker import (
@@ -201,16 +203,82 @@ def _save_progress(progress: JobProgress):
         json.dump(progress.to_dict(), f, indent=2)
 
 
-def _trim_context(text: str, max_chars: int = 2000) -> str:
+def _trim_context(text: str, max_tokens: int = 2000) -> str:
     """Trim context data to prevent token bloat between phases.
 
-    Keeps the first max_chars characters. If truncated, appends a note
+    Uses ~4 chars per token estimate. max_tokens is the target token budget.
+    Keeps the first (max_tokens * 4) characters. If truncated, appends a note
     so the agent knows context was trimmed.
     """
-    if not text or len(text) <= max_chars:
+    if not text:
+        return text
+    max_chars = max_tokens * 4
+    if len(text) <= max_chars:
         return text
     trimmed = text[:max_chars]
-    return trimmed + f"\n\n[... truncated from {len(text)} to {max_chars} chars to save tokens ...]"
+    return trimmed + f"\n\n[... truncated from {len(text)} to {max_chars} chars (~{max_tokens} tokens) to save tokens ...]"
+
+
+def _build_context_bundle(step: PlanStep, research: str, previous_results: list) -> str:
+    """Build a focused context bundle for the execute phase.
+
+    Instead of dumping the full research text, this:
+    1. Extracts file paths mentioned in the step description
+    2. Scores research lines by keyword relevance to the current step
+    3. Includes only the last 2 step summaries (not all)
+
+    Expected gain: 20-30% reduction in execute phase input tokens.
+    """
+    lines = []
+
+    # 1. Extract file paths from step description for focused context
+    step_desc_lower = step.description.lower()
+    step_keywords = set(step_desc_lower.split())
+    # Remove common words
+    stop_words = {"the", "a", "an", "to", "in", "of", "for", "and", "or", "is", "it", "at", "on", "by", "with", "from"}
+    step_keywords -= stop_words
+
+    # 2. Score research lines by relevance
+    if research:
+        research_lines = research.split("\n")
+        scored_lines = []
+        for line in research_lines:
+            if not line.strip():
+                continue
+            line_lower = line.lower()
+            # Score: count keyword matches + bonus for file paths
+            score = sum(1 for kw in step_keywords if kw in line_lower)
+            if "/" in line or "." in line.split()[-1] if line.split() else False:
+                score += 2  # Bonus for file paths
+            if any(marker in line_lower for marker in ["relevant", "important", "key", "pattern", "depend"]):
+                score += 1
+            scored_lines.append((score, line))
+
+        # Sort by relevance, take top lines that fit in ~4000 chars (~1000 tokens)
+        scored_lines.sort(key=lambda x: x[0], reverse=True)
+        budget = 4000
+        for score, line in scored_lines:
+            if score <= 0:
+                break
+            if budget <= 0:
+                break
+            lines.append(line)
+            budget -= len(line)
+
+    context = "\n".join(lines) if lines else research[:4000] if research else ""
+
+    # 3. Include only last 2 step summaries
+    if previous_results:
+        recent = previous_results[-2:]
+        step_summaries = "\n".join(
+            f"- Step {r['step']+1}: {r.get('summary', r.get('status', '?'))[:150]}"
+            for r in recent
+        )
+        context = f"RECENT STEPS:\n{step_summaries}\n\nRESEARCH CONTEXT:\n{context}"
+    else:
+        context = f"RESEARCH CONTEXT:\n{context}"
+
+    return context
 
 
 def _filter_tools_for_phase(phase: Phase, agent_key: str = None) -> list:
@@ -364,8 +432,13 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
     from gateway import call_model_for_agent, anthropic_client, get_agent_config
 
     agent_config = get_agent_config(agent_key)
-    provider = agent_config.get("apiProvider", "anthropic") if agent_config else "anthropic"
-    model = agent_config.get("model", "claude-opus-4-6") if agent_config else "claude-opus-4-6"
+    config_provider = agent_config.get("apiProvider", "anthropic") if agent_config else "anthropic"
+    config_model = agent_config.get("model", "claude-opus-4-6") if agent_config else "claude-opus-4-6"
+
+    # Track effective model/provider separately from agent_config so cost logging
+    # uses the actual model that made the API call, not the originally-assigned one.
+    effective_model = config_model
+    effective_provider = config_provider
 
     total_tokens = 0
     total_cost = 0.0
@@ -379,13 +452,13 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
     if tools:
         # For tool-executing phases (execute, verify, deliver), use a provider with
         # native tool_use support. Anthropic and Gemini both support it.
-        if provider not in ("anthropic", "gemini"):
+        if effective_provider not in ("anthropic", "gemini"):
             logger.info(
-                f"Tool execution required but provider='{provider}' doesn't support tool_use. "
+                f"Tool execution required but provider='{effective_provider}' doesn't support tool_use. "
                 f"Switching to claude-haiku-4-5-20251001 for phase={phase}, assigned_agent={agent_key}"
             )
-            model = "claude-haiku-4-5-20251001"
-            provider = "anthropic"
+            effective_model = "claude-haiku-4-5-20251001"
+            effective_provider = "anthropic"
 
         # Minimal system prompt for job execution context.
         # The full agent persona/identity is deliberately kept short here to
@@ -417,7 +490,7 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
         # Loop continues until the model returns no tool_use blocks.
         # Supports both Anthropic SDK objects and Gemini dict-based responses.
         iterations = 0
-        use_gemini = provider == "gemini"
+        use_gemini = effective_provider == "gemini"
 
         while iterations < MAX_TOOL_ITERATIONS:
             iterations += 1
@@ -452,7 +525,7 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                 flat_prompt = "\n".join(prompt_parts)
                 _gemini_client = _GeminiClient()
 
-                _current_model = model
+                _current_model = effective_model
                 _current_tools = tools
                 gemini_response = await loop.run_in_executor(
                     None,
@@ -468,7 +541,7 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                 tokens_in = gemini_response.tokens_input
                 tokens_out = gemini_response.tokens_output
                 total_tokens += tokens_out
-                step_cost = calculate_cost(model, tokens_in, tokens_out)
+                step_cost = calculate_cost(effective_model, tokens_in, tokens_out)
                 total_cost += step_cost
 
                 # Update guardrails with actual cost from this API call
@@ -478,7 +551,7 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                 log_cost_event(
                     project=job_id.split("-")[0] if job_id else "openclaw",
                     agent=agent_key,
-                    model=model,
+                    model=effective_model,
                     tokens_input=tokens_in,
                     tokens_output=tokens_out,
                     cost=step_cost,
@@ -518,6 +591,20 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                 messages.append({"role": "assistant", "content": serialized_content})
                 messages.append({"role": "user", "content": tool_results})
 
+                # Save checkpoint after successful tool execution
+                if job_id:
+                    save_checkpoint(
+                        job_id=job_id, phase=phase, step_index=0,
+                        tool_iteration=iterations,
+                        state={"text_so_far": final_text[:1000], "tool_calls_count": len(all_tool_calls)},
+                        messages=messages[-10:],
+                    )
+
+                # Rolling window: keep system prompt (messages[0]) + last 19 turns
+                # to prevent unbounded message growth in long tool loops
+                if len(messages) > 20:
+                    messages = [messages[0]] + messages[-19:]
+
             else:
                 # Anthropic tool-use path (original)
                 # NOTE: We do NOT add cache_control to user messages.
@@ -528,7 +615,7 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
 
                 # Snapshot current messages list length to avoid lambda closure mutation issues
                 _current_messages = list(messages)
-                _current_model = model
+                _current_model = effective_model
                 _current_tools = cached_tools or tools
                 _current_system = cached_system
 
@@ -546,7 +633,7 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                 tokens_in = response.usage.input_tokens
                 tokens_out = response.usage.output_tokens
                 total_tokens += tokens_out
-                step_cost = calculate_cost(model, tokens_in, tokens_out)
+                step_cost = calculate_cost(effective_model, tokens_in, tokens_out)
                 total_cost += step_cost
 
                 # Update guardrails with actual cost from this API call
@@ -557,7 +644,7 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                 log_cost_event(
                     project=job_id.split("-")[0] if job_id else "openclaw",
                     agent=agent_key,
-                    model=model,
+                    model=effective_model,
                     tokens_input=tokens_in,
                     tokens_output=tokens_out,
                     cost=step_cost,
@@ -631,6 +718,20 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                 messages.append({"role": "assistant", "content": serialized_content})
                 messages.append({"role": "user", "content": tool_results})
 
+                # Save checkpoint after successful tool execution
+                if job_id:
+                    save_checkpoint(
+                        job_id=job_id, phase=phase, step_index=0,
+                        tool_iteration=iterations,
+                        state={"text_so_far": final_text[:1000], "tool_calls_count": len(all_tool_calls)},
+                        messages=messages[-10:],
+                    )
+
+                # Rolling window: keep system prompt (messages[0]) + last 19 turns
+                # to prevent unbounded message growth in long tool loops
+                if len(messages) > 20:
+                    messages = [messages[0]] + messages[-19:]
+
         return {
             "text": final_text,
             "tokens": total_tokens,
@@ -645,7 +746,7 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
             None, call_model_for_agent, agent_key, prompt, conversation
         )
         # Estimate cost for non-Anthropic models based on tokens
-        est_cost = calculate_cost(model, tokens // 2, tokens // 2) if tokens else 0.0
+        est_cost = calculate_cost(config_model, tokens // 2, tokens // 2) if tokens else 0.0
         return {
             "text": response_text,
             "tokens": tokens,
@@ -691,6 +792,12 @@ async def _research_phase(job: dict, agent_key: str, progress: JobProgress,
     )
     if reflexion_context:
         prompt += f"{reflexion_context}\n\n"
+
+    # Inject shared blackboard context from previous jobs
+    bb_context = blackboard_context(project)
+    if bb_context:
+        prompt += f"{bb_context}\n\n"
+
     prompt += (
         f"Gather all the context you need:\n"
         f"1. Use research_task to understand the domain/technology involved\n"
@@ -783,9 +890,36 @@ async def _plan_phase(job: dict, agent_key: str, research: str,
             continue
 
     if not plan_data or "steps" not in plan_data:
-        # Fallback: create a single-step plan with the whole task
-        logger.warning(f"Could not parse plan JSON for {job['id']}, using fallback single-step plan")
-        plan_data = {"steps": [{"description": f"Complete the task: {task}", "tools": ["shell_execute", "file_write", "file_edit"]}]}
+        # Retry once with stricter prompt before falling back
+        logger.warning(f"Could not parse plan JSON for {job['id']}, retrying with stricter prompt")
+        retry_prompt = (
+            f"Your previous response was not valid JSON. Respond with ONLY a JSON object, "
+            f"no markdown, no explanation.\n\n"
+            f"TASK: {task}\n\n"
+            f'Return exactly: {{"steps": [{{"description": "...", "tools": ["..."]}}]}}\n'
+        )
+        retry_result = await _call_agent(agent_key, retry_prompt, tools=tools,
+                                          job_id=job["id"], phase="plan",
+                                          guardrails=guardrails)
+        progress.cost_usd += retry_result["cost_usd"]
+        retry_text = retry_result["text"].strip()
+        for attempt_str in [retry_text, _extract_json_block(retry_text)]:
+            try:
+                plan_data = json.loads(attempt_str)
+                if "steps" in plan_data:
+                    break
+                plan_data = None
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+    if not plan_data or "steps" not in plan_data:
+        # Final fallback: 3 generic steps (read → implement → test)
+        logger.warning(f"Plan retry also failed for {job['id']}, using 3-step fallback plan")
+        plan_data = {"steps": [
+            {"description": f"Read relevant files and understand the codebase for: {task}", "tools": ["file_read", "glob_files", "grep_search"]},
+            {"description": f"Implement the changes: {task}", "tools": ["file_write", "file_edit", "shell_execute"]},
+            {"description": f"Test and verify the changes work correctly", "tools": ["shell_execute", "file_read"]},
+        ]}
 
     plan = ExecutionPlan(
         job_id=job["id"],
@@ -859,6 +993,9 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                 f"(tools: {len(tools)}) for job {job['id']}"
             )
 
+        # Build focused context bundle (token-optimized)
+        context_bundle = _build_context_bundle(step, research, results)
+
         prompt = (
             f"You are executing step {step.index + 1} of {len(plan.steps)} for a job.\n\n"
             f"PROJECT: {job.get('project', 'unknown')}\n"
@@ -868,17 +1005,10 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
             f"If the task says to edit /root/Delhi-Palace/src/app/kds/page.tsx, write to THAT path.\n"
             f"Only use the workspace for scratch files, clones, or new standalone projects.\n"
             f"DO NOT write analysis documents — write actual code.\n\n"
-            f"RESEARCH CONTEXT:\n{research[:3000]}\n\n"
+            f"{context_bundle}\n\n"
             f"CURRENT STEP: {step.description}\n"
             f"SUGGESTED TOOLS: {', '.join(step.tool_hints)}\n\n"
         )
-
-        if conversation_context:
-            prompt += (
-                f"PREVIOUS STEPS COMPLETED:\n"
-                + "\n".join(f"- Step {r['step']+1}: {r.get('summary', 'done')}" for r in results[-5:])
-                + "\n\n"
-            )
 
         prompt += (
             f"Execute this step now using the available tools. "
@@ -961,6 +1091,18 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
 
         results.append(step_result)
         _save_progress(progress)
+
+        # Save checkpoint after each step completion for resume support
+        save_checkpoint(
+            job_id=job["id"], phase="execute", step_index=step.index,
+            tool_iteration=0,
+            state={
+                "completed_steps": [r["step"] for r in results if r.get("status") == "done"],
+                "current_step": step.index,
+                "total_steps": len(plan.steps),
+            },
+            messages=[],
+        )
 
         _log_phase(job["id"], "execute", {
             "event": "step_complete",
@@ -1054,7 +1196,7 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
                     test_failures_detected = True
             # Detect common test failure patterns
             if any(pat in tool_result for pat in [
-                "FAILED", "failed", "ERROR", "AssertionError",
+                "FAILED", "failed", "ERROR", "AssertionError", "AssertionError",
                 "Test Suites: ", "Tests:.*fail",
             ]):
                 # Check if it's actually a failure (not a pass with "failed" in test name)
@@ -1063,6 +1205,11 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
                     tool_result.lower().index("failed") < tool_result.lower().index("passed")
                 ):
                     test_failures_detected = True
+            # Parse pytest/jest numeric failure output (e.g. "3 failed", "2 errors")
+            if re.search(r'\d+\s+failed', tool_result, re.IGNORECASE):
+                test_failures_detected = True
+            if re.search(r'FAILURES|ERRORS\s*$', tool_result, re.MULTILINE):
+                test_failures_detected = True
 
     if test_failures_detected and verify_data.get("passed", True):
         logger.warning(
@@ -1876,6 +2023,14 @@ class AutonomousRunner:
         job_id = job["id"]
         started_at = _now_iso()
 
+        # Validate job before any phase runs
+        try:
+            validate_job(job.get("project", ""), job.get("task", ""), job.get("priority", "P1"))
+        except JobValidationError as ve:
+            logger.error(f"Job {job_id} failed validation: {ve}")
+            update_job_status(job_id, "failed", error=str(ve))
+            return {"job_id": job_id, "success": False, "error": str(ve)}
+
         # Select agent
         agent_key = _select_agent_for_job(job)
         logger.info(f"Job {job_id}: agent={agent_key}, project={job.get('project','?')}")
@@ -1922,6 +2077,16 @@ class AutonomousRunner:
             "cost_usd": 0.0,
         }
 
+        # Check for existing checkpoint to resume from
+        existing_checkpoint = get_latest_checkpoint(job_id)
+        resume_from_phase = None
+        if existing_checkpoint:
+            resume_from_phase = existing_checkpoint["phase"]
+            logger.info(
+                f"Job {job_id}: Found checkpoint at phase={resume_from_phase}, "
+                f"step={existing_checkpoint['step_index']} — will resume"
+            )
+
         try:
             # ---- Phase 1: RESEARCH ----
             research = await self._run_phase_with_retry(
@@ -1937,7 +2102,7 @@ class AutonomousRunner:
             # ---- Phase 2: PLAN ----
             # Trim research context for plan phase (full context was used during research;
             # plan only needs the summary, not the raw tool output)
-            research_for_plan = _trim_context(research, max_chars=3000)
+            research_for_plan = _trim_context(research, max_tokens=2000)
             plan = await self._run_phase_with_retry(
                 "plan",
                 lambda: _plan_phase(job, agent_key, research_for_plan, progress, guardrails=guardrails),
@@ -1955,7 +2120,7 @@ class AutonomousRunner:
             # Trim research further for execute phase — the plan already encodes
             # the research findings as concrete steps; research is only kept for
             # high-level context (file paths, patterns, etc.)
-            research_for_execute = _trim_context(research, max_chars=2000)
+            research_for_execute = _trim_context(research, max_tokens=1500)
             update_job_status(job_id, "code_generated")
             exec_results = await self._run_phase_with_retry(
                 "execute",
@@ -1995,6 +2160,29 @@ class AutonomousRunner:
             # Mark success
             result["success"] = delivery.get("delivered", True)
             result["cost_usd"] = progress.cost_usd
+
+            # Clear checkpoints on successful completion (no resume needed)
+            clear_checkpoints(job_id)
+
+            # Write key findings to shared blackboard for future jobs
+            try:
+                commit_hash = delivery.get("commit_hash", "")
+                summary = delivery.get("summary", "")[:200]
+                if commit_hash or summary:
+                    blackboard_write(
+                        key=f"last_delivery_{job_id[:20]}",
+                        value=json.dumps({
+                            "task": job.get("task", "")[:100],
+                            "commit": commit_hash,
+                            "summary": summary,
+                        }),
+                        job_id=job_id,
+                        agent=agent_key,
+                        project=job.get("project", ""),
+                        ttl_seconds=604800,  # 7 days
+                    )
+            except Exception:
+                pass
 
             # Update job to done
             final_status = "done" if result["success"] else "failed"

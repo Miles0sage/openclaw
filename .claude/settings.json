@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(.env*)",
+      "Write(.env*)",
+      "Edit(*credentials*)",
+      "Write(*credentials*)",
+      "Edit(*secret*)",
+      "Write(*secret*)",
+      "Bash(rm -rf /)",
+      "Bash(rm -rf /*)"
+    ]
+  }
+}

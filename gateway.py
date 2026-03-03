@@ -227,7 +227,7 @@ from agent_router import AgentRouter
 from workflow_engine import WorkflowEngine
 
 # Import job manager
-from job_manager import create_job, get_job, list_jobs, update_job_status
+from job_manager import create_job, get_job, list_jobs, update_job_status, validate_job, JobValidationError
 
 # Import autonomous runner (background job executor)
 from autonomous_runner import init_runner, get_runner
@@ -4224,12 +4224,15 @@ async def create_new_job(request: Request):
         project = data.get("project", "unknown")
         task = data.get("task", "")
         priority = data.get("priority", "P1")
-        
-        if not task:
-            return JSONResponse({"error": "task required"}, status_code=400)
-        
+
+        # Validate inputs (returns 400 on bad input)
+        try:
+            validate_job(project, task, priority)
+        except JobValidationError as ve:
+            return JSONResponse({"error": str(ve)}, status_code=400)
+
         job = create_job(project, task, priority)
-        logger.info(f"🆕 Job created: {job.id}")
+        logger.info(f"Job created: {job.id}")
 
         # Emit event for closed-loop
         engine = get_event_engine()
@@ -4243,6 +4246,8 @@ async def create_new_job(request: Request):
             "status": "pending",
             "created_at": job.created_at
         }
+    except JobValidationError:
+        raise  # Already handled above
     except Exception as e:
         logger.error(f"Job creation error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
