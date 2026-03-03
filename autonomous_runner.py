@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import time
 import traceback
 import uuid
@@ -41,6 +42,7 @@ from blackboard import write as blackboard_write, get_context_for_prompt as blac
 from checkpoint import save_checkpoint, get_latest_checkpoint, clear_checkpoints
 from job_manager import get_job, update_job_status, list_jobs, get_pending_jobs, validate_job, JobValidationError
 from reflexion import save_reflection, search_reflections, format_reflections_for_prompt
+from departments import DEPARTMENTS, AGENT_TO_DEPARTMENT, load_department_knowledge
 # Cost tracking — import from cost_tracker (single source of truth)
 from cost_tracker import (
     calculate_cost,
@@ -54,7 +56,7 @@ from cost_tracker import (
 DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/root/openclaw/data")
 JOB_RUNS_DIR = Path(os.path.join(DATA_DIR, "jobs", "runs"))
 DEFAULT_POLL_INTERVAL = 10        # seconds between job queue checks
-DEFAULT_MAX_CONCURRENT = 2        # max parallel job executions
+DEFAULT_MAX_CONCURRENT = 3        # max parallel job executions (VPS: 4 CPU / 8GB RAM)
 DEFAULT_MAX_RETRIES = 3           # retries per phase on failure
 DEFAULT_BUDGET_LIMIT_USD = 5.0    # per-job cost cap (legacy fallback — guardrails enforce priority-based caps)
 MAX_TOOL_ITERATIONS = 25          # safety cap on agent tool loops per step
@@ -347,6 +349,71 @@ def _build_context_bundle(step: PlanStep, research: str, previous_results: list)
     return context
 
 
+# ---------------------------------------------------------------------------
+# Git Worktree Isolation — for concurrent same-project jobs
+# ---------------------------------------------------------------------------
+
+WORKTREES_DIR = Path(os.path.join(DATA_DIR, "jobs", "worktrees"))
+
+
+def _create_job_worktree(job_id: str, project_root: str) -> str:
+    """Create a git worktree for isolated job execution. Returns worktree path."""
+    wt_path = str(WORKTREES_DIR / job_id)
+    WORKTREES_DIR.mkdir(parents=True, exist_ok=True)
+
+    if os.path.exists(wt_path):
+        logger.info(f"Reusing existing worktree: {wt_path}")
+        return wt_path
+
+    branch_name = f"agent/{job_id}"
+    result = subprocess.run(
+        ["git", "-C", project_root, "worktree", "add", "-b", branch_name, wt_path, "HEAD"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        # Branch might already exist, try detached HEAD
+        result = subprocess.run(
+            ["git", "-C", project_root, "worktree", "add", wt_path, "HEAD", "--detach"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to create worktree for {job_id}: {result.stderr.strip()}")
+
+    logger.info(f"Created worktree: {wt_path} (from {project_root})")
+    return wt_path
+
+
+def _cleanup_job_worktree(job_id: str, project_root: str):
+    """Remove worktree and branch after job completion."""
+    wt_path = str(WORKTREES_DIR / job_id)
+    if os.path.exists(wt_path):
+        subprocess.run(
+            ["git", "-C", project_root, "worktree", "remove", "--force", wt_path],
+            capture_output=True, text=True, timeout=15,
+        )
+        logger.info(f"Removed worktree: {wt_path}")
+    # Clean up branch
+    branch_name = f"agent/{job_id}"
+    subprocess.run(
+        ["git", "-C", project_root, "branch", "-D", branch_name],
+        capture_output=True, text=True, timeout=10,
+    )
+
+
+def _merge_worktree_changes(job_id: str, project_root: str) -> bool:
+    """Merge worktree branch changes back into main branch. Returns True on success."""
+    branch_name = f"agent/{job_id}"
+    result = subprocess.run(
+        ["git", "-C", project_root, "merge", branch_name, "--no-edit"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        logger.warning(f"Failed to merge worktree branch {branch_name}: {result.stderr.strip()}")
+        return False
+    logger.info(f"Merged worktree branch {branch_name} into main")
+    return True
+
+
 def _filter_tools_for_phase(phase: Phase, agent_key: str = None) -> list:
     """Return the AGENT_TOOLS definitions filtered for a given phase.
 
@@ -376,111 +443,53 @@ def _filter_tools_for_phase(phase: Phase, agent_key: str = None) -> list:
     return phase_tools
 
 
-def _select_agent_for_job(job: dict) -> str:
-    """Pick the best agent for a job based on its task description, project, and cost.
+def _classify_department(job: dict) -> str:
+    """Route job to a department based on task + project keywords.
 
-    Cost-aware routing: always pick the cheapest agent that won't compromise quality.
-    Cost hierarchy: coder_agent ($0.14) → hacker_agent ($0.27) → elite_coder ($0.30)
-                    → project_manager ($15) / database_agent ($15)
-
-    NEVER route "create", "fix", "build", "add" tasks to project_manager — that wastes
-    Opus tokens on work Kimi/MiniMax handle fine.
+    Two-step process:
+    1. Explicit agent_pref overrides keyword routing
+    2. Score each department by keyword hits, highest wins
     """
     task_lower = (job.get("task", "") + " " + job.get("project", "")).lower()
 
-    # --- Action keywords that ALWAYS mean code work, never PM ---
-    action_keywords = [
-        "create", "fix", "build", "add", "implement", "update", "write",
-        "deploy", "install", "configure", "setup", "migrate",
-    ]
-    is_action_task = any(kw in task_lower for kw in action_keywords)
+    # Explicit agent_pref overrides keyword routing
+    if job.get("agent_pref"):
+        return AGENT_TO_DEPARTMENT.get(job["agent_pref"], "backend")
 
-    # --- Complexity detection ---
-    complex_keywords = [
-        "refactor", "architecture", "redesign", "system design", "multi-file",
-        "algorithm", "race condition", "memory leak", "performance",
-        "rewrite", "overhaul", "optimize",
-    ]
-    is_complex = any(kw in task_lower for kw in complex_keywords)
+    # Score each department by keyword hits
+    scores = {name: 0 for name in DEPARTMENTS}
+    for dept_name, dept in DEPARTMENTS.items():
+        scores[dept_name] = sum(1 for kw in dept.keywords if kw in task_lower)
 
-    # --- Simple/small task detection ---
-    simple_keywords = [
-        "bug", "css", "typo", "button", "color", "font", "margin", "padding",
-        "single file", "simple", "small", "minor", "tweak", "rename",
-        "endpoint", "route", "api endpoint",
-    ]
-    is_simple = any(kw in task_lower for kw in simple_keywords)
+    best = max(scores, key=scores.get)
+    return best if scores[best] > 0 else "backend"  # safe default
 
-    # --- Security detection ---
-    # NOTE: "auth" removed — too broad (matches "authentication" in refactor tasks).
-    # Use "auth exploit", "auth bypass", "auth vuln" etc. for security routing.
-    security_keywords = [
-        "security", "pentest", "vulnerability", "owasp",
-        "xss", "injection", "penetration", "auth exploit", "auth bypass",
-        "csrf", "ssrf", "security audit",
-    ]
-    is_security = any(kw in task_lower for kw in security_keywords)
 
-    # --- Database detection (pure data work only) ---
-    db_keywords = [
-        "database", "sql", "query", "migration", "schema", "rls policy",
-        "data analysis", "supabase query", "table", "index",
-        "analyze data", "revenue data", "fetch data",
-    ]
-    is_db = any(kw in task_lower for kw in db_keywords)
+def _select_agent_for_job(job: dict) -> tuple[str, str]:
+    """Pick the best agent for a job using department-based routing.
 
-    # --- Code-building detection ---
-    build_keywords = [
-        "build", "create", "implement", "page", "component", "feature",
-        "frontend", "backend", "ui", "ux", "layout", "app",
-    ]
-    is_build = any(kw in task_lower for kw in build_keywords)
+    Returns (agent_key, department_name).
 
-    # --- Question detection (questions are planning, not action) ---
-    is_question = any(task_lower.strip().startswith(q) for q in [
-        "what ", "how ", "should ", "can ", "why ", "when ", "where ",
-    ]) or task_lower.strip().endswith("?")
+    Within a department, complexity heuristics determine whether to use
+    the primary agent (cheap) or fallback agent (powerful).
+    """
+    dept_name = _classify_department(job)
+    dept = DEPARTMENTS[dept_name]
 
-    # --- Routing logic (cheapest capable agent first) ---
+    # Within department: use complexity heuristics for agent selection
+    task_lower = job.get("task", "").lower()
+    complex_kw = ["refactor", "architecture", "multi-file", "rewrite", "overhaul", "redesign"]
+    is_complex = any(kw in task_lower for kw in complex_kw)
 
-    # 1. Complex code tasks → elite_coder (MiniMax, $0.30 — deep reasoning)
-    #    Check FIRST: "Refactor auth architecture" is complex, not security
-    if is_complex and not is_question:
-        return "elite_coder"
-
-    # 2. Security tasks → hacker_agent (cheap, specialized)
-    if is_security and not is_build:
-        return "hacker_agent"
-
-    # 3. Build/action tasks → coder_agent (Kimi, cheapest)
-    #    But NOT questions like "what should we build?"
-    if (is_build or is_action_task) and not is_question:
-        return "coder_agent"
-
-    # 4. Simple code tasks → coder_agent (cheapest)
-    if is_simple and not is_question:
-        return "coder_agent"
-
-    # 5. Pure database/data tasks → database_agent
-    if is_db:
-        return "database_agent"
-
-    # 6. Fallback: if the task has any code-related words, use coder_agent
-    #    NEVER default to project_manager for actionable tasks
-    code_signals = [
-        "fix", "add", "update", "test", "endpoint", "deploy", "file",
-        "code", "function", "class", "module", "script", "config",
-    ]
-    if any(kw in task_lower for kw in code_signals) and not is_question:
-        return "coder_agent"
-
-    # 7. Truly ambiguous tasks with no action words → PM for decomposition only
-    return "project_manager"
+    if is_complex and dept.fallback_agent:
+        return dept.fallback_agent, dept_name
+    return dept.primary_agent, dept_name
 
 
 async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                       tools: list = None, job_id: str = "", phase: str = "",
-                      guardrails: "JobGuardrails | None" = None) -> dict:
+                      guardrails: "JobGuardrails | None" = None,
+                      department: str = "") -> dict:
     """
     Call an agent model. Wraps the synchronous call_model_for_agent in an
     executor so it doesn't block the event loop. If tools are provided,
@@ -527,15 +536,20 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
             effective_provider = "anthropic"
 
         # Minimal system prompt for job execution context.
-        # The full agent persona/identity is deliberately kept short here to
-        # reduce cost — the execution prompt already contains full task context.
-        system_prompt = (
+        # Department system prompt is prepended when available for domain expertise.
+        base_system = (
             "You are an autonomous AI agent executing a task step-by-step using tools. "
             "When you need to perform an action (read/write files, run shell commands, "
             "git operations, etc.), you MUST use the provided tools — do NOT describe "
             "actions in text. Call tools directly. After all actions are complete, "
             "summarize what was done and the outcome."
         )
+        # Inject department-specific system prompt if available
+        if department and department in DEPARTMENTS:
+            dept = DEPARTMENTS[department]
+            system_prompt = f"{dept.system_prompt}\n\n{base_system}"
+        else:
+            system_prompt = base_system
 
         # Build messages
         messages = list(conversation or [])
@@ -843,7 +857,8 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
 # ---------------------------------------------------------------------------
 
 async def _research_phase(job: dict, agent_key: str, progress: JobProgress,
-                          guardrails: "JobGuardrails | None" = None) -> str:
+                          guardrails: "JobGuardrails | None" = None,
+                          department: str = "") -> str:
     """
     Phase 1: RESEARCH
     Gather context about the task — read relevant files, search the web,
@@ -859,20 +874,31 @@ async def _research_phase(job: dict, agent_key: str, progress: JobProgress,
     project = job.get("project", "unknown")
     workspace = progress.workspace
 
-    # Inject past experience from reflexion loop
-    past_reflections = search_reflections(task, project=project, limit=3)
+    # Inject past experience from reflexion loop (department-aware)
+    past_reflections = search_reflections(task, project=project, department=department, limit=3)
     reflexion_context = format_reflections_for_prompt(past_reflections)
     if reflexion_context:
         logger.info(f"Job {job['id']}: Injecting {len(past_reflections)} past reflections into research prompt")
 
+    # Load department-specific knowledge instead of generic project context
+    if department:
+        dept_knowledge = load_department_knowledge(department, project)
+    else:
+        dept_knowledge = _load_project_context(project)
+
     prompt = (
         f"You are researching a task before planning and executing it.\n\n"
         f"PROJECT: {project}\n"
+        f"DEPARTMENT: {department or 'general'}\n"
         f"TASK: {task}\n\n"
         f"WORKSPACE DIRECTORY: {workspace}\n"
         f"This is your isolated working directory for this job. Any files you need to\n"
         f"clone, download, or create during research should go inside {workspace}/\n\n"
     )
+
+    if dept_knowledge:
+        prompt += f"{dept_knowledge}\n\n"
+
     if reflexion_context:
         prompt += f"{reflexion_context}\n\n"
 
@@ -898,7 +924,7 @@ async def _research_phase(job: dict, agent_key: str, progress: JobProgress,
     tools = _filter_tools_for_phase(Phase.RESEARCH)
     result = await _call_agent(agent_key, prompt, tools=tools,
                                job_id=job["id"], phase="research",
-                               guardrails=guardrails)
+                               guardrails=guardrails, department=department)
 
     progress.cost_usd += result["cost_usd"]
     progress.phase_status = "done"
@@ -1038,7 +1064,8 @@ async def _plan_phase(job: dict, agent_key: str, research: str,
 
 async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                          research: str, progress: JobProgress,
-                         guardrails: "JobGuardrails | None" = None) -> list:
+                         guardrails: "JobGuardrails | None" = None,
+                         department: str = "") -> list:
     """
     Phase 3: EXECUTE
     Run each step in the plan. The agent gets the step description plus
@@ -1079,12 +1106,16 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
         # Build focused context bundle (token-optimized)
         context_bundle = _build_context_bundle(step, research, results)
 
-        # Load project-specific context (CLAUDE.md, available components, API routes)
-        project_context = _load_project_context(job.get("project", ""))
+        # Load department-specific knowledge (more focused than generic project context)
+        if department:
+            project_context = load_department_knowledge(department, job.get("project", ""))
+        else:
+            project_context = _load_project_context(job.get("project", ""))
 
         prompt = (
             f"You are executing step {step.index + 1} of {len(plan.steps)} for a job.\n\n"
             f"PROJECT: {job.get('project', 'unknown')}\n"
+            f"DEPARTMENT: {department or 'general'}\n"
             f"OVERALL TASK: {job['task']}\n\n"
             f"WORKSPACE DIRECTORY (for temp/scratch files): {workspace}\n"
             f"IMPORTANT: Edit the ACTUAL PROJECT FILES at their real paths on disk.\n"
@@ -1092,6 +1123,11 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
             f"Only use the workspace for scratch files, clones, or new standalone projects.\n"
             f"DO NOT write analysis documents — write actual code.\n\n"
         )
+
+        # File ownership header for conflict prevention
+        if department and department in DEPARTMENTS:
+            dept = DEPARTMENTS[department]
+            prompt += f"FILES YOU OWN: {', '.join(dept.file_patterns)}. Do NOT modify files outside your ownership.\n\n"
 
         if project_context:
             prompt += f"{project_context}\n\n"
@@ -1113,7 +1149,8 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
             try:
                 result = await _call_agent(step_agent, prompt, tools=tools,
                                            job_id=job["id"], phase="execute",
-                                           guardrails=guardrails)
+                                           guardrails=guardrails,
+                                           department=department)
                 progress.cost_usd += result["cost_usd"]
 
                 # Budget check (legacy fallback — guardrails are the primary check)
@@ -1209,7 +1246,8 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
 
 async def _verify_phase(job: dict, agent_key: str, execution_results: list,
                         progress: JobProgress,
-                        guardrails: "JobGuardrails | None" = None) -> dict:
+                        guardrails: "JobGuardrails | None" = None,
+                        department: str = "") -> dict:
     """
     Phase 4: VERIFY
     Run tests, lint checks, and quality verification.
@@ -1229,16 +1267,23 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
         for r in execution_results
     )
 
+    # Department-specific verification instruction
+    dept_verify = ""
+    if department and department in DEPARTMENTS:
+        dept_verify = f"\nDEPARTMENT-SPECIFIC CHECKS:\n{DEPARTMENTS[department].verify_instruction}\n"
+
     prompt = (
         f"You just completed execution of a task. Now verify the results.\n\n"
         f"PROJECT: {project}\n"
+        f"DEPARTMENT: {department or 'general'}\n"
         f"TASK: {job['task']}\n\n"
         f"EXECUTION RESULTS:\n{steps_summary}\n\n"
         f"Verification checklist:\n"
         f"1. Use shell_execute to run any relevant tests (pytest, jest, vitest, etc.)\n"
         f"2. Use shell_execute to run linting if applicable\n"
         f"3. Use file_read to spot-check created/modified files for correctness\n"
-        f"4. Use grep_search to check for common issues (TODO, FIXME, console.log, etc.)\n\n"
+        f"4. Use grep_search to check for common issues (TODO, FIXME, console.log, etc.)\n"
+        f"{dept_verify}\n"
         f"Respond with a JSON object:\n"
         f'{{"passed": true/false, "summary": "...", "issues": ["issue1", "issue2"]}}\n'
         f"Do NOT include markdown fences or any text outside the JSON."
@@ -1247,7 +1292,7 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
     tools = _filter_tools_for_phase(Phase.VERIFY)
     result = await _call_agent(agent_key, prompt, tools=tools,
                                job_id=job["id"], phase="verify",
-                               guardrails=guardrails)
+                               guardrails=guardrails, department=department)
 
     progress.cost_usd += result["cost_usd"]
 
@@ -1938,6 +1983,7 @@ class AutonomousRunner:
         self._running = False
         self._poll_task: Optional[asyncio.Task] = None
         self._active_jobs: dict[str, asyncio.Task] = {}     # job_id -> Task
+        self._active_jobs_meta: dict[str, dict] = {}         # job_id -> {project, department, ...}
         self._progress: dict[str, JobProgress] = {}          # job_id -> JobProgress
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._cancelled_jobs: set = set()
@@ -2109,6 +2155,7 @@ class AutonomousRunner:
                 logger.error(f"Job {job_id} failed: {e}")
             finally:
                 self._active_jobs.pop(job_id, None)
+                self._active_jobs_meta.pop(job_id, None)
 
     # ------------------------------------------------------------------
     # Internal — Pipeline Execution
@@ -2130,15 +2177,44 @@ class AutonomousRunner:
             update_job_status(job_id, "failed", error=str(ve))
             return {"job_id": job_id, "success": False, "error": str(ve)}
 
-        # Select agent
-        agent_key = _select_agent_for_job(job)
-        logger.info(f"Job {job_id}: agent={agent_key}, project={job.get('project','?')}")
+        # Select agent via department routing
+        agent_key, department = _select_agent_for_job(job)
+        logger.info(f"Job {job_id}: dept={department}, agent={agent_key}, project={job.get('project','?')}")
+
+        # Track active job metadata for worktree conflict detection
+        project = job.get("project", "")
+        project_root = PROJECT_ROOTS.get(project)
+        self._active_jobs_meta[job_id] = {
+            "project": project,
+            "department": department,
+            "agent": agent_key,
+        }
 
         # Create an isolated workspace directory for this job so concurrent jobs
         # cannot interfere with each other's files on the shared VPS filesystem.
         workspace = JOB_RUNS_DIR / job_id / "workspace"
         workspace.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Job {job_id}: workspace created at {workspace}")
+
+        # Git worktree isolation: if another active job targets the same project,
+        # create a worktree so agents don't step on each other's files.
+        use_worktree = False
+        if project_root:
+            same_project_active = any(
+                self._active_jobs_meta.get(jid, {}).get("project") == project
+                for jid in self._active_jobs if jid != job_id
+            )
+            if same_project_active:
+                try:
+                    wt_path = _create_job_worktree(job_id, project_root)
+                    workspace = Path(wt_path)
+                    use_worktree = True
+                    logger.info(f"Job {job_id}: worktree at {workspace} (concurrent {project} job)")
+                except Exception as wt_err:
+                    logger.warning(f"Job {job_id}: worktree creation failed ({wt_err}), using project root")
+                    workspace = Path(project_root)
+            else:
+                workspace = Path(project_root)
+        logger.info(f"Job {job_id}: workspace={workspace}, worktree={use_worktree}")
 
         # Initialize progress tracking
         progress = JobProgress(
@@ -2169,6 +2245,7 @@ class AutonomousRunner:
         result = {
             "job_id": job_id,
             "agent": agent_key,
+            "department": department,
             "started_at": started_at,
             "phases": {},
             "success": False,
@@ -2207,7 +2284,7 @@ class AutonomousRunner:
             else:
                 research = await self._run_phase_with_retry(
                     "research",
-                    lambda: _research_phase(job, agent_key, progress, guardrails=guardrails),
+                    lambda: _research_phase(job, agent_key, progress, guardrails=guardrails, department=department),
                     progress,
                 )
                 result["phases"]["research"] = {"status": "done", "length": len(research)}
@@ -2244,7 +2321,7 @@ class AutonomousRunner:
                 update_job_status(job_id, "code_generated")
                 exec_results = await self._run_phase_with_retry(
                     "execute",
-                    lambda: _execute_phase(job, agent_key, plan, research_for_execute, progress, guardrails=guardrails),
+                    lambda: _execute_phase(job, agent_key, plan, research_for_execute, progress, guardrails=guardrails, department=department),
                     progress,
                 )
             else:
@@ -2265,7 +2342,7 @@ class AutonomousRunner:
             if not _should_skip("verify"):
                 verify_result = await self._run_phase_with_retry(
                     "verify",
-                    lambda: _verify_phase(job, agent_key, exec_results, progress, guardrails=guardrails),
+                    lambda: _verify_phase(job, agent_key, exec_results, progress, guardrails=guardrails, department=department),
                     progress,
                 )
             else:
@@ -2283,6 +2360,15 @@ class AutonomousRunner:
                 progress,
             )
             result["phases"]["deliver"] = delivery
+
+            # Merge worktree changes back and clean up
+            if use_worktree and project_root:
+                try:
+                    _merge_worktree_changes(job_id, project_root)
+                    _cleanup_job_worktree(job_id, project_root)
+                    logger.info(f"Job {job_id}: worktree merged and cleaned up")
+                except Exception as wt_err:
+                    logger.warning(f"Job {job_id}: worktree cleanup failed: {wt_err}")
 
             # Mark success
             result["success"] = delivery.get("delivered", True)
@@ -2452,6 +2538,13 @@ class AutonomousRunner:
             except Exception:
                 pass
 
+        # Clean up worktree on failure (success path handles it above)
+        if use_worktree and project_root and result.get("error"):
+            try:
+                _cleanup_job_worktree(job_id, project_root)
+            except Exception:
+                pass
+
         # Include final guardrail metrics in result
         result["guardrails"] = guardrails.summary()
 
@@ -2502,8 +2595,9 @@ class AutonomousRunner:
                 job_data=job,
                 outcome=outcome,
                 duration_seconds=abs(elapsed_secs),
+                department=department,
             )
-            logger.info(f"Job {job_id}: Reflexion saved (outcome={outcome})")
+            logger.info(f"Job {job_id}: Reflexion saved (outcome={outcome}, dept={department})")
         except Exception as ref_err:
             logger.warning(f"Failed to save reflexion: {ref_err}")
 
@@ -2628,8 +2722,8 @@ if __name__ == "__main__":
         {"task": "Plan the sprint roadmap", "project": "openclaw"},
     ]
     for tj in test_jobs:
-        agent = _select_agent_for_job(tj)
-        print(f"[OK] Route: '{tj['task'][:50]}' -> {agent}")
+        agent, dept = _select_agent_for_job(tj)
+        print(f"[OK] Route: '{tj['task'][:50]}' -> dept={dept}, agent={agent}")
 
     # Test tool filtering
     for phase in Phase:

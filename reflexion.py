@@ -43,7 +43,7 @@ def _use_supabase() -> bool:
 # Core functions
 # ---------------------------------------------------------------------------
 
-def save_reflection(job_id: str, job_data: dict, outcome: str, duration_seconds: float = 0):
+def save_reflection(job_id: str, job_data: dict, outcome: str, duration_seconds: float = 0, department: str = ""):
     """Save a post-job reflection. Called after job completes."""
     ensure_dir()
 
@@ -67,6 +67,7 @@ def save_reflection(job_id: str, job_data: dict, outcome: str, duration_seconds:
         "project": job_data.get("project", "unknown"),
         "task": job_data.get("task", ""),
         "outcome": outcome,
+        "department": department,
         "duration_seconds": duration_seconds,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "tags": tags,
@@ -81,6 +82,7 @@ def save_reflection(job_id: str, job_data: dict, outcome: str, duration_seconds:
             "project": reflection["project"],
             "task": reflection["task"],
             "outcome": outcome,
+            "department": department,
             "reflection": json.dumps(learnings),
             "lessons": learnings,
             "cost_usd": job_data.get("cost_usd", 0),
@@ -89,19 +91,23 @@ def save_reflection(job_id: str, job_data: dict, outcome: str, duration_seconds:
         }
         result = sb["insert"]("reflections", row)
         if result:
-            logger.info(f"Reflection saved (Supabase): {job_id}")
+            logger.info(f"Reflection saved (Supabase): {job_id} [dept={department}]")
             return job_id
 
     # JSON file fallback
     filepath = REFLECTIONS_DIR / f"{job_id}.json"
     with open(filepath, "w") as f:
         json.dump(reflection, f, indent=2)
-    logger.info(f"Reflection saved (file): {filepath}")
+    logger.info(f"Reflection saved (file): {filepath} [dept={department}]")
     return filepath
 
 
-def search_reflections(task_description: str, project: str = None, limit: int = 3) -> list:
-    """Find relevant past reflections for a new task."""
+def search_reflections(task_description: str, project: str = None, department: str = None, limit: int = 3) -> list:
+    """Find relevant past reflections for a new task.
+
+    When department is specified, prioritizes same-department reflections
+    and pads with cross-department results.
+    """
 
     # Try Supabase first — get all reflections and score locally
     if _use_supabase():
@@ -111,7 +117,7 @@ def search_reflections(task_description: str, project: str = None, limit: int = 
             query = f"project=eq.{project}&{query}"
         rows = sb["select"]("reflections", query, limit=200)
         if rows:
-            return _score_and_rank(rows, task_description, project, limit)
+            return _score_and_rank(rows, task_description, project, limit, department=department)
 
     # File fallback
     ensure_dir()
@@ -124,11 +130,15 @@ def search_reflections(task_description: str, project: str = None, limit: int = 
         except (json.JSONDecodeError, IOError):
             continue
 
-    return _score_and_rank(all_reflections, task_description, project, limit)
+    return _score_and_rank(all_reflections, task_description, project, limit, department=department)
 
 
-def _score_and_rank(reflections: list, task_description: str, project: str, limit: int) -> list:
-    """Score reflections by relevance to a task and return top matches."""
+def _score_and_rank(reflections: list, task_description: str, project: str, limit: int, department: str = None) -> list:
+    """Score reflections by relevance to a task and return top matches.
+
+    When department is specified, same-department reflections get a bonus
+    and are prioritized in the results.
+    """
     tags = _extract_tags(task_description)
     scored = []
 
@@ -143,6 +153,10 @@ def _score_and_rank(reflections: list, task_description: str, project: str, limi
         if project and ref.get("project") == project:
             score += 3
 
+        # Department bonus: same-department reflections are more relevant
+        if department and ref.get("department") == department:
+            score += 4
+
         task_words = set(task_description.lower().split())
         ref_words = set(ref.get("task", "").lower().split())
         score += len(task_words & ref_words)
@@ -155,6 +169,13 @@ def _score_and_rank(reflections: list, task_description: str, project: str, limi
             scored.append(ref)
 
     scored.sort(key=lambda r: (r.get("_relevance_score", 0), r.get("timestamp", r.get("created_at", ""))), reverse=True)
+
+    # When department is set, ensure same-department results come first
+    if department:
+        dept_results = [r for r in scored if r.get("department") == department]
+        other_results = [r for r in scored if r.get("department") != department]
+        return (dept_results + other_results)[:limit]
+
     return scored[:limit]
 
 

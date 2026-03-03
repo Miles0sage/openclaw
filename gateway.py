@@ -725,9 +725,9 @@ async def lifespan(application):
 
     # Autonomous runner
     try:
-        runner = init_runner(max_concurrent=2, budget_limit_usd=15.0)
+        runner = init_runner(max_concurrent=3, budget_limit_usd=15.0)
         await runner.start()
-        logger.info("✅ Autonomous job runner started (max_concurrent=2, budget=$15/job)")
+        logger.info("✅ Autonomous job runner started (max_concurrent=3, budget=$15/job)")
     except Exception as err:
         logger.error(f"Failed to start autonomous runner: {err}")
 
