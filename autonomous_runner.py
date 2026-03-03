@@ -57,7 +57,8 @@ DEFAULT_POLL_INTERVAL = 10        # seconds between job queue checks
 DEFAULT_MAX_CONCURRENT = 2        # max parallel job executions
 DEFAULT_MAX_RETRIES = 3           # retries per phase on failure
 DEFAULT_BUDGET_LIMIT_USD = 5.0    # per-job cost cap (legacy fallback — guardrails enforce priority-based caps)
-MAX_TOOL_ITERATIONS = 30          # safety cap on agent tool loops per step
+MAX_TOOL_ITERATIONS = 25          # safety cap on agent tool loops per step
+TOOL_NUDGE_THRESHOLD = 15         # after this many iterations, nudge agent to finish up
 MAX_PLAN_STEPS = 10               # safety cap on plan step count (fewer = less iteration burn)
 
 logger = logging.getLogger("autonomous_runner")
@@ -705,6 +706,15 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                         "content": result_str,
                     })
 
+                # Nudge agent to wrap up if approaching iteration limit
+                if iterations == TOOL_NUDGE_THRESHOLD and tool_results:
+                    nudge = (
+                        f"\n\n[SYSTEM: You have used {iterations} tool calls for this step. "
+                        f"Wrap up now — summarize what you've done and move on. "
+                        f"Remaining budget: {MAX_TOOL_ITERATIONS - iterations} calls.]"
+                    )
+                    tool_results[-1]["content"] += nudge
+
                 # Append assistant response + tool results to messages for next iteration
                 # IMPORTANT: Serialize response.content to dicts (not SDK objects)
                 serialized_content = []
@@ -1204,8 +1214,8 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
                     test_failures_detected = True
             # Detect common test failure patterns
             if any(pat in tool_result for pat in [
-                "FAILED", "failed", "ERROR", "AssertionError", "AssertionError",
-                "Test Suites: ", "Tests:.*fail",
+                "FAILED", "failed", "ERROR", "AssertionError",
+                "Test Suites: ", "FAIL ", "npm ERR!", "ModuleNotFoundError",
             ]):
                 # Check if it's actually a failure (not a pass with "failed" in test name)
                 if "failed" in tool_result.lower() and (
@@ -2133,7 +2143,7 @@ class AutonomousRunner:
                 ])
                 result["phases"]["plan"] = {"status": "skipped"}
             else:
-                research_for_plan = _trim_context(research, max_tokens=2000)
+                research_for_plan = _trim_context(research, max_tokens=3000)
                 plan = await self._run_phase_with_retry(
                     "plan",
                     lambda: _plan_phase(job, agent_key, research_for_plan, progress, guardrails=guardrails),
