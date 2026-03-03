@@ -56,7 +56,7 @@ DEFAULT_MAX_CONCURRENT = 2        # max parallel job executions
 DEFAULT_MAX_RETRIES = 3           # retries per phase on failure
 DEFAULT_BUDGET_LIMIT_USD = 5.0    # per-job cost cap (legacy fallback — guardrails enforce priority-based caps)
 MAX_TOOL_ITERATIONS = 30          # safety cap on agent tool loops per step
-MAX_PLAN_STEPS = 20               # safety cap on plan step count
+MAX_PLAN_STEPS = 10               # safety cap on plan step count (fewer = less iteration burn)
 
 logger = logging.getLogger("autonomous_runner")
 
@@ -756,7 +756,10 @@ async def _plan_phase(job: dict, agent_key: str, research: str,
         f'  {{"description": "Step 1: ...", "tools": ["file_write", "shell_execute"]}},\n'
         f'  {{"description": "Step 2: ...", "tools": ["file_edit"], "delegate_to": "elite_coder"}}\n'
         f"]}}\n\n"
-        f"Keep the plan focused and practical. Maximum {MAX_PLAN_STEPS} steps.\n"
+        f"Keep the plan LEAN — minimum steps needed. Aim for 3-6 steps.\n"
+        f"Each step should do ONE concrete action (write code, run test, etc).\n"
+        f"Do NOT add separate 'documentation' or 'reporting' steps — just build and test.\n"
+        f"Maximum {MAX_PLAN_STEPS} steps. Fewer is better.\n"
         f"Do NOT include markdown fences or any text outside the JSON."
     )
 
@@ -1463,8 +1466,8 @@ class JobGuardrails:
 
     Defaults:
         max_cost_usd      = priority-based (P0=$5, P1=$3, P2=$3, P3=$1) + 10% grace
-        max_iterations     = 120     (total agent calls across all phases)
-        max_duration_secs  = 1800    (30 minutes wall-clock)
+        max_iterations     = 200     (total agent calls across all phases)
+        max_duration_secs  = 3600    (60 minutes wall-clock)
         circuit_breaker_n  = 3       (same error 3x in a row → kill)
 
     Phase iteration limits (prevents any single phase from hogging all iterations):
@@ -1479,19 +1482,19 @@ class JobGuardrails:
     # Phase-specific iteration budgets — prevents any single phase from
     # eating the entire iteration allowance (e.g. execute hogging 48/50).
     PHASE_ITERATION_LIMITS = {
-        "research": 15,
-        "plan":     10,
-        "execute":  60,
-        "verify":   10,
-        "deliver":  5,
+        "research": 30,
+        "plan":     20,
+        "execute":  150,
+        "verify":   25,
+        "deliver":  25,
     }
 
     def __init__(
         self,
         job_id: str,
         max_cost_usd: float = 2.0,
-        max_iterations: int = 120,
-        max_duration_secs: int = 1800,
+        max_iterations: int = 200,
+        max_duration_secs: int = 3600,
         circuit_breaker_n: int = 3,
     ):
         self.job_id = job_id
@@ -1900,8 +1903,8 @@ class AutonomousRunner:
         job_priority = job.get("priority", "P2")
         budget_map = {"P0": 5.0, "P1": 3.0, "P2": 3.0, "P3": 1.0}
         job_max_cost = float(job.get("max_cost_usd", budget_map.get(job_priority, 2.0)))
-        job_max_iter = job.get("max_iterations", 120)
-        job_max_dur  = job.get("max_duration_seconds", 1800)
+        job_max_iter = job.get("max_iterations", 200)
+        job_max_dur  = job.get("max_duration_seconds", 3600)
         guardrails = JobGuardrails(
             job_id=job_id,
             max_cost_usd=float(job_max_cost),

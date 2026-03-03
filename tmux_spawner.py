@@ -161,26 +161,65 @@ class TmuxSpawner:
         with open(prompt_file, "w") as f:
             f.write(prompt)
 
-        # Build a shell script to avoid quoting nightmares
+        # Build a shell script with continuation loop
+        # When Claude hits --max-turns, it exits with code 1. Instead of
+        # treating this as failure, we continue where it left off (up to
+        # MAX_CONTINUATIONS times). This lets complex tasks run 150+ turns.
         script_file = f"/tmp/openclaw-agent-{job_id}.sh"
         output_file = f"/tmp/openclaw-output-{job_id}.txt"
+        max_turns = 30  # per continuation chunk
+        max_continuations = 5  # total attempts = max_turns * max_continuations = 150 turns
         with open(script_file, "w") as sf:
             sf.write("#!/usr/bin/env bash\n")
+            sf.write("set -o pipefail\n")
             sf.write("unset CLAUDECODE\n")
             sf.write("unset CLAUDE_CODE_SESSION\n")
             sf.write(f"cd {work_dir}\n")
             sf.write(f'echo "[AGENT_START] $(date)" >> {LOG_FILE}\n')
             sf.write(f'echo "Agent {job_id} starting in {work_dir}..."\n')
-            # Use -p (print mode) with --dangerously-skip-permissions for full tool access
-            # This lets agents read, write, edit files and run commands without prompting
-            sf.write(f'{CLAUDE_CMD} -p {CLAUDE_FULL_ACCESS} --output-format text "$(cat {prompt_file})" {claude_args} 2>&1 | tee {output_file}\n')
-            sf.write('EXIT_CODE=$?\n')
-            sf.write('echo ""\n')
-            sf.write('echo "[AGENT_EXIT code=$EXIT_CODE]"\n')
-            sf.write(f'echo "[AGENT_DONE] job={job_id} exit=$EXIT_CODE $(date)" >> {LOG_FILE}\n')
-            # Keep pane open for 120s so output can be collected
-            sf.write('echo "Agent finished. Pane closes in 120s..."\n')
-            sf.write('sleep 120\n')
+            sf.write(f'> {output_file}\n')  # truncate output file
+            sf.write(f'PROMPT_FILE="{prompt_file}"\n')
+            sf.write(f'MAX_CONTINUATIONS={max_continuations}\n')
+            sf.write(f'ATTEMPT=0\n')
+            sf.write(f'FINAL_EXIT=1\n')
+            sf.write(f'\n')
+            sf.write(f'while [ $ATTEMPT -lt $MAX_CONTINUATIONS ]; do\n')
+            sf.write(f'  ATTEMPT=$((ATTEMPT + 1))\n')
+            sf.write(f'  echo "[CONTINUATION $ATTEMPT/{max_continuations}] $(date)"\n')
+            sf.write(f'  {CLAUDE_CMD} -p {CLAUDE_FULL_ACCESS} --max-turns {max_turns} --output-format text "$(cat $PROMPT_FILE)" {claude_args} 2>&1 | tee -a {output_file}\n')
+            sf.write(f'  FINAL_EXIT=$?\n')
+            sf.write(f'\n')
+            sf.write(f'  # Exit code 0 = task completed successfully\n')
+            sf.write(f'  if [ $FINAL_EXIT -eq 0 ]; then\n')
+            sf.write(f'    echo "[AGENT_COMPLETED] Task finished on attempt $ATTEMPT"\n')
+            sf.write(f'    break\n')
+            sf.write(f'  fi\n')
+            sf.write(f'\n')
+            sf.write(f'  # Exit code 1 = hit max-turns limit, continue with progress\n')
+            sf.write(f'  if [ $FINAL_EXIT -eq 1 ] && [ $ATTEMPT -lt $MAX_CONTINUATIONS ]; then\n')
+            sf.write(f'    echo "[TURN_LIMIT_HIT] Continuing from where we left off..."\n')
+            sf.write(f'    PROGRESS=$(tail -80 {output_file})\n')
+            sf.write(f'    cat > $PROMPT_FILE << CONTINUE_EOF\n')
+            sf.write(f'You were working on a task and hit the turn limit. Continue where you left off.\n')
+            sf.write(f'\n')
+            sf.write(f'Your recent progress:\n')
+            sf.write(f'$PROGRESS\n')
+            sf.write(f'\n')
+            sf.write(f'Continue the task. Do NOT restart from scratch. Pick up exactly where you stopped.\n')
+            sf.write(f'When fully done, output "TASK_COMPLETE" on the last line.\n')
+            sf.write(f'CONTINUE_EOF\n')
+            sf.write(f'  else\n')
+            sf.write(f'    echo "[AGENT_FAILED] Exit code $FINAL_EXIT on attempt $ATTEMPT"\n')
+            sf.write(f'    break\n')
+            sf.write(f'  fi\n')
+            sf.write(f'done\n')
+            sf.write(f'\n')
+            sf.write(f'echo ""\n')
+            sf.write(f'echo "[AGENT_EXIT code=$FINAL_EXIT attempts=$ATTEMPT]"\n')
+            sf.write(f'echo "[AGENT_DONE] job={job_id} exit=$FINAL_EXIT attempts=$ATTEMPT $(date)" >> {LOG_FILE}\n')
+            # Keep pane open for 300s so output can be collected
+            sf.write(f'echo "Agent finished. Pane closes in 5min..."\n')
+            sf.write(f'sleep 300\n')
         os.chmod(script_file, 0o755)
 
         # Wrap with timeout if specified
@@ -506,15 +545,26 @@ def _format_duration(seconds: int) -> str:
 def _check_success(output: str) -> bool:
     """
     Heuristic check if agent output indicates success.
-    Looks for common success/failure patterns.
+    Looks for common success/failure patterns including continuation loop markers.
     """
     output_lower = output.lower()
 
-    # Explicit exit code marker from our wrapper
+    # New continuation loop markers (preferred — generated by the while loop)
+    if "[agent_completed]" in output_lower:
+        return True
+    if "[agent_failed]" in output_lower:
+        return False
+
+    # New exit marker format: [AGENT_EXIT code=X attempts=Y]
+    import re
+    exit_match = re.search(r'\[agent_exit code=(\d+)', output_lower)
+    if exit_match:
+        return exit_match.group(1) == "0"
+
+    # Legacy exit code marker (pre-continuation loop)
     if "[agent_exit code=0]" in output_lower:
         return True
     if "[agent_exit code=" in output_lower:
-        # Non-zero exit code
         return False
 
     # Failure indicators
