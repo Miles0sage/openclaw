@@ -7441,6 +7441,74 @@ async def list_kill_flags():
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# PA INTEGRATION — Personal Assistant bidirectional bridge
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/pa/request")
+async def pa_request(request: Request):
+    """Accept a PA worker request and dispatch to the appropriate handler.
+
+    Auth: X-PA-Token header or standard X-Auth-Token.
+    Body: {"action": "create_job", "payload": {...}}
+    """
+    from pa_integration import handle_pa_request, VALID_ACTIONS
+
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    action = data.get("action")
+    payload = data.get("payload", {})
+
+    if not action:
+        return JSONResponse(
+            {"error": "Missing 'action' field", "valid_actions": sorted(VALID_ACTIONS)},
+            status_code=400,
+        )
+
+    result = handle_pa_request(action, payload)
+
+    status_code = 200 if result.get("status") != "failed" else 400
+    return JSONResponse(result, status_code=status_code)
+
+
+@app.get("/api/pa/status/{request_id}")
+async def pa_request_status(request_id: str):
+    """Query the status of a PA request by ID."""
+    from pa_integration import get_pa_request_status
+
+    status = get_pa_request_status(request_id)
+    if not status:
+        return JSONResponse({"error": "Request not found"}, status_code=404)
+    return status
+
+
+@app.post("/api/pa/callback/status/{request_id}")
+async def pa_callback_status(request_id: str, request: Request):
+    """Receive status callbacks from PA worker."""
+    from pa_integration import get_pa_request_status
+
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    logger.info(f"PA callback received for {request_id}: {data.get('status', 'unknown')}")
+    return {"received": True, "request_id": request_id}
+
+
+@app.get("/api/pa/requests")
+async def pa_list_requests(request: Request):
+    """List recent PA requests."""
+    from pa_integration import get_recent_pa_requests
+
+    limit = int(request.query_params.get("limit", "20"))
+    requests_list = get_recent_pa_requests(limit=limit)
+    return {"requests": requests_list, "total": len(requests_list)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # CLIENT INTAKE / LEAD CAPTURE
 # ═══════════════════════════════════════════════════════════════════════
 
