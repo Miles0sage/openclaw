@@ -78,6 +78,9 @@ def table_insert(table: str, data: dict | list, upsert: bool = False) -> dict | 
 
 def table_select(table: str, query: str = "", limit: int = 1000) -> list:
     """Select rows from a table. query is PostgREST filter string."""
+    # Encode '+' as %2B to prevent URL decoding as space (e.g. in +00:00 timezone offsets)
+    if query:
+        query = query.replace("+", "%2B")
     path = f"/rest/v1/{table}?{query}&limit={limit}" if query else f"/rest/v1/{table}?limit={limit}"
     resp = supabase_request("GET", path)
     if resp.status_code == 200:

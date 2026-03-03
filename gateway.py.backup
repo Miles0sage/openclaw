@@ -178,7 +178,7 @@ class _MemoryManagerStub:
 
     def get_due_reminders(self) -> list:
         """Get memories with remind_at in the past that haven't been reminded yet."""
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        now = datetime.now(timezone.utc).isoformat()
         if self._use_sb():
             rows = self._get_sb()["select"](
                 "memories",
@@ -824,7 +824,7 @@ if not AUTH_TOKEN:
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/coderclaw/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl", "/visionclaw", "/webhook/twilio", "/webhook/openclaw-jobs", "/webhook/slack-test", "/api/digest", "/api/ping", "/api/version"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/coderclaw/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl", "/visionclaw", "/webhook/twilio", "/webhook/openclaw-jobs", "/webhook/slack-test", "/api/digest"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
@@ -5207,16 +5207,6 @@ async def api_get_policy():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.get("/api/version")
-async def api_get_version():
-    """Get API version and codename"""
-    return {"version": "4.0", "codename": "mission-control"}
-
-
-@app.get("/api/ping")
-async def api_ping():
-    """Simple health check endpoint"""
-    return {"status": "pong", "timestamp": time.time()}
 @app.get("/control/avatar/{name}")
 async def api_control_avatar(name: str, meta: Optional[str] = None):
     """Return a placeholder for dashboard avatar requests."""
@@ -7619,51 +7609,6 @@ async def get_project_costs(request: Request):
     project = request.query_params.get("project")
     days = int(request.query_params.get("days", "7"))
     return get_project_cost_summary(project=project, days=days)
-
-
-@app.get("/api/monitoring/phases")
-async def get_pipeline_phases():
-    """Get pipeline phase configuration with allowed tools and descriptions."""
-    from autonomous_runner import (
-        Phase, RESEARCH_TOOLS, PLAN_TOOLS, EXECUTE_TOOLS, 
-        CODE_REVIEW_TOOLS, VERIFY_TOOLS, DELIVER_TOOLS
-    )
-    
-    phases = [
-        {
-            "name": Phase.RESEARCH.value,
-            "tools": RESEARCH_TOOLS,
-            "description": "Gather information, analyze requirements, and research the problem domain using web search, file exploration, and documentation review."
-        },
-        {
-            "name": Phase.PLAN.value,
-            "tools": PLAN_TOOLS,
-            "description": "Create a detailed execution plan by analyzing the codebase structure and breaking down the task into actionable steps."
-        },
-        {
-            "name": Phase.EXECUTE.value,
-            "tools": EXECUTE_TOOLS,
-            "description": "Implement the planned solution by writing code, running commands, managing files, and deploying changes."
-        },
-        {
-            "name": Phase.CODE_REVIEW.value,
-            "tools": CODE_REVIEW_TOOLS,
-            "description": "Review the implemented code for quality, correctness, and adherence to best practices through static analysis."
-        },
-        {
-            "name": Phase.VERIFY.value,
-            "tools": VERIFY_TOOLS,
-            "description": "Test and validate the implementation by running tests, checking functionality, and verifying the solution meets requirements."
-        },
-        {
-            "name": Phase.DELIVER.value,
-            "tools": DELIVER_TOOLS,
-            "description": "Finalize and deploy the solution by committing changes, deploying to production, and notifying stakeholders."
-        }
-    ]
-    
-    return {"phases": phases}
-
 
 
 # ═══════════════════════════════════════════════════════════════════════

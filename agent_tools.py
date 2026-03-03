@@ -16,6 +16,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 import httpx
 
+try:
+    from diff_view import format_edit_result
+    HAS_DIFF_VIEW = True
+except ImportError:
+    HAS_DIFF_VIEW = False
+
 logger = logging.getLogger("agent_tools")
 
 # ═══════════════════════════════════════════════════════════════
@@ -2600,6 +2606,10 @@ def _file_edit(path: str, old_string: str, new_string: str, replace_all: bool = 
 
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(new_content)
+
+        # Return diff-aware result if available (shows only changed lines)
+        if HAS_DIFF_VIEW:
+            return format_edit_result(path, content, new_content, success=True)
 
         replaced = content.count(old_string) if replace_all else 1
         return f"✅ Edited {path}: replaced {replaced} occurrence(s) ({len(new_content)} bytes written)"

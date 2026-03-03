@@ -28,10 +28,10 @@ OPENCODE_BIN = os.environ.get("OPENCODE_BIN", "/root/go/bin/opencode")
 # Default timeout for OpenCode execution (seconds)
 DEFAULT_TIMEOUT = 120
 
-# Cost per 1M tokens for OpenCode (estimated from typical usage)
+# Cost per 1M tokens for OpenCode (Gemini 2.5 Flash via opencode.json)
 OPENCODE_COST_PRICING = {
-    "input": 0.05,
-    "output": 0.08,
+    "input": 0.15,
+    "output": 0.60,
 }
 
 

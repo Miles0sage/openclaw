@@ -49,6 +49,12 @@ try:
 except ImportError:
     HAS_IDE_SESSION = False
 
+try:
+    from repo_map import generate_compact_map
+    HAS_REPO_MAP = True
+except ImportError:
+    HAS_REPO_MAP = False
+
 
 def _execute_tool_routed(tool_name: str, tool_input: dict, phase: str = "", job_id: str = "") -> str:
     """Execute tool through ToolRegistry (phase-gated + audited) with fallback."""
@@ -87,6 +93,11 @@ MAX_PLAN_STEPS = 10               # safety cap on plan step count (fewer = less 
 # hooks support, 80.9% SWE-bench accuracy. Toggle off with OPENCLAW_USE_SDK=0.
 USE_SDK = os.environ.get("OPENCLAW_USE_SDK", "1") == "1"
 
+# Oz executor — uses Warp Oz CLI for multi-model orchestration (GPT-5.2, Claude 4.6, Gemini 3 Pro).
+# Auto-selects best model per task. Falls back to OpenCode/SDK on failure.
+# Toggle off with OPENCLAW_USE_OZ=0.
+USE_OZ = os.environ.get("OPENCLAW_USE_OZ", "0") == "1"  # Disabled: needs WARP_API_KEY
+
 # OpenCode executor — uses Go-based OpenCode CLI for ~90% cost savings.
 # Falls back to Agent SDK on failure. Toggle off with OPENCLAW_USE_OPENCODE=0.
 USE_OPENCODE = os.environ.get("OPENCLAW_USE_OPENCODE", "1") == "1"
@@ -100,6 +111,7 @@ AGENT_MAP = {
     "elite_coder":     "elite_coder",        # MiniMax M2.5 — complex code
     "hacker_agent":    "hacker_agent",       # Kimi Reasoner — security
     "database_agent":  "database_agent",     # Claude Opus  — data / SQL
+    "code_reviewer":   "code_reviewer",      # Kimi 2.5    — PR/code review
 }
 
 # Tools available during each phase (restrict for safety)
@@ -120,6 +132,10 @@ EXECUTE_TOOLS = [
     "vercel_deploy", "process_manage", "env_manage",
 ]
 
+CODE_REVIEW_TOOLS = [
+    "file_read", "glob_files", "grep_search",
+]
+
 VERIFY_TOOLS = [
     "shell_execute", "file_read", "glob_files", "grep_search",
     "github_repo_info",
@@ -136,11 +152,12 @@ DELIVER_TOOLS = [
 # ---------------------------------------------------------------------------
 
 class Phase(str, Enum):
-    RESEARCH = "research"
-    PLAN     = "plan"
-    EXECUTE  = "execute"
-    VERIFY   = "verify"
-    DELIVER  = "deliver"
+    RESEARCH    = "research"
+    PLAN        = "plan"
+    EXECUTE     = "execute"
+    CODE_REVIEW = "code_review"
+    VERIFY      = "verify"
+    DELIVER     = "deliver"
 
 
 @dataclass
@@ -471,12 +488,39 @@ def _merge_worktree_changes(job_id: str, project_root: str) -> bool:
     return True
 
 
-def _filter_tools_for_phase(phase: Phase, agent_key: str = None) -> list:
+def _compact_description(desc: str, max_len: int = 100) -> str:
+    """Shorten a tool description to ≤max_len chars.
+
+    Strips fluff like 'Use when...' and 'Use this to...' keeping only the
+    core action.  Saves ~3000 tokens per agent call across 72 tools.
+    """
+    if len(desc) <= max_len:
+        return desc
+    # Drop trailing 'Use ...' sentences
+    sentences = desc.split(". ")
+    core = sentences[0]
+    if len(core) <= max_len:
+        return core + "." if not core.endswith(".") else core
+    return core[:max_len - 1] + "…"
+
+
+def _compact_tools(tools: list) -> list:
+    """Return tool defs with shortened descriptions (saves tokens)."""
+    compacted = []
+    for t in tools:
+        ct = dict(t)
+        ct["description"] = _compact_description(ct.get("description", ""))
+        compacted.append(ct)
+    return compacted
+
+
+def _filter_tools_for_phase(phase: Phase, agent_key: str = None, compact: bool = True) -> list:
     """Return the AGENT_TOOLS definitions filtered for a given phase.
 
     Uses ToolRegistry for phase gating (canonical source of truth).
     If agent_key is provided, further restricts to the agent's tool profile
     (intersection of phase tools and agent allowlist).
+    If compact=True, shortens descriptions to save tokens.
     """
     try:
         from tool_router import get_registry
@@ -485,11 +529,12 @@ def _filter_tools_for_phase(phase: Phase, agent_key: str = None) -> list:
     except ImportError:
         # Fallback to inline whitelists if tool_router not available
         allowed = {
-            Phase.RESEARCH: RESEARCH_TOOLS,
-            Phase.PLAN:     PLAN_TOOLS,
-            Phase.EXECUTE:  EXECUTE_TOOLS,
-            Phase.VERIFY:   VERIFY_TOOLS,
-            Phase.DELIVER:  DELIVER_TOOLS,
+            Phase.RESEARCH:    RESEARCH_TOOLS,
+            Phase.PLAN:        PLAN_TOOLS,
+            Phase.EXECUTE:     EXECUTE_TOOLS,
+            Phase.CODE_REVIEW: CODE_REVIEW_TOOLS,
+            Phase.VERIFY:      VERIFY_TOOLS,
+            Phase.DELIVER:     DELIVER_TOOLS,
         }.get(phase, EXECUTE_TOOLS)
         phase_tools = [t for t in AGENT_TOOLS if t["name"] in allowed]
 
@@ -503,7 +548,7 @@ def _filter_tools_for_phase(phase: Phase, agent_key: str = None) -> list:
         except ImportError:
             pass
 
-    return phase_tools
+    return _compact_tools(phase_tools) if compact else phase_tools
 
 
 def _classify_department(job: dict) -> str:
@@ -586,11 +631,13 @@ async def _call_agent_sdk(
         logger.error("claude_agent_sdk not installed — falling back to legacy path")
         raise  # Let caller handle fallback
 
-    # Select model based on priority
-    if priority == "P3":
-        model = "haiku"
-    else:
+    # Select model based on priority — default to Haiku (cheap) for SDK fallbacks.
+    # Only P0 critical jobs get Sonnet. This prevents expensive fallbacks when
+    # OpenCode fails (was causing $17+/day in Sonnet SDK costs).
+    if priority == "P0":
         model = "sonnet"
+    else:
+        model = "haiku"
 
     # Determine max turns from phase if not specified
     if max_turns <= 0:
@@ -757,6 +804,48 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
     # write tool calls as prose/code in their text response, which never executes.
     # Model selection: P3 -> Haiku (cheap), P0/P1/P2 -> Sonnet (better quality).
     if tools:
+        # --- Oz path: multi-model orchestration via Warp Oz CLI ---
+        if USE_OZ:
+            try:
+                from oz_executor import execute_with_oz_fallback
+
+                # Build system prompt with department context
+                oz_system = ""
+                if department and department in DEPARTMENTS:
+                    dept = DEPARTMENTS[department]
+                    oz_system = dept.system_prompt
+                else:
+                    oz_system = (
+                        "You are an autonomous AI agent executing a task step-by-step. "
+                        "Read/write files, run shell commands, and complete the task."
+                    )
+
+                # Determine workspace
+                oz_workspace = ""
+                ws_match = re.search(r"WORKSPACE DIRECTORY[^:]*:\s*(\S+)", prompt)
+                if ws_match and os.path.isdir(ws_match.group(1)):
+                    oz_workspace = ws_match.group(1)
+                elif job_id:
+                    job_run_dir = JOB_RUNS_DIR / job_id / "workspace"
+                    if job_run_dir.exists():
+                        oz_workspace = str(job_run_dir)
+
+                result = await execute_with_oz_fallback(
+                    prompt=prompt,
+                    workspace=oz_workspace or "/root/openclaw",
+                    job_id=job_id,
+                    phase=phase,
+                    priority=priority,
+                    guardrails=guardrails,
+                    system_prompt=oz_system,
+                )
+                return result
+
+            except ImportError:
+                logger.warning("oz_executor not available — falling back to OpenCode/SDK")
+            except Exception as oz_err:
+                logger.warning(f"Oz path failed for {job_id}/{phase}: {oz_err} — trying OpenCode/SDK")
+
         # --- OpenCode path: cheap execution via OpenCode CLI (~90% savings) ---
         if USE_OPENCODE:
             try:
@@ -1176,10 +1265,23 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
 
     else:
         # Non-tool call path (text-only, non-Anthropic provider)
+        # Add 90-second timeout to prevent Deepseek/Kimi API hangs from blocking forever
         loop = asyncio.get_running_loop()
-        response_text, tokens = await loop.run_in_executor(
-            None, call_model_for_agent, agent_key, prompt, conversation
-        )
+        try:
+            response_text, tokens = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, call_model_for_agent, agent_key, prompt, conversation
+                ),
+                timeout=90,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"API call timed out after 90s for agent={agent_key} job={job_id} phase={phase}")
+            return {
+                "text": f"[API timeout after 90s — {agent_key}/{config_provider}/{config_model}]",
+                "tokens": 0,
+                "tool_calls": [],
+                "cost_usd": 0.0,
+            }
         # Estimate cost for non-Anthropic models based on tokens
         est_cost = calculate_cost(config_model, tokens // 2, tokens // 2) if tokens else 0.0
         return {
@@ -1245,6 +1347,11 @@ async def _research_phase(job: dict, agent_key: str, progress: JobProgress,
     if bb_context:
         prompt += f"{bb_context}\n\n"
 
+    # Inject repo-map so agent skips exploratory file listing
+    repo_map = job.get("_repo_map")
+    if repo_map:
+        prompt += f"PROJECT STRUCTURE:\n{repo_map}\n\n"
+
     prompt += (
         f"Gather all the context you need:\n"
         f"1. Use research_task to understand the domain/technology involved\n"
@@ -1296,10 +1403,15 @@ async def _plan_phase(job: dict, agent_key: str, research: str,
     task = job["task"]
     project = job.get("project", "unknown")
 
+    # Inject repo-map so planner knows project structure
+    repo_map = job.get("_repo_map", "")
+    repo_map_section = f"PROJECT STRUCTURE:\n{repo_map}\n\n" if repo_map else ""
+
     prompt = (
         f"Based on the research below, create a concrete step-by-step plan to complete this task.\n\n"
         f"PROJECT: {project}\n"
         f"TASK: {task}\n\n"
+        f"{repo_map_section}"
         f"RESEARCH FINDINGS:\n{research}\n\n"
         f"Create a plan with numbered steps. For each step specify:\n"
         f"- A clear description of what to do\n"
@@ -1625,6 +1737,293 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
     return results
 
 
+# ---------------------------------------------------------------------------
+# Phase 3.5: TRIPLE AI CODE REVIEW
+# ---------------------------------------------------------------------------
+async def _code_review_phase(
+    job: dict,
+    execution_results: list,
+    progress: JobProgress,
+    guardrails: "JobGuardrails | None" = None,
+) -> dict:
+    """
+    Phase 3.5: CODE REVIEW (between EXECUTE and VERIFY)
+
+    Triple-review inspired by Elvis's agent swarm pattern:
+      1. Code Reviewer (Kimi 2.5 — $0.14/M) — logic errors, patterns, edge cases
+      2. Static analysis (free) — syntax checks on changed Python/JS files
+      3. Security review (Kimi Reasoner — $0.27/M) — only for security-relevant changes
+
+    Returns:
+        dict with reviews, issues_found, has_critical, passed, cost_usd
+    """
+    project = job.get("project", "unknown")
+    job_id = job["id"]
+
+    # Map projects to repo paths
+    project_paths = {
+        "barber-crm":     "/root/Barber-CRM",
+        "delhi-palace":   "/root/Delhi-Palace",
+        "openclaw":       "/root/openclaw",
+        "prestress-calc": "/root/Mathcad-Scripts",
+        "concrete-canoe": "/root/concrete-canoe-project2026",
+    }
+    repo_path = project_paths.get(project, f"/root/{project}")
+
+    # --- Collect the git diff of changes made during EXECUTE ---
+    git_diff = ""
+    try:
+        # Try uncommitted changes first
+        proc = await asyncio.create_subprocess_exec(
+            "git", "diff", "--stat", "--patch",
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+        git_diff = stdout.decode(errors="replace")
+
+        # If nothing uncommitted, check staged
+        if not git_diff.strip():
+            proc2 = await asyncio.create_subprocess_exec(
+                "git", "diff", "--cached", "--stat", "--patch",
+                cwd=repo_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout2, _ = await asyncio.wait_for(proc2.communicate(), timeout=15)
+            git_diff = stdout2.decode(errors="replace")
+
+        # If still nothing, try last commit
+        if not git_diff.strip():
+            proc3 = await asyncio.create_subprocess_exec(
+                "git", "diff", "HEAD~1", "--stat", "--patch",
+                cwd=repo_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout3, _ = await asyncio.wait_for(proc3.communicate(), timeout=15)
+            git_diff = stdout3.decode(errors="replace")
+    except Exception as e:
+        logger.warning(f"Job {job_id}: code review — git diff failed: {e}")
+
+    # Cap diff to avoid token explosion
+    git_diff = git_diff[:8000]
+
+    if not git_diff.strip():
+        logger.info(f"Job {job_id}: code review — no diff found, skipping")
+        return {
+            "reviews": [],
+            "review_count": 0,
+            "issues_found": 0,
+            "has_critical": False,
+            "passed": True,
+            "cost_usd": 0.0,
+            "summary": "No changes detected — review skipped",
+        }
+
+    # Build execution summary
+    steps_summary = "\n".join(
+        f"- Step {r.get('step', '?')}: {r.get('summary', r.get('status', '?'))}"
+        for r in execution_results
+    )
+
+    # --- Extract list of changed files from diff ---
+    changed_files = []
+    for line in git_diff.splitlines():
+        if line.startswith("diff --git"):
+            parts = line.split(" b/")
+            if len(parts) > 1:
+                changed_files.append(parts[-1])
+
+    logger.info(f"Job {job_id}: code review — {len(changed_files)} files changed, diff {len(git_diff)} chars")
+
+    reviews = []
+    total_cost = 0.0
+
+    # ---- REVIEW 1: Code Reviewer (Kimi 2.5 — $0.14/M, pattern-focused) ----
+    review_prompt = (
+        f"You are reviewing code changes for quality, correctness, and maintainability.\n\n"
+        f"TASK: {job['task']}\n"
+        f"PROJECT: {project}\n\n"
+        f"EXECUTION SUMMARY:\n{steps_summary}\n\n"
+        f"GIT DIFF:\n```\n{git_diff}\n```\n\n"
+        f"Review for:\n"
+        f"1. Logic errors or bugs\n"
+        f"2. Missing error handling for edge cases\n"
+        f"3. Code that doesn't match the task intent\n"
+        f"4. Regressions (breaking existing functionality)\n"
+        f"5. Naming and readability issues (critical only)\n\n"
+        f"Respond with ONLY a JSON object (no markdown fences):\n"
+        f'{{"severity": "pass|minor|major|critical", '
+        f'"issues": [{{"type": "bug|logic|edge_case|regression|style", '
+        f'"file": "filename", "description": "...", "suggestion": "..."}}], '
+        f'"summary": "one-line verdict"}}'
+    )
+
+    try:
+        r1 = await _call_agent(
+            "code_reviewer", review_prompt, tools=None,
+            job_id=job_id, phase="code_review",
+            guardrails=guardrails, priority=job.get("priority", "P2"),
+        )
+        total_cost += r1.get("cost_usd", 0)
+        reviews.append({
+            "reviewer": "code_reviewer",
+            "model": "kimi-2.5",
+            "cost_usd": r1.get("cost_usd", 0),
+            "response": r1.get("text", ""),
+        })
+        logger.info(f"Job {job_id}: code review #1 (Code Reviewer) done — ${r1.get('cost_usd', 0):.4f}")
+    except Exception as e:
+        logger.warning(f"Job {job_id}: code review #1 failed: {e}")
+        reviews.append({"reviewer": "code_reviewer", "error": str(e)})
+
+    # ---- REVIEW 2: Static Analysis (FREE — no LLM cost) ----
+    static_issues = []
+    py_files = [f for f in changed_files if f.endswith(".py")]
+    js_ts_files = [f for f in changed_files if f.endswith((".js", ".ts", ".tsx", ".jsx"))]
+
+    # Python syntax check
+    for pf in py_files[:10]:  # Cap at 10 files
+        full_path = os.path.join(repo_path, pf)
+        if os.path.isfile(full_path):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "python3", "-m", "py_compile", full_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+                if stderr:
+                    static_issues.append(f"Python syntax error in {pf}: {stderr.decode()[:200]}")
+            except Exception:
+                pass
+
+    # JS/TS syntax check via node --check
+    for jf in js_ts_files[:10]:
+        full_path = os.path.join(repo_path, jf)
+        if os.path.isfile(full_path) and jf.endswith(".js"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "node", "--check", full_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+                if stderr:
+                    static_issues.append(f"JS syntax error in {jf}: {stderr.decode()[:200]}")
+            except Exception:
+                pass
+
+    reviews.append({
+        "reviewer": "static_analysis",
+        "model": "none",
+        "cost_usd": 0.0,
+        "response": json.dumps({
+            "severity": "critical" if static_issues else "pass",
+            "issues": [{"type": "syntax", "description": i} for i in static_issues],
+            "summary": f"{len(static_issues)} syntax errors" if static_issues else "All files pass syntax check",
+        }),
+    })
+    logger.info(f"Job {job_id}: code review #2 (static analysis) — {len(static_issues)} issues")
+
+    # ---- REVIEW 3: Security Review (Kimi Reasoner — $0.27/M) ----
+    # Only for changes touching auth, API, database, or secrets
+    security_keywords = [
+        "auth", "token", "password", "session", "rls", "policy", "api_key",
+        "secret", "credential", "permission", "sql", "query", "inject",
+        "cookie", "cors", "csrf", "xss", "sanitiz", "encrypt", "hash",
+    ]
+    security_relevant = any(kw in git_diff.lower() for kw in security_keywords)
+
+    if security_relevant:
+        security_prompt = (
+            f"SECURITY CODE REVIEW — analyze these code changes for vulnerabilities.\n\n"
+            f"PROJECT: {project}\n"
+            f"TASK: {job['task']}\n\n"
+            f"GIT DIFF:\n```\n{git_diff}\n```\n\n"
+            f"Check for:\n"
+            f"1. Injection attacks (SQL, command, XSS)\n"
+            f"2. Authentication/authorization bypass\n"
+            f"3. Data leaks (secrets in code, PII exposure)\n"
+            f"4. Broken access control\n"
+            f"5. Insecure cryptography or session handling\n\n"
+            f"Respond with ONLY a JSON object (no markdown fences):\n"
+            f'{{"severity": "pass|minor|major|critical", '
+            f'"issues": [{{"type": "security", "description": "...", '
+            f'"file": "filename", "suggestion": "..."}}], '
+            f'"summary": "one-line security verdict"}}'
+        )
+
+        try:
+            r3 = await _call_agent(
+                "hacker_agent", security_prompt, tools=None,
+                job_id=job_id, phase="code_review",
+                guardrails=guardrails, priority=job.get("priority", "P2"),
+            )
+            total_cost += r3.get("cost_usd", 0)
+            reviews.append({
+                "reviewer": "pentest_ai",
+                "model": "kimi-reasoner",
+                "cost_usd": r3.get("cost_usd", 0),
+                "response": r3.get("text", ""),
+            })
+            logger.info(f"Job {job_id}: code review #3 (Pentest AI) done — ${r3.get('cost_usd', 0):.4f}")
+        except Exception as e:
+            logger.warning(f"Job {job_id}: code review #3 (security) failed: {e}")
+            reviews.append({"reviewer": "pentest_ai", "error": str(e)})
+    else:
+        logger.info(f"Job {job_id}: code review #3 skipped (no security-relevant changes)")
+
+    # ---- Aggregate Results ----
+    progress.cost_usd += total_cost
+    has_critical = False
+    all_issues = []
+
+    for review in reviews:
+        text = review.get("response", "")
+        parsed = None
+        # Try to extract JSON even if agent appends signature text after it
+        try:
+            parsed = json.loads(text) if text else {}
+        except (json.JSONDecodeError, TypeError):
+            # Agent may append signature (e.g. "— Pentest AI") after JSON
+            # Try extracting JSON substring between first { and last }
+            try:
+                start = text.index("{")
+                end = text.rindex("}") + 1
+                parsed = json.loads(text[start:end])
+            except (ValueError, json.JSONDecodeError, TypeError):
+                parsed = None
+
+        if parsed and isinstance(parsed, dict):
+            if parsed.get("severity") == "critical":
+                has_critical = True
+            all_issues.extend(parsed.get("issues", []))
+        elif text:
+            # Truly free-text response — only flag if explicit "CRITICAL" (uppercase) appears
+            if "CRITICAL" in text and "severity" not in text.lower():
+                has_critical = True
+
+    summary = (
+        f"{len(reviews)} reviews, {len(all_issues)} issues"
+        f"{', CRITICAL — BLOCKED' if has_critical else ', PASSED'}"
+    )
+    logger.info(f"Job {job_id}: code review complete — {summary}, cost ${total_cost:.4f}")
+
+    return {
+        "reviews": reviews,
+        "review_count": len(reviews),
+        "issues_found": len(all_issues),
+        "has_critical": has_critical,
+        "passed": not has_critical,
+        "cost_usd": total_cost,
+        "summary": summary,
+        "changed_files": changed_files,
+    }
+
+
 async def _verify_phase(job: dict, agent_key: str, execution_results: list,
                         progress: JobProgress,
                         guardrails: "JobGuardrails | None" = None,
@@ -1664,6 +2063,15 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
     if department and department in DEPARTMENTS:
         dept_verify = f"\nDEPARTMENT-SPECIFIC CHECKS:\n{DEPARTMENTS[department].verify_instruction}\n"
 
+    # Code review findings from Phase 3.5
+    code_review_section = ""
+    cr_issues = job.get("_code_review_issues", "")
+    if cr_issues:
+        code_review_section = (
+            f"\nCODE REVIEW FINDINGS (from triple AI review):\n{cr_issues}\n"
+            f"Pay special attention to these flagged issues during verification.\n"
+        )
+
     prompt = (
         f"You just completed execution of a task. Now verify the results.\n\n"
         f"PROJECT: {project}\n"
@@ -1674,11 +2082,14 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
         f"IMPORTANT: The actual project files are at {repo_path}, NOT in the workspace sandbox.\n"
         f"Use file_read and grep_search against {repo_path}/ paths to verify changes.\n\n"
         f"EXECUTION RESULTS:\n{steps_summary}\n\n"
+        f"{code_review_section}"
         f"Verification checklist:\n"
         f"1. Use shell_execute to run any relevant tests (pytest, jest, vitest, etc.) from {repo_path}\n"
-        f"2. Use shell_execute to run linting if applicable from {repo_path}\n"
+        f"2. If files were modified, lint ONLY the changed files — do NOT lint the entire project\n"
         f"3. Use file_read to spot-check created/modified files at {repo_path}/ for correctness\n"
-        f"4. Use grep_search to check for common issues (TODO, FIXME, console.log, etc.) in {repo_path}/\n"
+        f"4. Use grep_search to check for common issues (TODO, FIXME, console.log, etc.) ONLY in changed files\n"
+        f"5. If the task was read-only (no files modified), verify the output content is accurate\n"
+        f"\nIMPORTANT: Only fail verification for issues in THIS task's changes. Pre-existing issues are NOT blockers.\n"
         f"{dept_verify}\n"
         f"Respond with a JSON object:\n"
         f'{{"passed": true/false, "summary": "...", "issues": ["issue1", "issue2"]}}\n'
@@ -2635,6 +3046,18 @@ class AutonomousRunner:
             except Exception as sess_err:
                 logger.warning(f"Job {job_id}: IDE session init failed: {sess_err}")
 
+        # Generate repo-map for project context (saves agents 10-15 min exploration)
+        if HAS_REPO_MAP:
+            try:
+                repo_map_text = generate_compact_map(str(workspace))
+                if repo_map_text:
+                    job["_repo_map"] = repo_map_text[:2000]
+                    if ide_session:
+                        ide_session.add_context("repo_map", repo_map_text[:2000], source="repo_map", relevance=0.7, phase="research")
+                    logger.info(f"Job {job_id}: repo-map generated ({len(repo_map_text)} chars)")
+            except Exception as rm_err:
+                logger.warning(f"Job {job_id}: repo-map failed: {rm_err}")
+
         # --- Initialize guardrails for this job ---
         # Priority-based cost caps: P0 gets most headroom, P3 is cheapest
         job_priority = job.get("priority", "P2")
@@ -2704,12 +3127,20 @@ class AutonomousRunner:
                 raise CancelledError(job_id)
 
             # ---- Phase 2: PLAN ----
+            if ide_session:
+                ide_session.compact(target_tokens=6000)
+
             if _should_skip("plan"):
                 logger.info(f"Job {job_id}: Skipping plan (resuming from {resume_from_phase})")
                 # Create a minimal plan so execute phase has something to work with
-                plan = ExecutionPlan(steps=[
-                    PlanStep(index=0, description=job["task"], tool_hints=["file_read", "file_edit", "shell_execute"])
-                ])
+                plan = ExecutionPlan(
+                    job_id=job_id,
+                    agent=agent_key,
+                    steps=[
+                        PlanStep(index=0, description=job["task"], tool_hints=["file_read", "file_edit", "shell_execute"])
+                    ],
+                    created_at=_now_iso(),
+                )
                 result["phases"]["plan"] = {"status": "skipped"}
             else:
                 research_for_plan = _trim_context(research, max_tokens=3000)
@@ -2758,8 +3189,41 @@ class AutonomousRunner:
             if progress.cancelled:
                 raise CancelledError(job_id)
 
+            # ---- Phase 3.5: TRIPLE AI CODE REVIEW ----
+            code_review_result = {"passed": True, "reviews": [], "summary": "skipped"}
+            try:
+                code_review_result = await _code_review_phase(
+                    job, exec_results, progress, guardrails=guardrails,
+                )
+                result["phases"]["code_review"] = code_review_result
+                if ide_session:
+                    review_summary = code_review_result.get("summary", "")
+                    ide_session.add_context(
+                        "code_review", review_summary[:1500],
+                        source="code_review_phase", relevance=0.85, phase="code_review",
+                    )
+                    save_session(ide_session)
+
+                if code_review_result.get("has_critical"):
+                    logger.warning(
+                        f"Job {job_id}: code review BLOCKED — critical issues found. "
+                        f"Passing findings to verify phase for remediation check."
+                    )
+            except Exception as cr_err:
+                logger.warning(f"Job {job_id}: code review phase error (non-fatal): {cr_err}")
+                result["phases"]["code_review"] = {"error": str(cr_err), "passed": True}
+
+            if progress.cancelled:
+                raise CancelledError(job_id)
+
             # ---- Phase 4: VERIFY ----
+            if ide_session:
+                ide_session.compact(target_tokens=4000)
+
             if not _should_skip("verify"):
+                # Pass code review findings to verify phase so it knows what to double-check
+                if code_review_result.get("issues_found", 0) > 0:
+                    job["_code_review_issues"] = code_review_result.get("summary", "")
                 verify_result = await self._run_phase_with_retry(
                     "verify",
                     lambda: _verify_phase(job, agent_key, exec_results, progress, guardrails=guardrails, department=department),
@@ -2777,6 +3241,9 @@ class AutonomousRunner:
                 raise CancelledError(job_id)
 
             # ---- Phase 5: DELIVER ----
+            if ide_session:
+                ide_session.compact(target_tokens=3000)
+
             delivery = await self._run_phase_with_retry(
                 "deliver",
                 lambda: _deliver_phase(job, agent_key, verify_result, progress, guardrails=guardrails),
