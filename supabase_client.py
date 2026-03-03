@@ -112,7 +112,15 @@ def rpc(function_name: str, params: dict | None = None) -> dict | None:
 
 
 def is_connected() -> bool:
-    """Quick health check."""
+    """Check if Supabase connection is healthy.
+    
+    Performs a health check by making a lightweight GET request to the Supabase
+    REST API with a 5-second timeout. Returns True if the connection is healthy
+    (HTTP 200), False if the request fails or times out.
+    
+    Returns:
+        bool: True if connection is healthy, False on any error or timeout.
+    """
     try:
         resp = supabase_request("GET", "/rest/v1/jobs?limit=0", timeout=5)
         return resp.status_code == 200
