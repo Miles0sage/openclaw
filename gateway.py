@@ -7101,9 +7101,15 @@ async def recent_events():
 @app.get("/mission-control")
 @app.get("/mission-control.html")
 async def mission_control_page():
-    """Redirect to main dashboard (mission control consolidated)"""
-    from starlette.responses import RedirectResponse
-    return RedirectResponse(url="/dashboard.html", status_code=301)
+    """Serve Mission Control v4.0 dashboard"""
+    from starlette.responses import HTMLResponse
+    mc_path = os.path.join(os.path.dirname(__file__), "mission_control.html")
+    try:
+        with open(mc_path, "r") as f:
+            return HTMLResponse(content=f.read(), status_code=200)
+    except FileNotFoundError:
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(url="/dashboard.html", status_code=302)
 
 
 # ═══════════════════════════════════════════════════════════════════════
