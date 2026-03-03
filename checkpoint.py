@@ -90,10 +90,15 @@ def save_checkpoint(
     tool_iteration: int,
     state: dict,
     messages: list = None,
+    session_context: dict = None,
 ):
     """Save a checkpoint after a successful tool execution."""
     trimmed_messages = messages[-10:] if messages else []
     now = datetime.now(timezone.utc).isoformat()
+
+    # Merge session context into state for SQLite storage
+    if session_context:
+        state["_session_context"] = session_context
 
     # Try Supabase first
     if _use_supabase():
@@ -107,6 +112,8 @@ def save_checkpoint(
             "messages": json.dumps(trimmed_messages, default=str),
             "created_at": now,
         }
+        if session_context:
+            row["session_context"] = json.dumps(session_context, default=str)
         result = sb["insert"]("checkpoints", row)
         if result:
             logger.debug(f"Checkpoint saved (Supabase): job={job_id} phase={phase} step={step_index}")

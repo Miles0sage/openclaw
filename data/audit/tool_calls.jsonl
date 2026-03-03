@@ -1,0 +1,1 @@
+{"timestamp": 1772568312.0755725, "iso_time": "2026-03-03T20:05:12Z", "job_id": "test", "phase": "research", "tool": "shell_execute", "risk_level": "high", "status": "rejected", "elapsed_s": 0.0, "input_summary": {"command": "echo test"}, "output_length": 174}

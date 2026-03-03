@@ -43,6 +43,12 @@ except ImportError:
     _get_tool_registry = None
     PhaseViolationError = None
 
+try:
+    from ide_session import create_session, save_session, load_session, delete_session
+    HAS_IDE_SESSION = True
+except ImportError:
+    HAS_IDE_SESSION = False
+
 
 def _execute_tool_routed(tool_name: str, tool_input: dict, phase: str = "", job_id: str = "") -> str:
     """Execute tool through ToolRegistry (phase-gated + audited) with fallback."""
@@ -2620,6 +2626,15 @@ class AutonomousRunner:
         # Update job status to running
         update_job_status(job_id, "analyzing")
 
+        # Initialize IDE session for context tracking across phases
+        ide_session = None
+        if HAS_IDE_SESSION:
+            try:
+                ide_session = load_session(job_id) or create_session(job_id, project, str(workspace))
+                logger.info(f"Job {job_id}: IDE session {'resumed' if ide_session.updated_at != ide_session.created_at else 'created'}")
+            except Exception as sess_err:
+                logger.warning(f"Job {job_id}: IDE session init failed: {sess_err}")
+
         # --- Initialize guardrails for this job ---
         # Priority-based cost caps: P0 gets most headroom, P3 is cheapest
         job_priority = job.get("priority", "P2")
@@ -2680,6 +2695,10 @@ class AutonomousRunner:
                     progress,
                 )
                 result["phases"]["research"] = {"status": "done", "length": len(research)}
+                if ide_session:
+                    ide_session.set_phase("research")
+                    ide_session.add_context("research", research[:3000], source="research_phase", relevance=0.8, phase="research")
+                    save_session(ide_session)
 
             if progress.cancelled:
                 raise CancelledError(job_id)
@@ -2703,11 +2722,20 @@ class AutonomousRunner:
                     "status": "done",
                     "steps": len(plan.steps),
                 }
+                if ide_session:
+                    ide_session.set_phase("plan")
+                    plan_text = "\n".join(f"Step {s.index}: {s.description}" for s in plan.steps)
+                    ide_session.add_context("plan", plan_text[:3000], source="plan_phase", relevance=0.9, phase="plan")
+                    save_session(ide_session)
 
             if progress.cancelled:
                 raise CancelledError(job_id)
 
             # ---- Phase 3: EXECUTE ----
+            if ide_session:
+                ide_session.set_phase("execute")
+                ide_session.compact(target_tokens=4000)
+                save_session(ide_session)
             research_for_execute = _trim_context(research, max_tokens=1500)
             if not _should_skip("execute"):
                 update_job_status(job_id, "code_generated")
@@ -2741,6 +2769,9 @@ class AutonomousRunner:
                 logger.info(f"Job {job_id}: Skipping verify (resuming from {resume_from_phase})")
                 verify_result = {"status": "skipped"}
             result["phases"]["verify"] = verify_result
+            if ide_session:
+                ide_session.set_phase("verify")
+                save_session(ide_session)
 
             if progress.cancelled:
                 raise CancelledError(job_id)
@@ -2765,6 +2796,11 @@ class AutonomousRunner:
             # Mark success
             result["success"] = delivery.get("delivered", True)
             result["cost_usd"] = progress.cost_usd
+
+            # Clean up IDE session on success
+            if ide_session:
+                ide_session.set_phase("deliver")
+                save_session(ide_session)
 
             # Clear checkpoints on successful completion (no resume needed)
             clear_checkpoints(job_id)

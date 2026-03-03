@@ -31,6 +31,7 @@ COST_PRICING = {
     "gemini-2.5-flash-lite":      {"input": 0.10, "output": 0.40},
     "gemini-2.5-flash":           {"input": 0.30, "output": 2.50},
     "gemini-3-flash-preview":     {"input": 0.00, "output": 0.00},
+    "opencode":                    {"input": 0.05, "output": 0.08},
 }
 
 # Default fallback when a model is not in the table
