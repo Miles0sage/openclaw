@@ -5,6 +5,7 @@ Stores daily prediction files in data/predictions/{date}.json.
 Integrates with sports_model.py (predict + betting) and nba_api (actual scores).
 """
 
+import asyncio
 import json
 import os
 import time
@@ -13,6 +14,15 @@ from pathlib import Path
 
 PREDICTIONS_DIR = Path("/root/openclaw/data/predictions")
 PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _send_telegram_sync(text: str) -> None:
+    """Synchronous wrapper for async send_telegram function."""
+    try:
+        from alerts import send_telegram
+        asyncio.run(send_telegram(text))
+    except Exception:
+        pass  # Silently handle any telegram errors
 
 
 def prediction_tracker(action: str, date: str = "", bankroll: float = 100.0) -> str:
@@ -114,6 +124,34 @@ def _log_predictions(date: str, bankroll: float) -> str:
     filepath = PREDICTIONS_DIR / f"{target_date}.json"
     with open(filepath, "w") as f:
         json.dump(entry, f, indent=2)
+
+    # Send Telegram notification with prediction summary
+    num_games = len(entry["predictions"])
+    num_bets = len(entry["recommendations"])
+
+    if num_games > 0:
+        # Find the top pick by confidence
+        top_pick = max(entry["predictions"], key=lambda p: p.get("confidence", 0))
+        top_confidence = top_pick.get("confidence", 0)
+        top_team = top_pick.get("predicted_winner", "N/A")
+
+        # Find the biggest edge (highest EV)
+        biggest_edge = None
+        biggest_edge_ev = 0
+        for rec in entry["recommendations"]:
+            ev_pct = rec.get("ev_pct", 0)
+            if ev_pct > biggest_edge_ev:
+                biggest_edge_ev = ev_pct
+                biggest_edge = rec.get("bet_on", "N/A")
+
+        edge_str = f"\nBiggest edge: {biggest_edge} (+{biggest_edge_ev:.1f}% EV)" if biggest_edge else ""
+
+        tg_message = (
+            f"🏀 *NBA Predictions Logged* ({target_date})\n"
+            f"{num_games} games, {num_bets} bets\n"
+            f"Top pick: {top_team} ({top_confidence:.1f}% confidence){edge_str}"
+        )
+        _send_telegram_sync(tg_message)
 
     return json.dumps({
         "status": "logged",
@@ -339,6 +377,24 @@ def _check_results(date: str) -> str:
 
     with open(filepath, "w") as f:
         json.dump(entry, f, indent=2)
+
+    # Send Telegram notification with results
+    picks_correct = summary.get("picks_correct", 0)
+    picks_total = summary.get("picks_total", 0)
+    bets_won = summary.get("bets_won", 0)
+    bets_total = summary.get("bets_total", 0)
+    total_profit = summary.get("total_profit", 0)
+    roi_pct = summary.get("roi_pct", 0)
+
+    picks_pct = round(picks_correct / picks_total * 100, 1) if picks_total > 0 else 0
+
+    tg_message = (
+        f"📊 *NBA Results* ({target_date})\n"
+        f"Picks: {picks_correct}/{picks_total} ({picks_pct}%)\n"
+        f"Bets: {bets_won}/{bets_total} won\n"
+        f"Profit: ${total_profit:+.2f} (ROI: {roi_pct:+.1f}%)"
+    )
+    _send_telegram_sync(tg_message)
 
     return json.dumps({
         "date": target_date,
