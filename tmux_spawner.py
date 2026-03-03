@@ -75,6 +75,45 @@ class TmuxSpawner:
             _tmux("new-session", "-d", "-s", self.session, "-n", "control")
             _log(f"Created tmux session: {self.session}")
 
+    def _load_workspace_bootstrap(self) -> str:
+        """
+        Load workspace .md files for agent bootstrap context.
+        Returns concatenated content of IDENTITY.md, USER.md, HEARTBEAT.md, TOOLS.md
+        plus today's daily log. All files sized for token efficiency (~2KB each).
+        """
+        workspace = Path("/root/openclaw/workspace")
+        if not workspace.exists():
+            return ""
+
+        bootstrap_files = ["IDENTITY.md", "USER.md", "HEARTBEAT.md", "TOOLS.md"]
+        parts = []
+
+        # Load fixed bootstrap files
+        for fname in bootstrap_files:
+            fpath = workspace / fname
+            if fpath.exists():
+                try:
+                    content = fpath.read_text(encoding="utf-8")
+                    # Limit each file to 2000 chars to keep bootstrap token-efficient
+                    parts.append(f"## {fname}\n{content[:2000]}")
+                except Exception as e:
+                    _log(f"Failed to load {fname}: {e}")
+
+        # Load today's daily log
+        today = datetime.now().strftime("%Y-%m-%d")
+        daily = workspace / f"{today}.md"
+        if daily.exists():
+            try:
+                content = daily.read_text(encoding="utf-8")
+                # Limit daily log to 1500 chars
+                parts.append(f"## Daily Log ({today})\n{content[:1500]}")
+            except Exception as e:
+                _log(f"Failed to load daily log: {e}")
+
+        # Join with separators, max 8000 chars total
+        bootstrap = "\n\n---\n\n".join(parts)
+        return bootstrap[:8000]
+
     # ───────────────────────────────────────────────────────────
     # Worktree management
     # ───────────────────────────────────────────────────────────
@@ -155,6 +194,11 @@ class TmuxSpawner:
             work_dir = self._create_worktree(job_id, repo)
         elif not work_dir:
             work_dir = DEFAULT_REPO
+
+        # Load and inject workspace bootstrap context
+        bootstrap = self._load_workspace_bootstrap()
+        if bootstrap:
+            prompt = f"[WORKSPACE CONTEXT]\n{bootstrap}\n\n[USER MESSAGE]\n{prompt}"
 
         # Escape prompt for shell (write to file to avoid escaping nightmares)
         agent_outputs_dir = "/root/openclaw/data/agent_outputs"

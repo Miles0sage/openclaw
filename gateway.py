@@ -810,7 +810,7 @@ if not AUTH_TOKEN:
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl", "/visionclaw"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/coderclaw/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl", "/visionclaw"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
@@ -2955,6 +2955,433 @@ _TASK_PATTERNS = [
 
 TELEGRAM_OWNER_ID = os.getenv("TELEGRAM_USER_ID", "8475962905")
 
+# ═══════════════════════════════════════════════════════════════════════
+# CODERCLAW BOT — Dedicated Claude Code controller via Telegram
+# Persistent sessions: survives Cursor disconnects, resume from phone
+# ═══════════════════════════════════════════════════════════════════════
+
+CODERCLAW_BOT_TOKEN = os.getenv("CODERCLAW_BOT_TOKEN", "")
+CODERCLAW_SESSIONS_DIR = pathlib.Path("/root/openclaw/data/coderclaw_sessions")
+CODERCLAW_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _load_workspace_bootstrap() -> str:
+    """
+    Load workspace .md files for agent bootstrap context.
+    Returns concatenated content of IDENTITY.md, USER.md, HEARTBEAT.md, TOOLS.md
+    plus today's daily log. All files sized for token efficiency (~2KB each).
+    """
+    workspace = pathlib.Path("/root/openclaw/workspace")
+    if not workspace.exists():
+        return ""
+
+    bootstrap_files = ["IDENTITY.md", "USER.md", "HEARTBEAT.md", "TOOLS.md"]
+    parts = []
+
+    # Load fixed bootstrap files
+    for fname in bootstrap_files:
+        fpath = workspace / fname
+        if fpath.exists():
+            try:
+                content = fpath.read_text(encoding="utf-8")
+                # Limit each file to 2000 chars to keep bootstrap token-efficient
+                parts.append(f"## {fname}\n{content[:2000]}")
+            except Exception as e:
+                logger.warning(f"Failed to load {fname}: {e}")
+
+    # Load today's daily log
+    today = datetime.now().strftime("%Y-%m-%d")
+    daily = workspace / f"{today}.md"
+    if daily.exists():
+        try:
+            content = daily.read_text(encoding="utf-8")
+            # Limit daily log to 1500 chars
+            parts.append(f"## Daily Log ({today})\n{content[:1500]}")
+        except Exception as e:
+            logger.warning(f"Failed to load daily log: {e}")
+
+    # Join with separators, max 8000 chars total
+    bootstrap = "\n\n---\n\n".join(parts)
+    return bootstrap[:8000]
+
+
+async def _cc_send(chat_id, text: str, reply_to: int = None):
+    """Send a message via CoderClaw bot."""
+    if not CODERCLAW_BOT_TOKEN:
+        return
+    url = f"https://api.telegram.org/bot{CODERCLAW_BOT_TOKEN}/sendMessage"
+    chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
+    async with httpx.AsyncClient(timeout=15) as client:
+        for i, chunk in enumerate(chunks):
+            payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML"}
+            if reply_to and i == 0:
+                payload["reply_to_message_id"] = reply_to
+                payload["allow_sending_without_reply"] = True
+            try:
+                resp = await client.post(url, json=payload)
+                if resp.status_code != 200:
+                    payload.pop("parse_mode", None)
+                    payload.pop("reply_to_message_id", None)
+                    await client.post(url, json=payload)
+            except Exception as e:
+                logger.error(f"CoderClaw send error: {e}")
+
+
+async def _cc_typing(chat_id):
+    """Send typing indicator via CoderClaw bot."""
+    if not CODERCLAW_BOT_TOKEN:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{CODERCLAW_BOT_TOKEN}/sendChatAction",
+                json={"chat_id": chat_id, "action": "typing"}
+            )
+    except Exception:
+        pass
+
+
+def _cc_get_session(chat_id: str) -> dict:
+    """Load CoderClaw session for a chat. Tracks claude session_id for --resume."""
+    session_file = CODERCLAW_SESSIONS_DIR / f"{chat_id}.json"
+    if session_file.exists():
+        with open(session_file) as f:
+            return json.load(f)
+    return {"chat_id": str(chat_id), "claude_session_id": None, "history": [], "project": "/root"}
+
+
+def _cc_save_session(chat_id: str, session: dict):
+    """Save CoderClaw session."""
+    session_file = CODERCLAW_SESSIONS_DIR / f"{chat_id}.json"
+    with open(session_file, "w") as f:
+        json.dump(session, f, indent=2)
+
+
+async def _cc_run_claude(prompt: str, session: dict, cwd: str = "/root") -> tuple[str, str | None]:
+    """
+    Run Claude Code headless with session resume. Returns (output, session_id).
+    Uses --resume to maintain conversation continuity across Telegram messages.
+    Deterministic session IDs ensure sessions always resume even if JSON parsing fails.
+    Injects workspace bootstrap context (IDENTITY, USER, TOOLS, HEARTBEAT) before user prompt.
+    """
+    import subprocess as _sp
+
+    # Load workspace bootstrap context (identity, user prefs, tools, heartbeat)
+    bootstrap = _load_workspace_bootstrap()
+    if bootstrap:
+        prompt = f"[WORKSPACE CONTEXT]\n{bootstrap}\n\n[USER MESSAGE]\n{prompt}"
+
+    claude_cmd = ["/root/.local/bin/claude", "-p", prompt, "--output-format", "json"]
+
+    # Deterministic session ID from chat_id so sessions always resume
+    chat_id = session.get("chat_id", "default")
+    deterministic_uuid = str(uuid.UUID(hashlib.md5(f"coderclaw-{chat_id}".encode()).hexdigest()))
+
+    # Resume existing session or start with deterministic ID
+    if session.get("claude_session_id"):
+        claude_cmd.extend(["--resume", session["claude_session_id"]])
+    else:
+        claude_cmd.extend(["--session-id", deterministic_uuid])
+
+    # Allow all tools for full agent capability
+    claude_cmd.extend([
+        "--allowedTools", "Bash(command:*)", "Read", "Write", "Edit",
+        "Glob", "Grep", "WebFetch", "WebSearch", "Agent",
+        "--max-turns", "25",
+        "--max-budget-usd", "2.00",
+    ])
+
+    # Give CoderClaw access to all OpenClaw MCP tools if config exists
+    mcp_config = "/root/.claude/mcp.json"
+    if os.path.isfile(mcp_config):
+        claude_cmd.extend(["--mcp-config", mcp_config])
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *claude_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
+            env={**os.environ, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"},
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        output_text = stdout.decode("utf-8", errors="replace")
+
+        # Parse JSON output to extract session_id and result
+        session_id = session.get("claude_session_id")
+        result_text = output_text
+
+        try:
+            parsed = json.loads(output_text)
+            session_id = parsed.get("session_id", session_id)
+            result_text = parsed.get("result", output_text)
+        except json.JSONDecodeError:
+            # Multi-line JSON or plain text — extract what we can
+            for line in output_text.strip().split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    if "session_id" in obj:
+                        session_id = obj["session_id"]
+                    if "result" in obj:
+                        result_text = obj["result"]
+                except json.JSONDecodeError:
+                    continue
+
+        return result_text[:3800], session_id
+
+    except asyncio.TimeoutError:
+        return "Claude Code timed out after 5 minutes. The task may still be running in the background.", session.get("claude_session_id")
+    except Exception as e:
+        return f"Error running Claude Code: {e}", session.get("claude_session_id")
+
+
+@app.post("/coderclaw/webhook")
+async def coderclaw_webhook(request: Request):
+    """
+    CoderClaw bot — Dedicated Claude Code controller via Telegram.
+
+    Every message runs through Claude Code with --resume for session continuity.
+    Returns 200 immediately and processes in background to prevent Telegram retries.
+    Commands:
+      /start — Welcome message
+      /new — Start a fresh session (reset session_id)
+      /status — Show running agents and session info
+      /project <path> — Set working directory
+      /output <job_id> — Get tmux agent output
+      /spawn <task> — Spawn a long-running tmux agent (for big tasks)
+      /kill <id|all> — Kill tmux agents
+      Everything else — Runs through Claude Code with session resume
+    """
+    try:
+        update = await request.json()
+        if "message" not in update:
+            return {"ok": True}
+
+        # ── Dedup: reject retried updates ──
+        update_id = update.get("update_id")
+        if not hasattr(app.state, "_cc_seen_updates"):
+            app.state._cc_seen_updates = {}
+        now = time.time()
+        # Clean old entries (>5 min)
+        app.state._cc_seen_updates = {
+            k: v for k, v in app.state._cc_seen_updates.items() if now - v < 300
+        }
+        if update_id in app.state._cc_seen_updates:
+            logger.info(f"CoderClaw dedup: skipping update_id {update_id}")
+            return {"ok": True}
+        app.state._cc_seen_updates[update_id] = now
+
+        message = update["message"]
+        chat_id = str(message["chat"]["id"])
+        user_id = str(message["from"]["id"])
+        text = message.get("text", "")
+        msg_id = message.get("message_id")
+
+        if not text:
+            return {"ok": True}
+
+        # Owner-only
+        if TELEGRAM_OWNER_ID and user_id != TELEGRAM_OWNER_ID:
+            return {"ok": True}
+
+        logger.info(f"CoderClaw from {user_id}: {text[:80]}")
+
+        # ── Quick commands: handle inline, return fast ──
+        quick_commands = ["/start", "/new", "/status", "/project", "/output", "/kill"]
+        is_quick = any(text.strip().lower().startswith(cmd) for cmd in quick_commands)
+
+        if is_quick:
+            # Handle quick commands inline (fast, no bg needed)
+            await _cc_typing(chat_id)
+
+        # Load session
+        session = _cc_get_session(chat_id)
+
+        # ── /start ──
+        if text.strip().lower() == "/start":
+            await _cc_send(chat_id, (
+                "<b>CoderClaw — Claude Code via Telegram</b>\n\n"
+                "Send any message and I'll run it through Claude Code on your VPS.\n\n"
+                "<b>Commands:</b>\n"
+                "/new — Fresh session\n"
+                "/status — Running agents\n"
+                "/project &lt;path&gt; — Set working directory\n"
+                "/spawn &lt;task&gt; — Long-running tmux agent\n"
+                "/output &lt;job_id&gt; — Get agent output\n"
+                "/kill &lt;id|all&gt; — Kill agents\n\n"
+                "Everything else goes straight to Claude Code with session persistence. "
+                "Your conversation carries over even if Cursor disconnects."
+            ), reply_to=msg_id)
+            return {"ok": True}
+
+        # ── /new ──
+        if text.strip().lower() == "/new":
+            session["claude_session_id"] = None
+            session["history"] = []
+            _cc_save_session(chat_id, session)
+            await _cc_send(chat_id, "Session reset. Next message starts a fresh Claude Code conversation.", reply_to=msg_id)
+            return {"ok": True}
+
+        # ── /project <path> ──
+        proj_match = _re_tg.match(r'^/project\s+(.+)', text.strip())
+        if proj_match:
+            new_path = proj_match.group(1).strip()
+            if os.path.isdir(new_path):
+                session["project"] = new_path
+                _cc_save_session(chat_id, session)
+                await _cc_send(chat_id, f"Working directory set to: <code>{new_path}</code>", reply_to=msg_id)
+            else:
+                await _cc_send(chat_id, f"Directory not found: {new_path}", reply_to=msg_id)
+            return {"ok": True}
+
+        # ── /status ──
+        if text.strip().lower() == "/status":
+            lines = [f"<b>CoderClaw Status</b>\n"]
+            lines.append(f"Session ID: <code>{session.get('claude_session_id', 'none')}</code>")
+            lines.append(f"Project: <code>{session.get('project', '/root')}</code>")
+            lines.append(f"History: {len(session.get('history', []))} messages\n")
+
+            try:
+                from tmux_spawner import get_spawner
+                agents = get_spawner().list_agents()
+                if agents:
+                    lines.append(f"<b>{len(agents)} tmux agents running:</b>")
+                    for a in agents:
+                        lines.append(f"  {a['job_id'] or a['window_name']} — {a['status']} ({a['runtime_human']})")
+                else:
+                    lines.append("No tmux agents running.")
+            except Exception:
+                lines.append("Could not check tmux agents.")
+
+            await _cc_send(chat_id, "\n".join(lines), reply_to=msg_id)
+            return {"ok": True}
+
+        # ── /spawn <task> — long-running tmux agent ──
+        spawn_match = _re_tg.match(r'^/spawn\s+(.+)', text.strip(), _re_tg.IGNORECASE)
+        if spawn_match:
+            task = spawn_match.group(1).strip()
+            try:
+                from tmux_spawner import get_spawner
+                spawner = get_spawner()
+                job_id = f"cc-{int(time.time())}"
+                cwd = session.get("project", "/root")
+                prompt = (
+                    f"You are CoderClaw, a Claude Code agent running on the VPS.\n"
+                    f"Working directory: {cwd}\n"
+                    f"Task from Miles via Telegram: {task}\n\n"
+                    f"Do the work thoroughly. Commit and push when done. Write a summary."
+                )
+                pane_id = spawner.spawn_agent(job_id=job_id, prompt=prompt, cwd=cwd, timeout_minutes=30)
+                await _cc_send(chat_id, (
+                    f"<b>Agent spawned in tmux</b>\n"
+                    f"Job: <code>{job_id}</code>\n"
+                    f"Task: {task[:300]}\n"
+                    f"CWD: {cwd}\n\n"
+                    f"Check output: /output {job_id}"
+                ), reply_to=msg_id)
+            except Exception as e:
+                await _cc_send(chat_id, f"Spawn failed: {e}", reply_to=msg_id)
+            return {"ok": True}
+
+        # ── /output <job_id> ──
+        out_match = _re_tg.match(r'^/output\s+(\S+)', text.strip(), _re_tg.IGNORECASE)
+        if out_match:
+            job_id = out_match.group(1)
+            output_file = f"/root/openclaw/data/agent_outputs/openclaw-output-{job_id}.txt"
+            if os.path.exists(output_file):
+                with open(output_file) as f:
+                    content = f.read()
+                tail = content[-3000:] if len(content) > 3000 else content
+                await _cc_send(chat_id, f"<b>Output {job_id}:</b>\n<pre>{tail}</pre>", reply_to=msg_id)
+            else:
+                # Try tmux pane capture
+                try:
+                    from tmux_spawner import get_spawner
+                    spawner = get_spawner()
+                    output = spawner.collect_output("", job_id=job_id)
+                    await _cc_send(chat_id, f"<b>Output {job_id}:</b>\n<pre>{output[-3000:]}</pre>", reply_to=msg_id)
+                except Exception:
+                    await _cc_send(chat_id, f"No output found for {job_id}", reply_to=msg_id)
+            return {"ok": True}
+
+        # ── /kill <id|all> ──
+        kill_match = _re_tg.match(r'^/kill\s+(.+)', text.strip(), _re_tg.IGNORECASE)
+        if kill_match:
+            target = kill_match.group(1).strip()
+            try:
+                from tmux_spawner import get_spawner
+                spawner = get_spawner()
+                if target.lower() == "all":
+                    count = spawner.kill_all()
+                    await _cc_send(chat_id, f"Killed {count} agents.", reply_to=msg_id)
+                else:
+                    killed = False
+                    for a in spawner.list_agents():
+                        if a["job_id"] == target or target in (a.get("pane_id", ""), a.get("window_name", "")):
+                            spawner.kill_agent(a["pane_id"])
+                            killed = True
+                            break
+                    await _cc_send(chat_id, f"{'Killed' if killed else 'Not found'}: {target}", reply_to=msg_id)
+            except Exception as e:
+                await _cc_send(chat_id, f"Kill failed: {e}", reply_to=msg_id)
+            return {"ok": True}
+
+        # ── Slow path: return 200 immediately, process in background ──
+        # This prevents Telegram from retrying after 60s timeout
+        async def _cc_process_slow(chat_id, text, session, msg_id):
+            """Background task for Claude Code execution (can take minutes)."""
+            try:
+                # ── Route big tasks to the OpenClaw job system ──
+                job_keywords = ["build", "deploy", "refactor", "create", "implement", "fix all", "redesign", "migrate"]
+                if any(kw in text.lower() for kw in job_keywords) and len(text) > 50:
+                    try:
+                        from job_manager import create_job as _jm_create_job
+                        project_path = session.get("project", "/root")
+                        project_name = os.path.basename(project_path.rstrip("/")) or "openclaw"
+                        job = _jm_create_job(project=project_name, task=text, priority="P1")
+                        await _cc_send(chat_id, (
+                            f"<b>Task queued as job</b>\n"
+                            f"Job ID: <code>{job.id}</code>\n"
+                            f"Project: <code>{project_name}</code>\n"
+                            f"Priority: P1\n\n"
+                            f"This task is too large for inline execution. "
+                            f"An agent will pick it up shortly.\n"
+                            f"Check status: /status"
+                        ), reply_to=msg_id)
+                        return
+                    except Exception as e:
+                        logger.warning(f"CoderClaw job routing failed, falling back to inline: {e}")
+
+                # ── DEFAULT: Run through Claude Code with --resume ──
+                cwd = session.get("project", "/root")
+                await _cc_typing(chat_id)
+
+                result, new_session_id = await _cc_run_claude(text, session, cwd=cwd)
+
+                # Update session
+                if new_session_id:
+                    session["claude_session_id"] = new_session_id
+                session["history"].append({"role": "user", "content": text, "ts": time.time()})
+                session["history"].append({"role": "assistant", "content": result[:500], "ts": time.time()})
+                if len(session["history"]) > 100:
+                    session["history"] = session["history"][-60:]
+                _cc_save_session(chat_id, session)
+
+                await _cc_send(chat_id, result, reply_to=msg_id)
+            except Exception as e:
+                logger.error(f"CoderClaw background processing error: {e}")
+                await _cc_send(chat_id, f"Error: {e}", reply_to=msg_id)
+
+        asyncio.create_task(_cc_process_slow(chat_id, text, session, msg_id))
+        return {"ok": True}  # Return immediately so Telegram doesn't retry
+
+    except Exception as e:
+        logger.error(f"CoderClaw webhook error: {e}")
+        return {"ok": False, "error": str(e)}
+
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
@@ -2964,6 +3391,19 @@ async def telegram_webhook(request: Request):
 
         if "message" not in update:
             return {"ok": True}
+
+        # ── Dedup: reject retried updates ──
+        update_id = update.get("update_id")
+        if not hasattr(app.state, "_tg_seen_updates"):
+            app.state._tg_seen_updates = {}
+        now = time.time()
+        app.state._tg_seen_updates = {
+            k: v for k, v in app.state._tg_seen_updates.items() if now - v < 300
+        }
+        if update_id in app.state._tg_seen_updates:
+            logger.info(f"Telegram dedup: skipping update_id {update_id}")
+            return {"ok": True}
+        app.state._tg_seen_updates[update_id] = now
 
         message = update["message"]
         chat_id = message["chat"]["id"]
@@ -3335,46 +3775,49 @@ async def telegram_webhook(request: Request):
 
         # ═══════════════════════════════════════════════
         # 6. NORMAL CHAT — Route through Claude for conversation
+        # Runs in background to prevent Telegram retry duplicates
         # ═══════════════════════════════════════════════
-        try:
-            session_history = load_session_history(session_key)
-            messages_for_api = [
-                {"role": msg["role"], "content": msg["content"]}
-                for msg in session_history
-            ]
-            messages_for_api.append({"role": "user", "content": text})
-
-            client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-            route_decision = agent_router.select_agent(text)
-            agent_config = CONFIG.get("agents", {}).get(route_decision["agentId"], {})
-            system_prompt = build_channel_system_prompt(agent_config)
-            model = agent_config.get("model", "claude-opus-4-6")
-
-            assistant_message = await call_claude_with_tools(
-                client, model, system_prompt, messages_for_api
-            )
-
-            session_history.append({"role": "user", "content": text})
-            session_history.append({"role": "assistant", "content": assistant_message})
-            save_session_history(session_key, session_history)
-
+        async def _tg_process_chat(chat_id, text, session_key, msg_id):
             try:
-                mm = get_memory_manager()
-                if mm:
-                    mm.auto_extract_memories([
-                        {"role": "user", "content": text},
-                        {"role": "assistant", "content": assistant_message}
-                    ])
-            except Exception:
-                pass
+                session_history = load_session_history(session_key)
+                messages_for_api = [
+                    {"role": msg["role"], "content": msg["content"]}
+                    for msg in session_history
+                ]
+                messages_for_api.append({"role": "user", "content": text})
 
-            await _tg_send(chat_id, assistant_message, reply_to=msg_id)
+                client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+                route_decision = agent_router.select_agent(text)
+                agent_config = CONFIG.get("agents", {}).get(route_decision["agentId"], {})
+                system_prompt = build_channel_system_prompt(agent_config)
+                model = agent_config.get("model", "claude-opus-4-6")
 
-        except Exception as e:
-            logger.error(f"Telegram chat error: {e}")
-            await _tg_send(chat_id, f"Error: {str(e)[:500]}", reply_to=msg_id)
+                assistant_message = await call_claude_with_tools(
+                    client, model, system_prompt, messages_for_api
+                )
 
-        return {"ok": True}
+                session_history.append({"role": "user", "content": text})
+                session_history.append({"role": "assistant", "content": assistant_message})
+                save_session_history(session_key, session_history)
+
+                try:
+                    mm = get_memory_manager()
+                    if mm:
+                        mm.auto_extract_memories([
+                            {"role": "user", "content": text},
+                            {"role": "assistant", "content": assistant_message}
+                        ])
+                except Exception:
+                    pass
+
+                await _tg_send(chat_id, assistant_message, reply_to=msg_id)
+
+            except Exception as e:
+                logger.error(f"Telegram chat error: {e}")
+                await _tg_send(chat_id, f"Error: {str(e)[:500]}", reply_to=msg_id)
+
+        asyncio.create_task(_tg_process_chat(chat_id, text, session_key, msg_id))
+        return {"ok": True}  # Return immediately so Telegram doesn't retry
 
     except Exception as e:
         logger.error(f"Telegram webhook error: {e}")
