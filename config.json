@@ -272,10 +272,13 @@
       "name": "Memory Agent",
       "emoji": "\ud83e\udde0",
       "type": "memory",
+      "model": "gemini-2.5-flash",
+      "apiProvider": "gemini",
       "local": true,
       "persona": "I manage persistent knowledge across sessions. I store user profiles, conversation history, and contextual preferences using SQLite and Redis.",
       "skills": ["session_management", "user_profiles", "context_recall"],
-      "talks_to": ["Cybershield PM"]
+      "talks_to": ["Cybershield PM"],
+      "costSavings": "Free tier (Gemini 2.5 Flash)"
     },
     "vision_agent": {
       "name": "Vision AI",

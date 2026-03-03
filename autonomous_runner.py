@@ -22,6 +22,7 @@ Architecture:
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -80,6 +81,35 @@ MAX_TOOL_ITERATIONS = 15          # safety cap on agent tool loops per step
 TOOL_NUDGE_THRESHOLD = 10         # after this many iterations, nudge agent to finish up
 LOOP_DETECT_THRESHOLD = 3         # same tool+args called this many times → force break
 MAX_PLAN_STEPS = 10               # safety cap on plan step count (fewer = less iteration burn)
+
+
+def _make_call_signature(tool_name: str, tool_input) -> str:
+    """Create a deterministic signature for loop detection.
+
+    Uses hashlib.md5 instead of hash() to avoid Python's hash randomization
+    which can produce different values across runs and collisions.
+    """
+    if isinstance(tool_input, dict):
+        input_str = str(sorted(tool_input.items()))
+    else:
+        input_str = str(tool_input)
+    input_hash = hashlib.md5(input_str.encode()).hexdigest()[:12]
+    return f"{tool_name}:{input_hash}"
+
+
+def _check_loop(call_sig: str, counts: dict, job_id: str, phase: str) -> bool:
+    """Check if a tool call has been repeated too many times.
+
+    Returns True if loop detected (caller should break).
+    """
+    counts[call_sig] = counts.get(call_sig, 0) + 1
+    if counts[call_sig] >= LOOP_DETECT_THRESHOLD:
+        tool_name = call_sig.split(":")[0]
+        logger.warning(
+            f"Loop detected for {job_id}/{phase}: {tool_name} called {counts[call_sig]}x with same args"
+        )
+        return True
+    return False
 
 # Agent SDK integration — uses Claude Code's native tool execution engine instead of
 # our manual tool-use loop. Benefits: native context compaction, better tool handling,
@@ -1082,13 +1112,9 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                     tool_results.append({"type": "tool_result", "tool_use_id": tc_id, "content": result_str})
 
                     # --- Loop detection: track repeated tool calls ---
-                    call_sig = f"{tool_name}:{hash(str(sorted(tool_input.items()) if isinstance(tool_input, dict) else str(tool_input)))}"
-                    _tool_call_counts[call_sig] = _tool_call_counts.get(call_sig, 0) + 1
-                    if _tool_call_counts[call_sig] >= LOOP_DETECT_THRESHOLD:
+                    call_sig = _make_call_signature(tool_name, tool_input)
+                    if _check_loop(call_sig, _tool_call_counts, job_id, phase):
                         _loop_detected = True
-                        logger.warning(
-                            f"Loop detected for {job_id}/{phase}: {tool_name} called {_tool_call_counts[call_sig]}x with same args"
-                        )
 
                 messages.append({"role": "assistant", "content": serialized_content})
                 messages.append({"role": "user", "content": tool_results})
@@ -1214,13 +1240,9 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                     })
 
                     # --- Loop detection: track repeated tool calls ---
-                    call_sig = f"{tool_name}:{hash(str(sorted(tool_input.items()) if isinstance(tool_input, dict) else str(tool_input)))}"
-                    _tool_call_counts[call_sig] = _tool_call_counts.get(call_sig, 0) + 1
-                    if _tool_call_counts[call_sig] >= LOOP_DETECT_THRESHOLD:
+                    call_sig = _make_call_signature(tool_name, tool_input)
+                    if _check_loop(call_sig, _tool_call_counts, job_id, phase):
                         _loop_detected = True
-                        logger.warning(
-                            f"Loop detected for {job_id}/{phase}: {tool_name} called {_tool_call_counts[call_sig]}x with same args"
-                        )
 
                 # Nudge agent to wrap up if approaching iteration limit
                 if iterations == TOOL_NUDGE_THRESHOLD and tool_results:

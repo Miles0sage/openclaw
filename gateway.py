@@ -1665,9 +1665,25 @@ async def health():
     """Health check endpoint"""
     return {
         "status": "operational",
-        "gateway": "OpenClaw-FIXED-2026-02-18",
-        "version": "2.1.0",
+        "gateway": "OpenClaw v4.1",
+        "version": "4.1.0",
         "agents_active": len(CONFIG.get("agents", {})),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+@app.get("/api/health")
+async def api_health():
+    """System health endpoint — used by monitoring, dashboards, and probes."""
+    import psutil
+    process = psutil.Process()
+    uptime_seconds = time.time() - process.create_time()
+    return {
+        "status": "operational",
+        "version": "4.1.0",
+        "uptime_seconds": int(uptime_seconds),
+        "uptime_human": f"{int(uptime_seconds // 3600)}h {int((uptime_seconds % 3600) // 60)}m",
+        "agents_configured": len(CONFIG.get("agents", {})),
+        "memory_mb": round(process.memory_info().rss / 1024 / 1024, 1),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
