@@ -197,7 +197,15 @@ def get_job(job_id: str) -> dict:
 
 
 def get_pending_jobs(limit: int = 10):
-    """Get pending jobs, ordered by priority then creation time."""
+    """Get pending jobs, ordered by priority then creation time.
+
+    Merges results from Supabase AND local JSONL to catch jobs that
+    were created in either store (MCP subprocess may not have Supabase).
+    """
+    seen_ids = set()
+    jobs = []
+
+    # Check Supabase first
     if _use_supabase():
         sb = _sb()
         rows = sb["select"](
@@ -205,16 +213,19 @@ def get_pending_jobs(limit: int = 10):
             "status=eq.pending&order=priority.asc,created_at.asc",
             limit=limit,
         )
-        if rows is not None:
-            return rows
-    # Fallback
-    jobs = []
+        if rows:
+            for r in rows:
+                seen_ids.add(r["id"])
+                jobs.append(r)
+
+    # Also check JSONL (catches jobs not in Supabase)
     for job in _locked_read_jobs():
-        if job["status"] == "pending":
+        if job["status"] == "pending" and job["id"] not in seen_ids:
             jobs.append(job)
             if len(jobs) >= limit:
                 break
-    return jobs
+
+    return jobs[:limit]
 
 
 def update_job_status(job_id: str, status: str, **kwargs):

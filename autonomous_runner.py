@@ -220,6 +220,71 @@ def _trim_context(text: str, max_tokens: int = 2000) -> str:
     return trimmed + f"\n\n[... truncated from {len(text)} to {max_chars} chars (~{max_tokens} tokens) to save tokens ...]"
 
 
+PROJECT_ROOTS = {
+    "barber-crm": "/root/Barber-CRM/nextjs-app",
+    "delhi-palace": "/root/Delhi-Palace",
+    "openclaw": "/root/openclaw",
+    "prestress-calc": "/root/Mathcad-Scripts",
+    "concrete-canoe": "/root/concrete-canoe-project2026",
+}
+
+
+def _load_project_context(project: str) -> str:
+    """Load CLAUDE.md and component manifest for a project.
+
+    This gives the agent accurate knowledge of what files/components exist,
+    preventing it from importing non-existent modules.
+    """
+    root = PROJECT_ROOTS.get(project, "")
+    if not root:
+        return ""
+
+    parts = []
+
+    # Load CLAUDE.md if it exists (truncated to save tokens)
+    claude_md_path = os.path.join(root, "CLAUDE.md")
+    if os.path.isfile(claude_md_path):
+        try:
+            with open(claude_md_path, "r") as f:
+                md = f.read()
+            # Take first 3000 chars — enough for key patterns and structure
+            parts.append(f"PROJECT GUIDE (from CLAUDE.md):\n{md[:3000]}")
+        except Exception:
+            pass
+
+    # Auto-discover UI components for Next.js projects
+    ui_dir = os.path.join(root, "src", "components", "ui")
+    if os.path.isdir(ui_dir):
+        try:
+            components = [f.replace(".tsx", "").replace(".ts", "")
+                          for f in os.listdir(ui_dir)
+                          if f.endswith((".tsx", ".ts")) and not f.startswith("_")]
+            if components:
+                parts.append(
+                    f"AVAILABLE UI COMPONENTS in @/components/ui/: {', '.join(sorted(components))}\n"
+                    f"IMPORTANT: Only import from components that exist in this list. "
+                    f"Do NOT import components that are not listed here."
+                )
+        except Exception:
+            pass
+
+    # Auto-discover existing API routes
+    api_dir = os.path.join(root, "src", "app", "api")
+    if os.path.isdir(api_dir):
+        try:
+            routes = []
+            for dirpath, dirnames, filenames in os.walk(api_dir):
+                if "route.ts" in filenames or "route.tsx" in filenames:
+                    rel = os.path.relpath(dirpath, os.path.join(root, "src", "app"))
+                    routes.append(f"/{rel}")
+            if routes:
+                parts.append(f"EXISTING API ROUTES: {', '.join(sorted(routes))}")
+        except Exception:
+            pass
+
+    return "\n\n".join(parts)
+
+
 def _build_context_bundle(step: PlanStep, research: str, previous_results: list) -> str:
     """Build a focused context bundle for the execute phase.
 
@@ -1014,6 +1079,9 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
         # Build focused context bundle (token-optimized)
         context_bundle = _build_context_bundle(step, research, results)
 
+        # Load project-specific context (CLAUDE.md, available components, API routes)
+        project_context = _load_project_context(job.get("project", ""))
+
         prompt = (
             f"You are executing step {step.index + 1} of {len(plan.steps)} for a job.\n\n"
             f"PROJECT: {job.get('project', 'unknown')}\n"
@@ -1023,6 +1091,12 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
             f"If the task says to edit /root/Delhi-Palace/src/app/kds/page.tsx, write to THAT path.\n"
             f"Only use the workspace for scratch files, clones, or new standalone projects.\n"
             f"DO NOT write analysis documents — write actual code.\n\n"
+        )
+
+        if project_context:
+            prompt += f"{project_context}\n\n"
+
+        prompt += (
             f"{context_bundle}\n\n"
             f"CURRENT STEP: {step.description}\n"
             f"SUGGESTED TOOLS: {', '.join(step.tool_hints)}\n\n"
@@ -1212,22 +1286,29 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
                 exit_match = re.search(r'\[EXIT CODE\]: (\d+)', tool_result)
                 if exit_match and exit_match.group(1) != "0":
                     test_failures_detected = True
-            # Detect common test failure patterns
-            if any(pat in tool_result for pat in [
-                "FAILED", "failed", "ERROR", "AssertionError",
-                "Test Suites: ", "FAIL ", "npm ERR!", "ModuleNotFoundError",
-            ]):
-                # Check if it's actually a failure (not a pass with "failed" in test name)
-                if "failed" in tool_result.lower() and (
-                    "passed" not in tool_result.lower() or
-                    tool_result.lower().index("failed") < tool_result.lower().index("passed")
-                ):
+            # Detect common test failure patterns (strict — avoid false positives)
+            # Skip known false-positive outputs
+            false_positive = any(fp in tool_result for fp in [
+                "deprecated", "warning:", "Warning:", "is deprecated",
+                "Compiled successfully", "Build complete",
+            ])
+            if not false_positive:
+                if any(pat in tool_result for pat in [
+                    "FAILED", "AssertionError", "AssertionError",
+                    "Test Suites: ", "FAIL ", "npm ERR!", "ModuleNotFoundError",
+                    "Failed to compile",
+                ]):
+                    # Check if it's actually a failure (not a pass with "failed" in test name)
+                    if "failed" in tool_result.lower() and (
+                        "passed" not in tool_result.lower() or
+                        tool_result.lower().index("failed") < tool_result.lower().index("passed")
+                    ):
+                        test_failures_detected = True
+                # Parse pytest/jest numeric failure output (e.g. "3 failed", "2 errors")
+                if re.search(r'\d+\s+failed', tool_result, re.IGNORECASE):
                     test_failures_detected = True
-            # Parse pytest/jest numeric failure output (e.g. "3 failed", "2 errors")
-            if re.search(r'\d+\s+failed', tool_result, re.IGNORECASE):
-                test_failures_detected = True
-            if re.search(r'FAILURES|ERRORS\s*$', tool_result, re.MULTILINE):
-                test_failures_detected = True
+                if re.search(r'FAILURES|ERRORS\s*$', tool_result, re.MULTILINE):
+                    test_failures_detected = True
 
     if test_failures_detected and verify_data.get("passed", True):
         logger.warning(
@@ -1631,7 +1712,7 @@ class JobGuardrails:
 
     Defaults:
         max_cost_usd      = priority-based (P0=$5, P1=$3, P2=$3, P3=$1) + 10% grace
-        max_iterations     = 200     (total agent calls across all phases)
+        max_iterations     = 350     (total agent calls across all phases)
         max_duration_secs  = 3600    (60 minutes wall-clock)
         circuit_breaker_n  = 3       (same error 3x in a row → kill)
 
@@ -1647,18 +1728,18 @@ class JobGuardrails:
     # Phase-specific iteration budgets — prevents any single phase from
     # eating the entire iteration allowance (e.g. execute hogging 48/50).
     PHASE_ITERATION_LIMITS = {
-        "research": 30,
-        "plan":     20,
-        "execute":  150,
-        "verify":   25,
-        "deliver":  25,
+        "research": 60,
+        "plan":     30,
+        "execute":  250,
+        "verify":   30,
+        "deliver":  30,
     }
 
     def __init__(
         self,
         job_id: str,
         max_cost_usd: float = 2.0,
-        max_iterations: int = 200,
+        max_iterations: int = 350,
         max_duration_secs: int = 3600,
         circuit_breaker_n: int = 3,
     ):
