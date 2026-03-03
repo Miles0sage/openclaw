@@ -4,16 +4,16 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "openclaw-cost-alerts",
+        "path": "openclaw-events",
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "webhook-cost-trigger",
-      "name": "Webhook - Cost Alerts",
+      "id": "webhook-trigger",
+      "name": "Webhook - Cost Events",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [240, 300],
-      "webhookId": "openclaw-cost-alerts"
+      "webhookId": "openclaw-events"
     },
     {
       "parameters": {
@@ -42,55 +42,66 @@
       "name": "If Cost Alert",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [480, 250]
+      "position": [480, 200]
     },
     {
       "parameters": {
-        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
-        "options": {},
-        "otherOptions": {},
-        "content": "slack",
-        "attachment": [
-          {
-            "fallback": "Cost Alert",
-            "color": "#ff6f00",
-            "title": "⚠️ Cost Alert",
-            "fields": [
-              {
-                "title": "Message",
-                "value": "={{ $json.body.data.message || $json.body.data.description || 'Cost threshold warning' }}",
-                "short": false
-              },
-              {
-                "title": "Current Cost",
-                "value": "={{ $json.body.data.current_cost || $json.body.data.spent || 'N/A' }}",
-                "short": true
-              },
-              {
-                "title": "Budget",
-                "value": "={{ $json.body.data.budget || $json.body.data.limit || 'N/A' }}",
-                "short": true
-              },
-              {
-                "title": "Severity",
-                "value": "={{ $json.body.data.severity || 'warning' }}",
-                "short": true
-              },
-              {
-                "title": "Period",
-                "value": "={{ $json.body.data.period || 'monthly' }}",
-                "short": true
-              }
-            ],
-            "ts": "={{ Math.floor(Date.now() / 1000) }}"
-          }
-        ]
+        "url": "http://172.24.0.1:18789/webhook/slack-test",
+        "authentication": "none",
+        "method": "POST",
+        "contentType": "application/json",
+        "body": "={{ JSON.stringify({text: `💰 Cost Alert: $${$json.body.data.amount || 'N/A'} (${$json.body.data.resource || 'N/A'})`, attachments: [{color: '#ff9800', title: 'Cost Alert', fields: [{title: 'Amount', value: String($json.body.data.amount || 'N/A')}, {title: 'Resource', value: String($json.body.data.resource || 'N/A')}, {title: 'Threshold', value: String($json.body.data.threshold || 'N/A')}, {title: 'Message', value: String($json.body.data.message || 'Cost threshold approached')}]}]}) }}",
+        "options": {}
       },
-      "id": "slack-cost-alert",
-      "name": "Slack - Cost Alert",
-      "type": "n8n-nodes-base.slack",
-      "typeVersion": 3,
-      "position": [720, 250]
+      "id": "http-post-slack-cost",
+      "name": "HTTP POST - Cost Alert to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [720, 150]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.body.event_type }}",
+              "rightValue": "cost.threshold_exceeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-threshold-exceeded",
+      "name": "If Threshold Exceeded",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 400]
+    },
+    {
+      "parameters": {
+        "url": "http://172.24.0.1:18789/webhook/slack-test",
+        "authentication": "none",
+        "method": "POST",
+        "contentType": "application/json",
+        "body": "={{ JSON.stringify({text: `🚨 COST THRESHOLD EXCEEDED: $${$json.body.data.total || 'N/A'} of $${$json.body.data.limit || 'N/A'} limit`, attachments: [{color: '#d32f2f', title: 'Critical Cost Alert', fields: [{title: 'Total Spent', value: String($json.body.data.total || 'N/A')}, {title: 'Limit', value: String($json.body.data.limit || 'N/A')}, {title: 'Overage', value: String($json.body.data.overage || '0')}, {title: 'Period', value: String($json.body.data.period || 'month')}]}]}) }}",
+        "options": {}
+      },
+      "id": "http-post-slack-threshold",
+      "name": "HTTP POST - Threshold Alert to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [720, 350]
     },
     {
       "parameters": {
@@ -98,7 +109,7 @@
         "responseBody": "={{ {ok: true, received: true, event_id: $json.body.event_id} }}",
         "options": {}
       },
-      "id": "respond-ok-cost",
+      "id": "respond-ok",
       "name": "Respond OK",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
@@ -106,11 +117,16 @@
     }
   ],
   "connections": {
-    "Webhook - Cost Alerts": {
+    "Webhook - Cost Events": {
       "main": [
         [
           {
             "node": "If Cost Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "If Threshold Exceeded",
             "type": "main",
             "index": 0
           }
@@ -121,7 +137,7 @@
       "main": [
         [
           {
-            "node": "Slack - Cost Alert",
+            "node": "HTTP POST - Cost Alert to Slack",
             "type": "main",
             "index": 0
           }
@@ -135,7 +151,36 @@
         ]
       ]
     },
-    "Slack - Cost Alert": {
+    "If Threshold Exceeded": {
+      "main": [
+        [
+          {
+            "node": "HTTP POST - Threshold Alert to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP POST - Cost Alert to Slack": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP POST - Threshold Alert to Slack": {
       "main": [
         [
           {

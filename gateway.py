@@ -824,7 +824,7 @@ if not AUTH_TOKEN:
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/coderclaw/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl", "/visionclaw", "/webhook/twilio", "/webhook/openclaw-jobs", "/webhook/slack-test"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/coderclaw/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl", "/visionclaw", "/webhook/twilio", "/webhook/openclaw-jobs", "/webhook/slack-test", "/api/digest"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
@@ -2726,6 +2726,62 @@ async def costs_text():
     except Exception as e:
         logger.error(f"Error getting cost summary: {e}")
         return {"success": False, "error": str(e)}
+
+
+@app.get("/api/digest")
+async def daily_digest():
+    """Get daily digest stats for n8n Daily Digest workflow"""
+    try:
+        from event_engine import get_event_engine
+
+        engine = get_event_engine()
+
+        # Get events from the last 24 hours
+        from datetime import datetime, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+
+        all_events = engine.get_recent_events(limit=500)
+
+        # Filter to last 24 hours
+        recent_events = [
+            e for e in all_events
+            if datetime.fromisoformat(e.get("timestamp", "")) >= cutoff
+        ]
+
+        # Count job events
+        jobs_completed = len([e for e in recent_events if e.get("event_type") == "job.completed"])
+        jobs_failed = len([e for e in recent_events if e.get("event_type") == "job.failed"])
+        jobs_created = len([e for e in recent_events if e.get("event_type") == "job.created"])
+
+        # Get cost data
+        metrics = get_cost_metrics()
+        total_cost = metrics.get("daily_spend", 0) if isinstance(metrics, dict) else 0
+
+        # Calculate uptime (simple heuristic: if we have recent events, assume healthy)
+        uptime = "100%" if recent_events else "Unknown"
+
+        return {
+            "success": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "jobs_completed": jobs_completed,
+            "jobs_failed": jobs_failed,
+            "jobs_created": jobs_created,
+            "total_cost": total_cost,
+            "uptime": uptime,
+            "event_count": len(recent_events),
+            "period": "24h"
+        }
+    except Exception as e:
+        logger.error(f"Error generating daily digest: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "jobs_completed": 0,
+            "jobs_failed": 0,
+            "total_cost": 0,
+            "uptime": "Error",
+            "event_count": 0
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════════
