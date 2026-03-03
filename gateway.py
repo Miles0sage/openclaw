@@ -810,7 +810,7 @@ if not AUTH_TOKEN:
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/coderclaw/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl", "/visionclaw"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/coderclaw/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl", "/visionclaw", "/webhook/twilio", "/webhook/openclaw-jobs"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
@@ -2964,6 +2964,33 @@ CODERCLAW_BOT_TOKEN = os.getenv("CODERCLAW_BOT_TOKEN", "")
 CODERCLAW_SESSIONS_DIR = pathlib.Path("/root/openclaw/data/coderclaw_sessions")
 CODERCLAW_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
+# ── Persistent dedup for Telegram webhooks (survives gateway restarts) ──
+_TG_DEDUP_FILE = pathlib.Path("/root/openclaw/data/tg_dedup.json")
+_TG_DEDUP_TTL = 600  # 10 minutes
+
+def _tg_dedup_check(update_id: int, bot: str = "cc") -> bool:
+    """Return True if this update_id was already seen (duplicate). Thread-safe via file."""
+    now = time.time()
+    key = f"{bot}:{update_id}"
+    try:
+        if _TG_DEDUP_FILE.exists():
+            seen = json.loads(_TG_DEDUP_FILE.read_text())
+        else:
+            seen = {}
+    except (json.JSONDecodeError, OSError):
+        seen = {}
+    # Prune expired entries
+    seen = {k: v for k, v in seen.items() if now - v < _TG_DEDUP_TTL}
+    if key in seen:
+        return True  # Duplicate
+    seen[key] = now
+    try:
+        _TG_DEDUP_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _TG_DEDUP_FILE.write_text(json.dumps(seen))
+    except OSError:
+        pass
+    return False  # New update
+
 
 def _load_workspace_bootstrap() -> str:
     """
@@ -3160,19 +3187,11 @@ async def coderclaw_webhook(request: Request):
         if "message" not in update:
             return {"ok": True}
 
-        # ── Dedup: reject retried updates ──
+        # ── Dedup: reject retried updates (persistent, survives restarts) ──
         update_id = update.get("update_id")
-        if not hasattr(app.state, "_cc_seen_updates"):
-            app.state._cc_seen_updates = {}
-        now = time.time()
-        # Clean old entries (>5 min)
-        app.state._cc_seen_updates = {
-            k: v for k, v in app.state._cc_seen_updates.items() if now - v < 300
-        }
-        if update_id in app.state._cc_seen_updates:
+        if _tg_dedup_check(update_id, bot="cc"):
             logger.info(f"CoderClaw dedup: skipping update_id {update_id}")
             return {"ok": True}
-        app.state._cc_seen_updates[update_id] = now
 
         message = update["message"]
         chat_id = str(message["chat"]["id"])
@@ -3190,7 +3209,7 @@ async def coderclaw_webhook(request: Request):
         logger.info(f"CoderClaw from {user_id}: {text[:80]}")
 
         # ── Quick commands: handle inline, return fast ──
-        quick_commands = ["/start", "/new", "/status", "/project", "/output", "/kill"]
+        quick_commands = ["/start", "/new", "/status", "/project", "/output", "/kill", "/remote"]
         is_quick = any(text.strip().lower().startswith(cmd) for cmd in quick_commands)
 
         if is_quick:
@@ -3208,6 +3227,8 @@ async def coderclaw_webhook(request: Request):
                 "<b>Commands:</b>\n"
                 "/new — Fresh session\n"
                 "/status — Running agents\n"
+                "/remote — Start a web session (get URL to open in browser)\n"
+                "/remote stop — Stop the remote session\n"
                 "/project &lt;path&gt; — Set working directory\n"
                 "/spawn &lt;task&gt; — Long-running tmux agent\n"
                 "/output &lt;job_id&gt; — Get agent output\n"
@@ -3257,6 +3278,114 @@ async def coderclaw_webhook(request: Request):
                 lines.append("Could not check tmux agents.")
 
             await _cc_send(chat_id, "\n".join(lines), reply_to=msg_id)
+            return {"ok": True}
+
+        # ── /remote — Start Claude Code remote-control session (web URL) ──
+        if text.strip().lower().startswith("/remote"):
+            remote_arg = text.strip()[7:].strip().lower()
+
+            # /remote stop — kill any running remote-control session
+            if remote_arg in ("stop", "kill", "off"):
+                try:
+                    import subprocess as _sp
+                    # Find and kill remote-control tmux pane
+                    result = _sp.run(
+                        ["tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_current_command}"],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    killed = False
+                    for line in result.stdout.strip().split("\n"):
+                        if "claude" in line.lower():
+                            parts = line.split()
+                            if parts:
+                                pane_id = parts[0]
+                                # Check if it's the remote-control window
+                                check = _sp.run(
+                                    ["tmux", "capture-pane", "-t", pane_id, "-p"],
+                                    capture_output=True, text=True, timeout=5
+                                )
+                                if "remote-control" in check.stdout.lower() or "Remote Control" in check.stdout:
+                                    _sp.run(["tmux", "send-keys", "-t", pane_id, "C-c", ""], timeout=5)
+                                    _sp.run(["tmux", "send-keys", "-t", pane_id, "exit", "Enter"], timeout=5)
+                                    killed = True
+                    # Also check for named window
+                    _sp.run(["tmux", "kill-window", "-t", "remote-control"], capture_output=True, timeout=5)
+                    await _cc_send(chat_id, "Remote session stopped." if killed else "No active remote session found.", reply_to=msg_id)
+                except Exception as e:
+                    await _cc_send(chat_id, f"Stop failed: {e}", reply_to=msg_id)
+                return {"ok": True}
+
+            # /remote — Start a new remote-control session
+            try:
+                import subprocess as _sp
+                cwd = session.get("project", "/root/openclaw")
+
+                # Kill any existing remote-control window first
+                _sp.run(["tmux", "kill-window", "-t", "remote-control"], capture_output=True, timeout=5)
+
+                # Ensure tmux server exists
+                _sp.run(["tmux", "has-session", "-t", "openclaw"], capture_output=True, timeout=5)
+                has_session = _sp.run(["tmux", "has-session", "-t", "openclaw"], capture_output=True, timeout=5).returncode == 0
+                if not has_session:
+                    _sp.run(["tmux", "new-session", "-d", "-s", "openclaw"], timeout=5)
+
+                # Start remote-control in a new tmux window
+                # Unset CLAUDECODE to avoid nested session error
+                cmd = f"cd {cwd} && unset CLAUDECODE && claude remote-control --verbose --permission-mode bypassPermissions 2>&1 | tee /tmp/claude-remote-output.log"
+                _sp.run(
+                    ["tmux", "new-window", "-t", "openclaw", "-n", "remote-control", "-d", cmd],
+                    timeout=10
+                )
+
+                # Wait for URL to appear in output
+                await _cc_send(chat_id, "Starting remote session... waiting for URL (5s)", reply_to=msg_id)
+                await asyncio.sleep(6)
+
+                # Read the output to extract URL
+                url = None
+                try:
+                    # Try the log file first
+                    if os.path.exists("/tmp/claude-remote-output.log"):
+                        with open("/tmp/claude-remote-output.log") as f:
+                            log_content = f.read()
+                        import re as _re_mod
+                        url_match = _re_mod.search(r'(https://claude\.ai/code/session_[^\s]+)', log_content)
+                        if url_match:
+                            url = url_match.group(1)
+
+                    # Fallback: capture from tmux pane
+                    if not url:
+                        capture = _sp.run(
+                            ["tmux", "capture-pane", "-t", "openclaw:remote-control", "-p", "-S", "-50"],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        import re as _re_mod
+                        url_match = _re_mod.search(r'(https://claude\.ai/code/session_[^\s]+)', capture.stdout)
+                        if url_match:
+                            url = url_match.group(1)
+                except Exception as e:
+                    logger.warning(f"Remote URL extraction failed: {e}")
+
+                if url:
+                    await _cc_send(chat_id, (
+                        f"<b>Remote Session Ready</b>\n\n"
+                        f"Open this URL in your browser or Claude app:\n"
+                        f"<code>{url}</code>\n\n"
+                        f"Working directory: <code>{cwd}</code>\n"
+                        f"Full VPS access — files, git, MCP tools, everything.\n\n"
+                        f"Stop with: /remote stop"
+                    ), reply_to=msg_id)
+                else:
+                    # URL not found yet — might need more time
+                    await _cc_send(chat_id, (
+                        "<b>Remote session starting...</b>\n\n"
+                        "Couldn't extract URL yet. Check in a few seconds:\n"
+                        "/output remote-control\n\n"
+                        "Or try: /remote stop and retry."
+                    ), reply_to=msg_id)
+
+            except Exception as e:
+                await _cc_send(chat_id, f"Remote start failed: {e}", reply_to=msg_id)
             return {"ok": True}
 
         # ── /spawn <task> — long-running tmux agent ──
@@ -3337,14 +3466,15 @@ async def coderclaw_webhook(request: Request):
                 # ── Route big tasks to the OpenClaw job system ──
                 job_keywords = ["build", "deploy", "refactor", "create", "implement", "fix all", "redesign", "migrate"]
                 if any(kw in text.lower() for kw in job_keywords) and len(text) > 50:
+                    _cc_job_created = None
                     try:
                         from job_manager import create_job as _jm_create_job
                         project_path = session.get("project", "/root")
                         project_name = os.path.basename(project_path.rstrip("/")) or "openclaw"
-                        job = _jm_create_job(project=project_name, task=text, priority="P1")
+                        _cc_job_created = _jm_create_job(project=project_name, task=text, priority="P1")
                         await _cc_send(chat_id, (
                             f"<b>Task queued as job</b>\n"
-                            f"Job ID: <code>{job.id}</code>\n"
+                            f"Job ID: <code>{_cc_job_created.id}</code>\n"
                             f"Project: <code>{project_name}</code>\n"
                             f"Priority: P1\n\n"
                             f"This task is too large for inline execution. "
@@ -3353,6 +3483,11 @@ async def coderclaw_webhook(request: Request):
                         ), reply_to=msg_id)
                         return
                     except Exception as e:
+                        if _cc_job_created:
+                            # Job exists in queue — don't also run inline (prevents double-reply)
+                            logger.warning(f"CoderClaw job {_cc_job_created.id} created but send failed: {e}")
+                            await _cc_send(chat_id, f"Task queued (job {_cc_job_created.id})", reply_to=msg_id)
+                            return
                         logger.warning(f"CoderClaw job routing failed, falling back to inline: {e}")
 
                 # ── DEFAULT: Run through Claude Code with --resume ──
@@ -3392,18 +3527,11 @@ async def telegram_webhook(request: Request):
         if "message" not in update:
             return {"ok": True}
 
-        # ── Dedup: reject retried updates ──
+        # ── Dedup: reject retried updates (persistent, survives restarts) ──
         update_id = update.get("update_id")
-        if not hasattr(app.state, "_tg_seen_updates"):
-            app.state._tg_seen_updates = {}
-        now = time.time()
-        app.state._tg_seen_updates = {
-            k: v for k, v in app.state._tg_seen_updates.items() if now - v < 300
-        }
-        if update_id in app.state._tg_seen_updates:
+        if _tg_dedup_check(update_id, bot="tg"):
             logger.info(f"Telegram dedup: skipping update_id {update_id}")
             return {"ok": True}
-        app.state._tg_seen_updates[update_id] = now
 
         message = update["message"]
         chat_id = message["chat"]["id"]
@@ -3657,7 +3785,7 @@ async def telegram_webhook(request: Request):
             except Exception as e:
                 logger.error(f"Agent spawn from Telegram failed: {e}")
                 await _tg_send(chat_id, f"❌ Agent spawn failed: {e}", reply_to=msg_id)
-                # Fall through to normal processing
+                return {"ok": True}  # Don't fall through — already replied
 
         # ═══════════════════════════════════════════════
         # 2. TASK CREATION — "create task:", "todo:", "remind me to:"
@@ -3710,6 +3838,8 @@ async def telegram_webhook(request: Request):
                 return {"ok": True}
             except Exception as e:
                 logger.error(f"Telegram task creation failed: {e}")
+                await _tg_send(chat_id, f"❌ Task creation failed: {e}", reply_to=msg_id)
+                return {"ok": True}  # Don't fall through
 
         # ═══════════════════════════════════════════════
         # 3. STATUS CHECK — "status", "agents", "what's running"
@@ -3822,6 +3952,94 @@ async def telegram_webhook(request: Request):
     except Exception as e:
         logger.error(f"Telegram webhook error: {e}")
         return {"ok": False, "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# TWILIO SMS WEBHOOK + SEND ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/webhook/twilio")
+async def twilio_incoming_sms(request: Request):
+    """Receive inbound SMS from Twilio webhook."""
+    try:
+        form_data = await request.form()
+        from_number = form_data.get("From", "")
+        to_number = form_data.get("To", "")
+        message_body = form_data.get("Body", "")
+        message_sid = form_data.get("MessageSid", "")
+
+        logger.info(f"📱 Inbound SMS from {from_number}: {message_body[:100]}")
+
+        # Validate Twilio signature if auth token is set
+        twilio_auth = os.getenv("TWILIO_AUTH_TOKEN")
+        if twilio_auth:
+            import hmac as _hmac
+            import hashlib as _hashlib
+            import base64 as _b64
+            sig = request.headers.get("X-Twilio-Signature", "")
+            # Build validation URL
+            url = str(request.url)
+            params = sorted(form_data.items())
+            url_with_params = url + "".join(f"{k}{v}" for k, v in params)
+            expected = _b64.b64encode(
+                _hmac.new(twilio_auth.encode(), url_with_params.encode(), _hashlib.sha1).digest()
+            ).decode()
+            if not _hmac.compare_digest(sig, expected):
+                logger.warning(f"⚠️ Invalid Twilio signature from {from_number}")
+                # Don't reject in case URL mismatch (proxy), just log
+
+        # Log the inbound message
+        from agent_tools import _log_sms
+        _log_sms("received", to_number, from_number, message_body, message_sid)
+
+        # Broadcast event
+        broadcast_event({
+            "type": "sms.received",
+            "from": from_number,
+            "body": message_body[:200],
+            "sid": message_sid,
+        })
+
+        # Forward to Slack for visibility
+        try:
+            await send_slack_message(
+                os.getenv("SLACK_REPORT_CHANNEL", "C0AFE4QHKH7"),
+                f"📱 *Inbound SMS* from `{from_number}`:\n>{message_body}"
+            )
+        except Exception:
+            pass
+
+        # Return empty TwiML (accept silently)
+        return PlainTextResponse(
+            '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+            media_type="application/xml"
+        )
+    except Exception as e:
+        logger.error(f"Twilio webhook error: {e}")
+        return PlainTextResponse(
+            '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+            media_type="application/xml",
+            status_code=200  # Always 200 to Twilio
+        )
+
+
+class SMSSendRequest(BaseModel):
+    to: str
+    body: str
+
+
+@app.post("/sms/send")
+async def send_sms_endpoint(req: SMSSendRequest, request: Request):
+    """Send an SMS via API. Requires auth token."""
+    auth = request.headers.get("X-Auth-Token", "")
+    expected = os.getenv("GATEWAY_AUTH_TOKEN", "")
+    if not expected or auth != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from agent_tools import _send_sms
+    result = _send_sms(req.to, req.body)
+    success = not result.startswith("Error")
+    return {"ok": success, "result": result}
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -4987,6 +5205,56 @@ async def api_post_event(request: Request):
         event_id = engine.emit(event_type, data)
         return {"ok": True, "event_id": event_id}
     except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# N8N WEBHOOK ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/webhook/openclaw-jobs")
+async def n8n_openclaw_jobs_webhook(request: Request):
+    """Receive OpenClaw job events from n8n workflows.
+
+    This endpoint is called by the event_engine when job events occur:
+    - job.created: new job submitted
+    - job.completed: job finished successfully
+    - job.failed: job encountered an error
+    - job.approved: job was approved
+    - job.phase_change: job moved to a new phase
+    """
+    try:
+        body = await request.json()
+        event_type = body.get("event_type", "unknown")
+        event_id = body.get("event_id", "")
+        data = body.get("data", {})
+
+        logger.info(
+            f"n8n webhook received: event_type={event_type}, event_id={event_id}, "
+            f"job_id={data.get('job_id', 'N/A')}"
+        )
+
+        # Log to a dedicated webhook event log for pipeline monitoring
+        webhook_log_path = os.path.join(DATA_DIR, "webhooks", "n8n_events.jsonl")
+        os.makedirs(os.path.dirname(webhook_log_path), exist_ok=True)
+
+        record = {
+            "webhook_timestamp": datetime.now(timezone.utc).isoformat(),
+            "event_type": event_type,
+            "event_id": event_id,
+            "data": data,
+        }
+
+        with open(webhook_log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, separators=(",", ":")) + "\n")
+
+        return {
+            "ok": True,
+            "message": f"Event {event_type} received and logged",
+            "event_id": event_id
+        }
+    except Exception as e:
+        logger.error(f"n8n webhook error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 

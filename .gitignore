@@ -98,3 +98,9 @@ __pycache__/
 *.pyc
 ci.yml.wanted
 logs/
+
+# Sensitive data files
+data/semantic_metadata.json
+data/semantic_index.pkl
+data/trading/kalshi_private.pem
+.opencode/

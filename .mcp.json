@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tree-sitter": {
+      "command": "mcp-server-tree-sitter",
+      "args": []
+    }
+  }
+}

@@ -1,0 +1,3 @@
+{"webhook_timestamp":"2026-03-03T18:31:27.972711+00:00","event_type":"job.created","event_id":"test-event-123","data":{"job_id":"test-job-001","project":"openclaw","task":"Test job creation","priority":"P2"}}
+{"webhook_timestamp":"2026-03-03T18:32:55.944736+00:00","event_type":"job.created","event_id":"468bf875-50b6-4920-b328-f9c47b751c57","data":{"job_id":"job-20260303-183255-16084f81","project":"openclaw","task":"Test n8n webhook event emission","priority":"P2"}}
+{"webhook_timestamp":"2026-03-03T18:33:23.149963+00:00","event_type":"job.created","event_id":"49c3b000-4ba9-447d-b617-8daf2b3dc6a0","data":{"job_id":"job-20260303-183322-da6443a0","project":"openclaw","task":"Final test of n8n integration","priority":"P1"}}

@@ -117,6 +117,12 @@ class EventEngine:
             self.subscribe(evt, self._slack_notify)
         self.subscribe("job.completed", self._reaction_handler)
         self.subscribe("job.failed", self._reaction_handler)
+        # Subscribe to job events for n8n webhook
+        self.subscribe("job.created", self._n8n_webhook_notify)
+        self.subscribe("job.completed", self._n8n_webhook_notify)
+        self.subscribe("job.failed", self._n8n_webhook_notify)
+        self.subscribe("job.approved", self._n8n_webhook_notify)
+        self.subscribe("job.phase_change", self._n8n_webhook_notify)
 
         logger.info("EventEngine initialized with built-in subscribers + deduplication")
 
@@ -307,6 +313,48 @@ class EventEngine:
                 )
         except (URLError, OSError) as exc:
             logger.warning("Slack notify failed for %s: %s", event_type, exc)
+
+    def _n8n_webhook_notify(self, record: dict) -> None:
+        """POST job events to n8n webhook for pipeline monitoring and visualization."""
+        event_type = record.get("event_type", "unknown")
+        data = record.get("data", {})
+        event_id = record.get("event_id", "n/a")
+        ts = record.get("timestamp", "")
+
+        # Only post job-related events to n8n
+        if not event_type.startswith("job."):
+            return
+
+        # Post to the gateway's webhook endpoint which handles n8n events
+        # Falls back to n8n directly if N8N_WEBHOOK_URL is set
+        n8n_webhook_url = os.environ.get(
+            "N8N_WEBHOOK_URL",
+            "http://localhost:18789/webhook/openclaw-jobs"
+        )
+
+        payload = json.dumps({
+            "event_type": event_type,
+            "event_id": event_id,
+            "timestamp": ts,
+            "data": data,
+        }).encode("utf-8")
+
+        req = Request(
+            n8n_webhook_url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urlopen(req, timeout=5) as resp:
+                logger.debug(
+                    "n8n webhook sent (%s): %d", event_type, resp.status
+                )
+        except (URLError, OSError) as exc:
+            logger.debug("n8n webhook failed for %s: %s (non-critical)", event_type, exc)
 
     def _reaction_handler(self, record: dict) -> None:
         """Smart automatic reactions to job lifecycle events.
