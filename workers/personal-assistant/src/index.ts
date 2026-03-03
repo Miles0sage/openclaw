@@ -1409,6 +1409,125 @@ const OPENCLAW_TOOLS = [
       },
     ],
   },
+  // --- PA Integration (bidirectional agency control) ---
+  {
+    functionDeclarations: [
+      {
+        name: "pa_create_job",
+        description: "Create a job through the PA integration bridge with full tracking",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            project: {
+              type: "STRING",
+              description:
+                "Project: barber-crm, openclaw, delhi-palace, prestress-calc, concrete-canoe",
+            },
+            task: { type: "STRING", description: "Description of the task" },
+            priority: { type: "STRING", description: "P0=critical, P1=high, P2=medium, P3=low" },
+          },
+          required: ["project", "task"],
+        },
+      },
+      {
+        name: "pa_monitor_job",
+        description:
+          "Monitor a job's live progress including current phase, active tools, and cost",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            job_id: { type: "STRING", description: "The job ID to monitor" },
+          },
+          required: ["job_id"],
+        },
+      },
+      {
+        name: "pa_cancel_job",
+        description: "Cancel a running job via PA bridge (sets kill flag)",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            job_id: { type: "STRING", description: "The job ID to cancel" },
+          },
+          required: ["job_id"],
+        },
+      },
+      {
+        name: "pa_approve_job",
+        description: "Approve a pending job for execution via PA bridge",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            job_id: { type: "STRING", description: "The job ID to approve" },
+          },
+          required: ["job_id"],
+        },
+      },
+      {
+        name: "pa_escalate_job",
+        description: "Escalate a job to a higher-capability agent (e.g. from Kimi to Claude Opus)",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            job_id: { type: "STRING", description: "The job ID to escalate" },
+            target_agent: {
+              type: "STRING",
+              description: "Target agent: overseer, elite_coder, debugger, database_agent",
+            },
+            reason: { type: "STRING", description: "Why this job needs escalation" },
+          },
+          required: ["job_id"],
+        },
+      },
+      {
+        name: "pa_estimate_cost",
+        description: "Estimate the cost of a proposed task before creating a job",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            task: { type: "STRING", description: "Task description" },
+            agent: {
+              type: "STRING",
+              description:
+                "Preferred agent: coder_agent, elite_coder, hacker_agent, database_agent, code_reviewer, test_generator, architecture_designer, debugger",
+            },
+          },
+          required: ["task"],
+        },
+      },
+      {
+        name: "pa_get_agency_status",
+        description: "Get comprehensive agency status: runner, jobs, costs, recent events",
+        parameters: { type: "OBJECT", properties: {} },
+      },
+      {
+        name: "pa_get_runner_status",
+        description: "Get autonomous runner status and active job count",
+        parameters: { type: "OBJECT", properties: {} },
+      },
+      {
+        name: "pa_list_requests",
+        description: "List recent PA integration requests and their statuses",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            limit: { type: "NUMBER", description: "Max results (default 20)" },
+          },
+        },
+      },
+      {
+        name: "pa_request_status",
+        description: "Check the status of a specific PA request by ID",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            request_id: { type: "STRING", description: "The PA request ID" },
+          },
+          required: ["request_id"],
+        },
+      },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -2146,6 +2265,80 @@ async function executeTool(
           }),
         })
       ).json();
+    // --- PA Integration ---
+    case "pa_create_job":
+      return (
+        await gatewayFetch(env, "/api/pa/request", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "create_job",
+            payload: { project: args.project, task: args.task, priority: args.priority || "P1" },
+          }),
+        })
+      ).json();
+    case "pa_monitor_job":
+      return (
+        await gatewayFetch(env, "/api/pa/request", {
+          method: "POST",
+          body: JSON.stringify({ action: "monitor_job", payload: { job_id: args.job_id } }),
+        })
+      ).json();
+    case "pa_cancel_job":
+      return (
+        await gatewayFetch(env, "/api/pa/request", {
+          method: "POST",
+          body: JSON.stringify({ action: "cancel_job", payload: { job_id: args.job_id } }),
+        })
+      ).json();
+    case "pa_approve_job":
+      return (
+        await gatewayFetch(env, "/api/pa/request", {
+          method: "POST",
+          body: JSON.stringify({ action: "approve_job", payload: { job_id: args.job_id } }),
+        })
+      ).json();
+    case "pa_escalate_job":
+      return (
+        await gatewayFetch(env, "/api/pa/request", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "escalate_job",
+            payload: {
+              job_id: args.job_id,
+              target_agent: args.target_agent || "overseer",
+              reason: args.reason || "PA escalation",
+            },
+          }),
+        })
+      ).json();
+    case "pa_estimate_cost":
+      return (
+        await gatewayFetch(env, "/api/pa/request", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "estimate_cost",
+            payload: { task: args.task, agent: args.agent },
+          }),
+        })
+      ).json();
+    case "pa_get_agency_status":
+      return (
+        await gatewayFetch(env, "/api/pa/request", {
+          method: "POST",
+          body: JSON.stringify({ action: "get_agency_status", payload: {} }),
+        })
+      ).json();
+    case "pa_get_runner_status":
+      return (
+        await gatewayFetch(env, "/api/pa/request", {
+          method: "POST",
+          body: JSON.stringify({ action: "get_runner_status", payload: {} }),
+        })
+      ).json();
+    case "pa_list_requests":
+      return (await gatewayFetch(env, `/api/pa/requests?limit=${args.limit || 20}`)).json();
+    case "pa_request_status":
+      return (await gatewayFetch(env, `/api/pa/status/${args.request_id}`)).json();
     default:
       return { error: `Unknown tool: ${name}` };
   }
