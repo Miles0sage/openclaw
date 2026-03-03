@@ -44,9 +44,7 @@ logger = logging.getLogger("openclaw.provider_chain")
 # ---------------------------------------------------------------------------
 PROVIDER_CHAINS: dict = {
     "tool_executor": [
-        # Gemini 2.5 Flash supports native function calling — try it first.
-        # Fall back to Anthropic if Gemini fails or key is missing.
-        {"provider": "gemini",   "model": "gemini-2.5-flash"},
+        {"provider": "anthropic", "model": "claude-sonnet-4-5-20250929"},
         {"provider": "anthropic", "model": "claude-haiku-4-5-20251001"},
     ],
     "text_reasoner": [

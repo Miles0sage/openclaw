@@ -3,10 +3,13 @@ OpenClaw Reflexion Loop — Self-improving agent memory
 
 After each job, stores a reflection. Before new jobs, injects relevant past reflections.
 Primary backend: Supabase | Fallback: JSON files on disk
+
+v2: Structured reflections with what_worked/what_failed/missing_tools analysis
 """
 import os
 import json
 import logging
+from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,28 +43,208 @@ def _use_supabase() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Structured Reflection
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StructuredReflection:
+    """Rich post-job reflection with actionable insights."""
+    job_id: str
+    task: str
+    outcome: str  # success | partial | failed
+    what_worked: list = field(default_factory=list)
+    what_failed: list = field(default_factory=list)
+    missing_tools: list = field(default_factory=list)
+    missing_knowledge: list = field(default_factory=list)
+    time_wasted_on: list = field(default_factory=list)
+    suggested_improvements: list = field(default_factory=list)
+    confidence: float = 0.5  # 0-1, how confident the agent was in its output
+    cost_usd: float = 0.0
+    duration_seconds: float = 0.0
+    phases_completed: int = 0
+    phases_total: int = 5
+    error_type: str = ""  # budget | guardrail | timeout | code_error | ""
+
+
+def _extract_structured_insights(run_result: dict, job_data: dict, outcome: str) -> StructuredReflection:
+    """Analyze the runner's result dict to extract structured insights."""
+    phases = run_result.get("phases", {})
+    guardrails = run_result.get("guardrails", {})
+    error = run_result.get("error")
+    cost = run_result.get("cost_usd", 0)
+    task = job_data.get("task", "")
+
+    sr = StructuredReflection(
+        job_id=run_result.get("job_id", ""),
+        task=task,
+        outcome=outcome,
+        cost_usd=cost,
+    )
+
+    # --- Analyze phases ---
+    phase_names = ["research", "plan", "execute", "verify", "deliver"]
+    completed = 0
+    for pname in phase_names:
+        pdata = phases.get(pname, {})
+        if not pdata:
+            continue
+        status = pdata.get("status", "")
+        if status == "done":
+            completed += 1
+        elif status == "skipped":
+            pass  # resumed job, don't count
+        elif status == "partial":
+            completed += 0.5
+            failed_steps = pdata.get("steps_failed", 0)
+            if failed_steps:
+                sr.what_failed.append(f"Execute phase: {failed_steps} step(s) failed out of {pdata.get('steps_done', 0) + failed_steps}")
+
+    sr.phases_completed = int(completed)
+
+    # What worked — successful phases
+    if phases.get("research", {}).get("status") == "done":
+        length = phases["research"].get("length", 0)
+        if length > 500:
+            sr.what_worked.append(f"Research phase produced {length} chars of useful context")
+        elif length > 0:
+            sr.what_worked.append("Research phase completed (brief output)")
+
+    if phases.get("plan", {}).get("status") == "done":
+        steps = phases["plan"].get("steps", 0)
+        sr.what_worked.append(f"Plan phase: {steps} step(s) generated")
+
+    exec_phase = phases.get("execute", {})
+    if exec_phase.get("status") == "done":
+        steps_done = exec_phase.get("steps_done", 0)
+        sr.what_worked.append(f"Execute phase: all {steps_done} step(s) completed")
+    elif exec_phase.get("steps_done", 0) > 0:
+        sr.what_worked.append(f"Execute phase: {exec_phase['steps_done']} step(s) succeeded")
+
+    if phases.get("verify", {}).get("status") == "done":
+        sr.what_worked.append("Verification passed")
+
+    if phases.get("deliver", {}).get("delivered"):
+        sr.what_worked.append("Delivery completed")
+        pr = phases.get("deliver", {}).get("pr_url")
+        if pr:
+            sr.what_worked.append(f"PR created: {pr}")
+
+    # --- Analyze failures ---
+    if error:
+        error_lower = str(error).lower()
+        if "budget" in error_lower:
+            sr.error_type = "budget"
+            sr.what_failed.append(f"Hit budget limit: {error}")
+            sr.suggested_improvements.append("Task may need higher budget or simpler decomposition")
+        elif "guardrail" in error_lower or "kill" in error_lower:
+            sr.error_type = "guardrail"
+            sr.what_failed.append(f"Guardrail triggered: {error}")
+            if "iteration" in error_lower:
+                sr.time_wasted_on.append("Too many iterations — agent may have been looping")
+                sr.suggested_improvements.append("Add clearer stop conditions or break task into smaller pieces")
+            elif "timeout" in error_lower or "duration" in error_lower:
+                sr.error_type = "timeout"
+                sr.time_wasted_on.append("Task took too long")
+                sr.suggested_improvements.append("Pre-fetch context to reduce research time")
+        elif "timeout" in error_lower or "timed out" in error_lower:
+            sr.error_type = "timeout"
+            sr.what_failed.append(f"Timed out: {error}")
+            sr.time_wasted_on.append("Agent ran out of time before completing")
+        elif "credit" in error_lower or "billing" in error_lower:
+            sr.error_type = "budget"
+            sr.what_failed.append(f"Credit/billing issue: {error}")
+        else:
+            sr.error_type = "code_error"
+            sr.what_failed.append(f"Error: {str(error)[:200]}")
+
+    # No phases completed at all
+    if sr.phases_completed == 0 and not error:
+        sr.what_failed.append("No phases completed — possible early abort")
+
+    # --- Analyze guardrail metrics ---
+    if guardrails:
+        iterations = guardrails.get("iterations", 0)
+        max_iters = guardrails.get("max_iterations", 50)
+        if iterations > max_iters * 0.8:
+            sr.time_wasted_on.append(f"Used {iterations}/{max_iters} iterations — near limit")
+            sr.suggested_improvements.append("Optimize prompts to reduce iteration count")
+
+        cost_pct = (cost / guardrails.get("max_cost_usd", 2.0)) * 100 if guardrails.get("max_cost_usd") else 0
+        if cost_pct > 80:
+            sr.time_wasted_on.append(f"Cost was {cost_pct:.0f}% of budget (${cost:.4f})")
+
+    # --- Confidence scoring ---
+    if outcome == "success":
+        sr.confidence = 0.8
+        if phases.get("verify", {}).get("status") == "done":
+            sr.confidence = 0.9
+        if exec_phase.get("steps_failed", 0) > 0:
+            sr.confidence -= 0.2
+    elif outcome == "partial":
+        sr.confidence = 0.4
+    else:
+        sr.confidence = 0.1 if sr.phases_completed == 0 else 0.2
+
+    # --- Outcome-based suggestions ---
+    if outcome == "success" and cost > 0.5:
+        sr.suggested_improvements.append(f"Successful but expensive (${cost:.4f}) — consider simpler approach")
+    if outcome == "failed" and sr.phases_completed >= 3:
+        sr.suggested_improvements.append("Got through most phases — failure was late-stage, review verify/deliver")
+    if outcome == "failed" and sr.phases_completed <= 1:
+        sr.suggested_improvements.append("Failed early — research or planning may need better context")
+
+    return sr
+
+
+# ---------------------------------------------------------------------------
 # Core functions
 # ---------------------------------------------------------------------------
 
-def save_reflection(job_id: str, job_data: dict, outcome: str, duration_seconds: float = 0, department: str = ""):
-    """Save a post-job reflection. Called after job completes."""
+def save_reflection(job_id: str, job_data: dict, outcome: str, duration_seconds: float = 0,
+                    department: str = "", run_result: dict = None):
+    """Save a post-job reflection. Called after job completes.
+
+    When run_result is provided, extracts structured insights from the full
+    pipeline result (phases, guardrails, costs, errors). Falls back to
+    simple template learnings when run_result is None (backward compat).
+    """
     ensure_dir()
 
     tags = list(_extract_tags(job_data.get("task", "")))
 
-    if outcome == "success":
-        learnings = [
-            f"Task '{job_data.get('task', '')[:100]}' completed successfully",
-            f"Project: {job_data.get('project', 'unknown')}",
-            f"Duration: {duration_seconds:.0f}s",
-        ]
+    # Extract structured insights if we have the full result
+    structured = None
+    if run_result:
+        structured = _extract_structured_insights(run_result, job_data, outcome)
+        structured.duration_seconds = duration_seconds
+        # Build learnings from structured data (backward-compatible summary)
+        learnings = []
+        for item in structured.what_worked:
+            learnings.append(f"[OK] {item}")
+        for item in structured.what_failed:
+            learnings.append(f"[FAIL] {item}")
+        for item in structured.time_wasted_on:
+            learnings.append(f"[WASTE] {item}")
+        for item in structured.suggested_improvements:
+            learnings.append(f"[IMPROVE] {item}")
+        if not learnings:
+            learnings = [f"Task '{job_data.get('task', '')[:100]}' — {outcome}"]
     else:
-        learnings = [
-            f"Task '{job_data.get('task', '')[:100]}' FAILED",
-            f"Project: {job_data.get('project', 'unknown')}",
-            "Review logs for error details",
-        ]
+        # Legacy path — simple template learnings
+        if outcome == "success":
+            learnings = [
+                f"Task '{job_data.get('task', '')[:100]}' completed successfully",
+                f"Project: {job_data.get('project', 'unknown')}",
+                f"Duration: {duration_seconds:.0f}s",
+            ]
+        else:
+            learnings = [
+                f"Task '{job_data.get('task', '')[:100]}' FAILED",
+                f"Project: {job_data.get('project', 'unknown')}",
+                "Review logs for error details",
+            ]
 
+    # Build the full reflection dict
     reflection = {
         "job_id": job_id,
         "project": job_data.get("project", "unknown"),
@@ -73,32 +256,35 @@ def save_reflection(job_id: str, job_data: dict, outcome: str, duration_seconds:
         "tags": tags,
         "learnings": learnings,
     }
+    # Attach structured data if available
+    if structured:
+        reflection["structured"] = asdict(structured)
 
     # Try Supabase first
     if _use_supabase():
         sb = _sb()
+        structured_json = json.dumps(asdict(structured)) if structured else ""
         row = {
             "job_id": job_id,
             "project": reflection["project"],
             "task": reflection["task"],
             "outcome": outcome,
-            "department": department,
-            "reflection": json.dumps(learnings),
+            "reflection": structured_json or json.dumps(learnings),
             "lessons": learnings,
-            "cost_usd": job_data.get("cost_usd", 0),
+            "cost_usd": run_result.get("cost_usd", 0) if run_result else job_data.get("cost_usd", 0),
             "duration_seconds": int(duration_seconds),
             "created_at": reflection["timestamp"],
         }
         result = sb["insert"]("reflections", row)
         if result:
-            logger.info(f"Reflection saved (Supabase): {job_id} [dept={department}]")
+            logger.info(f"Reflection saved (Supabase): {job_id} [dept={department}, structured={'yes' if structured else 'no'}]")
             return job_id
 
     # JSON file fallback
     filepath = REFLECTIONS_DIR / f"{job_id}.json"
     with open(filepath, "w") as f:
         json.dump(reflection, f, indent=2)
-    logger.info(f"Reflection saved (file): {filepath} [dept={department}]")
+    logger.info(f"Reflection saved (file): {filepath} [dept={department}, structured={'yes' if structured else 'no'}]")
     return filepath
 
 
@@ -180,7 +366,11 @@ def _score_and_rank(reflections: list, task_description: str, project: str, limi
 
 
 def format_reflections_for_prompt(reflections: list) -> str:
-    """Format reflections as context to inject into agent prompts."""
+    """Format reflections as context to inject into agent prompts.
+
+    Uses structured data when available for richer, more actionable context.
+    Falls back to simple learnings list for older reflections.
+    """
     if not reflections:
         return ""
 
@@ -189,9 +379,45 @@ def format_reflections_for_prompt(reflections: list) -> str:
         outcome_label = "SUCCESS" if ref.get("outcome") == "success" else "FAILED"
         lines.append(f"\n### [{outcome_label}] {ref.get('task', 'Unknown task')[:120]}")
         dur = ref.get("duration_seconds", 0)
-        lines.append(f"Project: {ref.get('project', '?')} | Duration: {dur:.0f}s" if dur else f"Project: {ref.get('project', '?')}")
-        for learning in ref.get("learnings", ref.get("lessons", [])):
-            lines.append(f"- {learning}")
+        cost = ref.get("cost_usd", 0)
+        meta = f"Project: {ref.get('project', '?')}"
+        if dur:
+            meta += f" | Duration: {dur:.0f}s"
+        if cost:
+            meta += f" | Cost: ${cost:.4f}"
+        lines.append(meta)
+
+        # Try structured data first (from 'structured' key or parsed 'reflection' column)
+        structured = ref.get("structured")
+        if not structured and ref.get("reflection"):
+            try:
+                parsed = json.loads(ref["reflection"]) if isinstance(ref["reflection"], str) else ref["reflection"]
+                if isinstance(parsed, dict) and "what_worked" in parsed:
+                    structured = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        if structured:
+            if structured.get("what_worked"):
+                lines.append("**What worked:**")
+                for item in structured["what_worked"][:3]:
+                    lines.append(f"  + {item}")
+            if structured.get("what_failed"):
+                lines.append("**What failed:**")
+                for item in structured["what_failed"][:3]:
+                    lines.append(f"  - {item}")
+            if structured.get("suggested_improvements"):
+                lines.append("**Advice:**")
+                for item in structured["suggested_improvements"][:2]:
+                    lines.append(f"  > {item}")
+            if structured.get("missing_tools"):
+                lines.append(f"**Missing tools:** {', '.join(structured['missing_tools'][:3])}")
+            if structured.get("time_wasted_on"):
+                lines.append(f"**Time wasted on:** {'; '.join(structured['time_wasted_on'][:2])}")
+        else:
+            # Legacy format — simple learnings list
+            for learning in ref.get("learnings", ref.get("lessons", [])):
+                lines.append(f"- {learning}")
 
     lines.append("\nUse these past experiences to inform your approach. Avoid repeating past failures.")
     return "\n".join(lines)
