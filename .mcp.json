@@ -3,6 +3,13 @@
     "tree-sitter": {
       "command": "mcp-server-tree-sitter",
       "args": []
+    },
+    "firecrawl": {
+      "command": "firecrawl-mcp",
+      "args": [],
+      "env": {
+        "FIRECRAWL_API_KEY": ""
+      }
     }
   }
 }
