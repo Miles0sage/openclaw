@@ -5207,6 +5207,11 @@ async def api_get_policy():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/api/version")
+async def api_get_version():
+    """Get API version and feature list"""
+    return {"version": "4.0.0", "features": ["repo_map", "diff_view", "compact_tools", "auto_compaction", "phase_gating"]}
+
 @app.get("/control/avatar/{name}")
 async def api_control_avatar(name: str, meta: Optional[str] = None):
     """Return a placeholder for dashboard avatar requests."""
