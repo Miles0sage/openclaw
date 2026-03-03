@@ -828,7 +828,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research", "/api/monitoring", "/api/pa"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -7506,6 +7506,103 @@ async def pa_list_requests(request: Request):
     limit = int(request.query_params.get("limit", "20"))
     requests_list = get_recent_pa_requests(limit=limit)
     return {"requests": requests_list, "total": len(requests_list)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# REAL-TIME JOB MONITORING — WebSocket + HTTP endpoints
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.websocket("/ws/jobs/{job_id}")
+async def ws_job_monitor(websocket: WebSocket, job_id: str):
+    """WebSocket endpoint for real-time job monitoring.
+
+    Connects client to live updates for a specific job. Pushes state
+    changes every time an event fires (phase changes, tool calls, etc.).
+    """
+    from gateway_monitoring import get_job_monitor, get_ws_manager
+
+    ws_mgr = get_ws_manager()
+    monitor = get_job_monitor()
+
+    await websocket.accept()
+    ws_mgr.connect(job_id, websocket)
+    logger.info(f"[WS-MONITOR] Client connected for job {job_id}")
+
+    try:
+        # Send initial state snapshot
+        state = monitor.get_live_state(job_id)
+        await websocket.send_json({"type": "snapshot", "job_id": job_id, "state": state})
+
+        # Keep connection alive — events are pushed via broadcast
+        while True:
+            try:
+                msg = await asyncio.wait_for(websocket.receive_text(), timeout=30)
+                if msg == "ping":
+                    await websocket.send_json({"type": "pong"})
+                elif msg == "refresh":
+                    state = monitor.get_live_state(job_id)
+                    await websocket.send_json({"type": "snapshot", "job_id": job_id, "state": state})
+            except asyncio.TimeoutError:
+                # Send keepalive
+                await websocket.send_json({"type": "heartbeat", "ts": time.time()})
+    except Exception as e:
+        logger.info(f"[WS-MONITOR] Client disconnected for job {job_id}: {e}")
+    finally:
+        ws_mgr.disconnect(job_id, websocket)
+
+
+@app.get("/api/jobs/{job_id}/live")
+async def get_job_live_state(job_id: str):
+    """Get real-time state of a running job (phase, progress, active tools, cost)."""
+    from gateway_monitoring import get_job_monitor
+
+    monitor = get_job_monitor()
+    state = monitor.get_live_state(job_id)
+    if not state:
+        return JSONResponse({"error": "Job not found in live state"}, status_code=404)
+    return {"job_id": job_id, "state": state}
+
+
+@app.get("/api/jobs/{job_id}/phases")
+async def get_job_phases(job_id: str):
+    """Get phase timeline for a job (start/end timestamps per phase)."""
+    from gateway_monitoring import get_job_phases_timeline
+
+    timeline = get_job_phases_timeline(job_id)
+    return {"job_id": job_id, "phases": timeline}
+
+
+@app.get("/api/jobs/{job_id}/costs")
+async def get_job_costs(job_id: str):
+    """Get detailed cost breakdown for a job (per-phase, per-tool, per-agent, per-model)."""
+    from cost_breakdown import get_job_cost_breakdown, get_tool_usage_breakdown
+
+    costs = get_job_cost_breakdown(job_id)
+    tools = get_tool_usage_breakdown(job_id)
+    return {"job_id": job_id, "costs": costs, "tool_usage": tools}
+
+
+@app.get("/api/monitoring/active")
+async def get_active_jobs_monitoring():
+    """Get live state of all currently active jobs."""
+    from gateway_monitoring import get_job_monitor
+
+    monitor = get_job_monitor()
+    states = monitor.get_all_live_states()
+    return {
+        "active_jobs": len(states),
+        "jobs": states,
+    }
+
+
+@app.get("/api/monitoring/costs")
+async def get_project_costs(request: Request):
+    """Get aggregated cost summary for a project or all projects."""
+    from cost_breakdown import get_project_cost_summary
+
+    project = request.query_params.get("project")
+    days = int(request.query_params.get("days", "7"))
+    return get_project_cost_summary(project=project, days=days)
 
 
 # ═══════════════════════════════════════════════════════════════════════
