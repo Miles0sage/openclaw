@@ -99,11 +99,7 @@ def summarize_changes(
     new_content: str,
     filename: str = "file",
 ) -> str:
-    """
-    Ultra-compact change summary (1-2 lines) for event logs.
-
-    Example: "auth.py: +3 -1 lines (added scope validation)"
-    """
+    """Ultra-compact change summary for event logs and notifications."""
     old_lines = old_content.splitlines()
     new_lines = new_content.splitlines()
 
