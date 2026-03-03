@@ -1,0 +1,123 @@
+{
+  "name": "OpenClaw Daily Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": [
+          {
+            "interval": [
+              {
+                "field": "minutes",
+                "expression": "0"
+              },
+              {
+                "field": "hours",
+                "expression": "9"
+              }
+            ]
+          }
+        ]
+      },
+      "id": "cron-trigger",
+      "name": "Cron - 9am Daily",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:18789/api/agency/status",
+        "options": {
+          "headers": {}
+        },
+        "method": "GET"
+      },
+      "id": "fetch-agency-status",
+      "name": "Fetch Agency Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "options": {},
+        "otherOptions": {},
+        "content": "slack",
+        "attachment": [
+          {
+            "fallback": "OpenClaw Daily Digest",
+            "color": "#1976d2",
+            "title": "📊 OpenClaw Daily Digest",
+            "title_link": "https://dashboard.overseerclaw.uk",
+            "fields": [
+              {
+                "title": "Active Jobs",
+                "value": "={{ $json.activeJobs || 0 }}",
+                "short": true
+              },
+              {
+                "title": "Completed Today",
+                "value": "={{ $json.completedToday || 0 }}",
+                "short": true
+              },
+              {
+                "title": "Failed Today",
+                "value": "={{ $json.failedToday || 0 }}",
+                "short": true
+              },
+              {
+                "title": "Total Cost (Month)",
+                "value": "={{ $json.monthlySpend || '$0.00' }}",
+                "short": true
+              },
+              {
+                "title": "Budget Remaining",
+                "value": "={{ $json.budgetRemaining || 'N/A' }}",
+                "short": true
+              },
+              {
+                "title": "Active Agents",
+                "value": "={{ $json.activeAgents || 0 }}",
+                "short": true
+              }
+            ],
+            "footer": "OpenClaw v3.7",
+            "ts": "={{ Math.floor(Date.now() / 1000) }}"
+          }
+        ]
+      },
+      "id": "slack-daily-digest",
+      "name": "Slack - Daily Digest",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 3,
+      "position": [720, 300]
+    }
+  ],
+  "connections": {
+    "Cron - 9am Daily": {
+      "main": [
+        [
+          {
+            "node": "Fetch Agency Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Agency Status": {
+      "main": [
+        [
+          {
+            "node": "Slack - Daily Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {}
+}

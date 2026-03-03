@@ -1,0 +1,40 @@
+NightOwl Security — Scan Report
+Target: scanme.nmap.org (45.33.32.156)
+Scan Type: Quick (Nmap)
+Date: 2026-03-03
+
+═══════════════════════════════════════
+OPEN PORTS
+═══════════════════════════════════════
+
+PORT    STATE     SERVICE    VERSION
+22/tcp  open      ssh        OpenSSH 6.6.1p1 Ubuntu 2ubuntu2.13
+80/tcp  open      http       Apache httpd 2.4.7 (Ubuntu)
+25/tcp  filtered  smtp
+465/tcp filtered  smtps
+587/tcp filtered  submission
+
+═══════════════════════════════════════
+FINDINGS
+═══════════════════════════════════════
+
+[HIGH] Outdated SSH Server
+  OpenSSH 6.6.1p1 is severely outdated (2014 release)
+  Multiple known CVEs including CVE-2016-0777, CVE-2015-5600
+  Recommendation: Upgrade to OpenSSH 9.x+
+
+[HIGH] Outdated Web Server
+  Apache 2.4.7 is severely outdated (2013 release)
+  Multiple known CVEs including CVE-2017-9798, CVE-2017-7679
+  Recommendation: Upgrade to Apache 2.4.58+
+
+[MEDIUM] SSH Host Key Types
+  DSA 1024-bit key detected — weak and deprecated
+  Recommendation: Remove DSA key, use Ed25519 or RSA 4096
+
+[INFO] Filtered SMTP Ports
+  Ports 25, 465, 587 are filtered — mail services may be present behind firewall
+
+═══════════════════════════════════════
+RISK SCORE: 7.2 / 10 (HIGH)
+═══════════════════════════════════════

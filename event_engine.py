@@ -117,12 +117,14 @@ class EventEngine:
             self.subscribe(evt, self._slack_notify)
         self.subscribe("job.completed", self._reaction_handler)
         self.subscribe("job.failed", self._reaction_handler)
-        # Subscribe to job events for n8n webhook
+        # Subscribe to job and cost events for n8n webhook
         self.subscribe("job.created", self._n8n_webhook_notify)
         self.subscribe("job.completed", self._n8n_webhook_notify)
         self.subscribe("job.failed", self._n8n_webhook_notify)
         self.subscribe("job.approved", self._n8n_webhook_notify)
         self.subscribe("job.phase_change", self._n8n_webhook_notify)
+        self.subscribe("cost.alert", self._n8n_webhook_notify)
+        self.subscribe("cost.threshold_exceeded", self._n8n_webhook_notify)
 
         logger.info("EventEngine initialized with built-in subscribers + deduplication")
 
@@ -321,16 +323,18 @@ class EventEngine:
         event_id = record.get("event_id", "n/a")
         ts = record.get("timestamp", "")
 
-        # Only post job-related events to n8n
+        # Only post job-related events to n8n; cost.* events are silently dropped
         if not event_type.startswith("job."):
             return
 
-        # Post to the gateway's webhook endpoint which handles n8n events
-        # Falls back to n8n directly if N8N_WEBHOOK_URL is set
-        n8n_webhook_url = os.environ.get(
-            "N8N_WEBHOOK_URL",
-            "http://localhost:18789/webhook/openclaw-jobs"
-        )
+        # Post directly to n8n webhook. Production URL expects workflow to be active.
+        # Use test URL format for development (http://localhost:5678/webhook-test/{path})
+        # Use production URL for active workflows (http://localhost:5678/webhook/{path})
+        n8n_base_url = os.environ.get("N8N_BASE_URL", "http://localhost:5678")
+        n8n_webhook_mode = os.environ.get("N8N_WEBHOOK_MODE", "webhook")  # "webhook" or "webhook-test"
+        n8n_webhook_path = os.environ.get("N8N_WEBHOOK_PATH", "openclaw-events")
+
+        n8n_webhook_url = f"{n8n_base_url}/{n8n_webhook_mode}/{n8n_webhook_path}"
 
         payload = json.dumps({
             "event_type": event_type,

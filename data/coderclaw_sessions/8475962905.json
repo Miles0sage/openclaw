@@ -1,0 +1,27 @@
+{
+  "chat_id": "8475962905",
+  "claude_session_id": "50f5733c-2dab-b4dc-eb13-0b0d575e097b",
+  "history": [
+    {
+      "role": "user",
+      "content": "/project",
+      "ts": 1772554520.102488
+    },
+    {
+      "role": "assistant",
+      "content": "Unknown skill: project",
+      "ts": 1772554520.10249
+    },
+    {
+      "role": "user",
+      "content": "/project",
+      "ts": 1772554533.9291568
+    },
+    {
+      "role": "assistant",
+      "content": "Unknown skill: project",
+      "ts": 1772554533.9291604
+    }
+  ],
+  "project": "/root"
+}

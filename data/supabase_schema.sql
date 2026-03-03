@@ -93,6 +93,22 @@ CREATE TABLE IF NOT EXISTS events (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 8. TOOL_REQUESTS TABLE — Phase 2: Self-improving tool gap detection
+CREATE TABLE IF NOT EXISTS tool_requests (
+    id SERIAL PRIMARY KEY,
+    description TEXT NOT NULL,
+    source_job TEXT,
+    source_reflection TEXT,
+    priority TEXT DEFAULT 'P2',
+    status TEXT DEFAULT 'pending',  -- pending | approved | rejected | implemented
+    proposed_name TEXT,
+    proposed_schema JSONB,
+    proposed_code TEXT,
+    votes INTEGER DEFAULT 1,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ
+);
+
 -- ============================================
 -- Indexes for query performance
 -- ============================================

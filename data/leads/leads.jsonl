@@ -1,0 +1,2 @@
+{"id": "lead_1772481160_a675c9c2", "name": "Verify Test", "business": "Test Corp", "phone": "", "email": "test@verify.com", "service": "full-package", "message": "", "source": "website", "timestamp": "2026-03-02T19:52:40Z", "status": "new"}
+{"id": "lead_1772484341_fc493d0c", "name": "John Doe", "business": "Test Barber Shop", "phone": "(928) 555-1234", "email": "john@testbarber.com", "service": ["ai-receptionist", "website-ai"], "message": "", "source": "direct", "timestamp": "2026-03-02T20:45:41Z", "status": "new", "budget": "$500-1000"}

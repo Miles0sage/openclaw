@@ -1,0 +1,178 @@
+{
+  "date": "2026-02-28",
+  "logged_at": "2026-02-28T21:46:07.760409Z",
+  "predictions": [
+    {
+      "home": "Charlotte Hornets",
+      "away": "Portland Trail Blazers",
+      "predicted_winner": "Charlotte Hornets",
+      "home_win_prob": 0.5245,
+      "away_win_prob": 0.4755,
+      "confidence": 0.524
+    },
+    {
+      "home": "Miami Heat",
+      "away": "Houston Rockets",
+      "predicted_winner": "Miami Heat",
+      "home_win_prob": 0.5447,
+      "away_win_prob": 0.4553,
+      "confidence": 0.545
+    },
+    {
+      "home": "Washington Wizards",
+      "away": "Toronto Raptors",
+      "predicted_winner": "Toronto Raptors",
+      "home_win_prob": 0.1762,
+      "away_win_prob": 0.8238,
+      "confidence": 0.824
+    },
+    {
+      "home": "Golden State Warriors",
+      "away": "Los Angeles Lakers",
+      "predicted_winner": "Golden State Warriors",
+      "home_win_prob": 0.501,
+      "away_win_prob": 0.499,
+      "confidence": 0.501
+    },
+    {
+      "home": "Utah Jazz",
+      "away": "New Orleans Pelicans",
+      "predicted_winner": "New Orleans Pelicans",
+      "home_win_prob": 0.1475,
+      "away_win_prob": 0.8525,
+      "confidence": 0.853
+    }
+  ],
+  "recommendations": [
+    {
+      "game": "Toronto Raptors @ Washington Wizards",
+      "bet_on": "Washington Wizards",
+      "odds": 8.2,
+      "model_prob": 0.1762,
+      "ev_pct": 44.48,
+      "bet_size": 1.54,
+      "expected_profit": 0.68
+    },
+    {
+      "game": "Houston Rockets @ Miami Heat",
+      "bet_on": "Miami Heat",
+      "odds": 2.52,
+      "model_prob": 0.5447,
+      "ev_pct": 37.26,
+      "bet_size": 6.13,
+      "expected_profit": 2.28
+    },
+    {
+      "game": "New Orleans Pelicans @ Utah Jazz",
+      "bet_on": "New Orleans Pelicans",
+      "odds": 1.47,
+      "model_prob": 0.8525,
+      "ev_pct": 25.32,
+      "bet_size": 13.47,
+      "expected_profit": 3.41
+    },
+    {
+      "game": "Los Angeles Lakers @ Golden State Warriors",
+      "bet_on": "Golden State Warriors",
+      "odds": 2.5,
+      "model_prob": 0.501,
+      "ev_pct": 25.25,
+      "bet_size": 4.21,
+      "expected_profit": 1.06
+    }
+  ],
+  "results": {
+    "graded_at": "2026-03-01T17:45:59.607819Z",
+    "predictions": [
+      {
+        "home": "Charlotte Hornets",
+        "away": "Portland Trail Blazers",
+        "predicted_winner": "Charlotte Hornets",
+        "actual_winner": "Charlotte Hornets",
+        "home_score": 109,
+        "away_score": 93,
+        "correct": true
+      },
+      {
+        "home": "Miami Heat",
+        "away": "Houston Rockets",
+        "predicted_winner": "Miami Heat",
+        "actual_winner": "Miami Heat",
+        "home_score": 115,
+        "away_score": 105,
+        "correct": true
+      },
+      {
+        "home": "Washington Wizards",
+        "away": "Toronto Raptors",
+        "predicted_winner": "Toronto Raptors",
+        "actual_winner": "Toronto Raptors",
+        "home_score": 125,
+        "away_score": 134,
+        "correct": true
+      },
+      {
+        "home": "Golden State Warriors",
+        "away": "Los Angeles Lakers",
+        "predicted_winner": "Golden State Warriors",
+        "actual_winner": "Los Angeles Lakers",
+        "home_score": 101,
+        "away_score": 129,
+        "correct": false
+      },
+      {
+        "home": "Utah Jazz",
+        "away": "New Orleans Pelicans",
+        "predicted_winner": "New Orleans Pelicans",
+        "actual_winner": "New Orleans Pelicans",
+        "home_score": 105,
+        "away_score": 115,
+        "correct": true
+      }
+    ],
+    "bets": [
+      {
+        "game": "Toronto Raptors @ Washington Wizards",
+        "bet_on": "Washington Wizards",
+        "odds": 8.2,
+        "bet_size": 1.54,
+        "won": false,
+        "profit": -1.54
+      },
+      {
+        "game": "Houston Rockets @ Miami Heat",
+        "bet_on": "Miami Heat",
+        "odds": 2.52,
+        "bet_size": 6.13,
+        "won": true,
+        "profit": 9.32
+      },
+      {
+        "game": "New Orleans Pelicans @ Utah Jazz",
+        "bet_on": "New Orleans Pelicans",
+        "odds": 1.47,
+        "bet_size": 13.47,
+        "won": true,
+        "profit": 6.33
+      },
+      {
+        "game": "Los Angeles Lakers @ Golden State Warriors",
+        "bet_on": "Golden State Warriors",
+        "odds": 2.5,
+        "bet_size": 4.21,
+        "won": false,
+        "profit": -4.21
+      }
+    ],
+    "summary": {
+      "picks_correct": 4,
+      "picks_total": 5,
+      "picks_pct": 80.0,
+      "bets_won": 2,
+      "bets_total": 4,
+      "total_wagered": 25.35,
+      "total_profit": 9.9,
+      "roi_pct": 39.0
+    }
+  }
+}

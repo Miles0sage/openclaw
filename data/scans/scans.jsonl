@@ -1,1 +1,4 @@
 {"scan_id": "scan-98c3245a948d", "target": "https://example.com", "email": "test@test.com", "scan_type": "quick", "status": "queued", "created_at": "2026-03-02T22:06:45.787221+00:00"}
+{"scan_id": "scan-d5f63c843344", "target": "scanme.nmap.org", "email": "miles@overseerclaw.uk", "scan_type": "quick", "status": "queued", "created_at": "2026-03-02T23:25:44.070479+00:00"}
+{"scan_id": "scan-08bb9f5036c5", "target": "testphp.vulnweb.com", "email": "miles@overseerclaw.uk", "scan_type": "full", "status": "queued", "created_at": "2026-03-02T23:25:45.219796+00:00"}
+{"scan_id": "scan-5d52a18084ba", "target": "demo.testfire.net", "email": "miles@overseerclaw.uk", "scan_type": "deep", "status": "queued", "created_at": "2026-03-02T23:25:46.355100+00:00"}

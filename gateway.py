@@ -416,11 +416,25 @@ TASKS_FILE = pathlib.Path(os.path.join(DATA_DIR, "jobs", "tasks.json"))
 _event_log = []  # Ring buffer of recent events (max 200)
 
 def broadcast_event(event_data: dict):
-    """Broadcast an event to SSE subscribers via ring buffer"""
+    """Broadcast an event to SSE subscribers via ring buffer and emit to event engine"""
     event_data.setdefault("timestamp", datetime.now(timezone.utc).isoformat() + "Z")
     _event_log.append(event_data)
     while len(_event_log) > 200:
         _event_log.pop(0)
+
+    # Also emit to the event engine subscription system
+    # Normalize event types: "job_completed" -> "job.completed"
+    event_type_raw = event_data.get("type", "")
+    event_type = event_type_raw.replace("_", ".") if event_type_raw else ""
+
+    if event_type:
+        try:
+            engine = get_event_engine()
+            # Extract relevant data fields for the event (exclude type and timestamp, which are metadata)
+            event_payload = {k: v for k, v in event_data.items() if k not in ["type", "timestamp"]}
+            engine.emit(event_type, event_payload)
+        except Exception as e:
+            logger.warning(f"Failed to emit event {event_type} to event engine: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -810,7 +824,7 @@ if not AUTH_TOKEN:
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/coderclaw/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl", "/visionclaw", "/webhook/twilio", "/webhook/openclaw-jobs"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/coderclaw/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl", "/visionclaw", "/webhook/twilio", "/webhook/openclaw-jobs", "/webhook/slack-test"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
@@ -5235,7 +5249,9 @@ async def n8n_openclaw_jobs_webhook(request: Request):
         )
 
         # Log to a dedicated webhook event log for pipeline monitoring
-        webhook_log_path = os.path.join(DATA_DIR, "webhooks", "n8n_events.jsonl")
+        # Use runtime env lookup so tests can monkeypatch OPENCLAW_DATA_DIR
+        _data_dir = os.environ.get("OPENCLAW_DATA_DIR", DATA_DIR)
+        webhook_log_path = os.path.join(_data_dir, "webhooks", "n8n_events.jsonl")
         os.makedirs(os.path.dirname(webhook_log_path), exist_ok=True)
 
         record = {
@@ -5255,6 +5271,42 @@ async def n8n_openclaw_jobs_webhook(request: Request):
         }
     except Exception as e:
         logger.error(f"n8n webhook error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/webhook/slack-test")
+async def slack_webhook_test(request: Request):
+    """Test endpoint for Slack webhook events from n8n workflows.
+
+    This endpoint accepts Slack message payloads and logs them for testing.
+    In production, replace with actual Slack incoming webhook integration.
+    """
+    try:
+        body = await request.json()
+
+        # Log the incoming message
+        logger.info(f"Slack webhook test received: {body.get('text', 'no text')[:100]}")
+
+        # Log to a dedicated webhook log for monitoring
+        _data_dir = os.environ.get("OPENCLAW_DATA_DIR", DATA_DIR)
+        slack_log_path = os.path.join(_data_dir, "webhooks", "slack_test.jsonl")
+        os.makedirs(os.path.dirname(slack_log_path), exist_ok=True)
+
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "text": body.get("text", ""),
+            "attachments": len(body.get("attachments", [])),
+        }
+
+        with open(slack_log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, separators=(",", ":")) + "\n")
+
+        return {
+            "ok": True,
+            "message": "Slack webhook test received",
+        }
+    except Exception as e:
+        logger.error(f"Slack test webhook error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 

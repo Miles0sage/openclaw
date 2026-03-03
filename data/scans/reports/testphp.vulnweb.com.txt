@@ -1,0 +1,34 @@
+NightOwl Security — Scan Report
+Target: testphp.vulnweb.com (44.228.249.3)
+Scan Type: Full (Nmap + Nuclei)
+Date: 2026-03-03
+
+═══════════════════════════════════════
+OPEN PORTS
+═══════════════════════════════════════
+
+PORT   STATE  SERVICE  VERSION
+80/tcp open   http     nginx 1.19.0
+
+Host: AWS EC2 (us-west-2)
+
+═══════════════════════════════════════
+FINDINGS
+═══════════════════════════════════════
+
+[HIGH] Outdated Nginx
+  nginx 1.19.0 is outdated (2020 release)
+  Known CVEs including HTTP/2 vulnerabilities
+  Recommendation: Upgrade to nginx 1.25+
+
+[CRITICAL] Known Vulnerable Application
+  Acunetix test application — intentionally vulnerable
+  Contains SQL injection, XSS, file inclusion, CSRF vulnerabilities
+  This is a test target, not a production issue
+
+[INFO] Single Port Exposure
+  Only port 80 open — all other ports filtered by AWS security group
+
+═══════════════════════════════════════
+NUCLEI RESULTS: (pending — appended below)
+═══════════════════════════════════════

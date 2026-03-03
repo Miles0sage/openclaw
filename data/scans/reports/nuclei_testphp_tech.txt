@@ -1,0 +1,8 @@
+[waf-detect:nginxgeneric] [http] [info] http://testphp.vulnweb.com
+[nginx-eol:version] [http] [info] http://testphp.vulnweb.com ["1.19.0"]
+[php-eol:version] [http] [info] http://testphp.vulnweb.com ["5.6.40"]
+[nginx-version] [http] [info] http://testphp.vulnweb.com ["nginx/1.19.0"]
+[php-detect] [http] [info] http://testphp.vulnweb.com ["5.6.40"]
+[tech-detect:dreamweaver] [http] [info] http://testphp.vulnweb.com
+[tech-detect:nginx] [http] [info] http://testphp.vulnweb.com
+[tech-detect:php] [http] [info] http://testphp.vulnweb.com
