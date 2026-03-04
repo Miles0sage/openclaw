@@ -855,7 +855,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/job-viewer", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research", "/api/monitoring", "/api/pa", "/api/oz", "/api/ceo", "/api/pinch"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/job-viewer", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research", "/api/monitoring", "/api/pa", "/api/oz", "/api/ceo", "/api/pinch", "/api/mcp"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -5175,6 +5175,118 @@ async def ceo_trigger_task(task_name: str):
         return JSONResponse({"error": "CEO engine not initialized"}, status_code=503)
     result = await ceo.trigger_task(task_name)
     return result
+
+
+# ---------------------------------------------------------------------------
+# MCP Tool Servers API
+# ---------------------------------------------------------------------------
+
+@app.get("/api/mcp/servers")
+async def mcp_list_servers():
+    """List available MCP tool servers and their tools."""
+    import json as _json
+    servers = []
+    mcp_dir = os.path.join(os.path.dirname(__file__), "mcp_servers")
+    for name in ["restaurant", "barbershop"]:
+        manifest = os.path.join(mcp_dir, name, "server.json")
+        if os.path.exists(manifest):
+            with open(manifest) as f:
+                servers.append(_json.load(f))
+    return {"servers": servers, "count": len(servers)}
+
+
+@app.post("/api/mcp/{server_name}/call")
+async def mcp_call_tool(server_name: str, request: Request):
+    """Call a tool on an MCP server. Body: {tool, arguments, api_key?}"""
+    import json as _json
+    body = await request.json()
+    tool_name = body.get("tool")
+    arguments = body.get("arguments", {})
+    api_key = body.get("api_key", "")
+
+    if not tool_name:
+        return JSONResponse({"error": "tool name required"}, status_code=400)
+
+    # Billing check
+    from mcp_servers.shared.billing import UsageTracker, APIKeyManager, billing_check
+    tracker = UsageTracker(server_name)
+    key_mgr = APIKeyManager(server_name)
+    block = billing_check(tracker, key_mgr, api_key, tool_name)
+    if block:
+        return JSONResponse(block, status_code=429)
+
+    # Load the right MCP server
+    try:
+        if server_name == "restaurant":
+            from mcp_servers.restaurant.server import mcp as srv
+        elif server_name == "barbershop":
+            from mcp_servers.barbershop.server import mcp as srv
+        else:
+            return JSONResponse({"error": f"Unknown server: {server_name}"}, status_code=404)
+
+        result = await srv.call_tool(tool_name, arguments)
+        # Parse the text content
+        text = result.content[0].text if result.content else "{}"
+        try:
+            data = _json.loads(text)
+        except Exception:
+            data = {"result": text}
+        return {"tool": tool_name, "server": server_name, "result": data}
+    except Exception as e:
+        logger.error(f"MCP call error: {server_name}/{tool_name}: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/mcp/{server_name}/tools")
+async def mcp_list_tools(server_name: str):
+    """List tools available on an MCP server."""
+    try:
+        if server_name == "restaurant":
+            from mcp_servers.restaurant.server import mcp as srv
+        elif server_name == "barbershop":
+            from mcp_servers.barbershop.server import mcp as srv
+        else:
+            return JSONResponse({"error": f"Unknown server: {server_name}"}, status_code=404)
+
+        tools = await srv.list_tools()
+        return {
+            "server": server_name,
+            "tools": [
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.inputSchema if hasattr(t, "inputSchema") else {},
+                }
+                for t in tools
+            ],
+            "count": len(tools),
+        }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/mcp/keys")
+async def mcp_create_api_key(request: Request):
+    """Create an API key for an MCP server. Body: {server, owner, tier?}"""
+    body = await request.json()
+    server = body.get("server")
+    owner = body.get("owner")
+    tier = body.get("tier", "free")
+    if not server or not owner:
+        return JSONResponse({"error": "server and owner required"}, status_code=400)
+    from mcp_servers.shared.billing import APIKeyManager
+    mgr = APIKeyManager(server)
+    key = mgr.create_key(owner, tier)
+    return {"api_key": key, "server": server, "owner": owner, "tier": tier}
+
+
+@app.get("/api/mcp/{server_name}/usage")
+async def mcp_usage(server_name: str, api_key: str = "anonymous"):
+    """Get usage stats for an API key on a server."""
+    from mcp_servers.shared.billing import UsageTracker
+    tracker = UsageTracker(server_name)
+    usage = tracker.get_usage(api_key)
+    return {"server": server_name, "usage": usage}
 
 
 # ---------------------------------------------------------------------------

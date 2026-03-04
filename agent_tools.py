@@ -1279,7 +1279,7 @@ AGENT_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["click", "type", "fill", "press", "hover", "select", "scroll"], "description": "Action to perform"},
+                "action": {"type": "string", "enum": ["click", "type", "fill", "press", "hover", "select", "scroll", "focus", "humanClick", "humanType"], "description": "Action to perform (humanClick/humanType simulate real user behavior)"},
                 "ref": {"type": "string", "description": "Element ref from snapshot (e.g. 'e5') or CSS selector"},
                 "value": {"type": "string", "description": "Value for type/fill/press/select actions"},
             },
@@ -4344,7 +4344,7 @@ def _pinchtab_snapshot() -> str:
 
 def _pinchtab_action(action: str, ref: str, value: str = "") -> str:
     """Perform a browser action."""
-    body = {"action": action, "ref": ref}
+    body = {"kind": action, "ref": ref}
     if value:
         body["value"] = value
     return _pinchtab_request("POST", "/action", body)
@@ -4366,13 +4366,13 @@ def _pinchtab_tabs(action: str = "list", url: str = "", tab_id: str = "") -> str
     if action == "list":
         return _pinchtab_request("GET", "/tabs")
     elif action == "open":
-        return _pinchtab_request("POST", "/tab", {"action": "open", "url": url})
+        return _pinchtab_request("GET", f"/tabs/new?url={url}")
     elif action == "close":
-        return _pinchtab_request("POST", "/tab", {"action": "close", "id": tab_id})
+        return _pinchtab_request("GET", f"/tabs/close/{tab_id}")
     return json.dumps({"error": f"Unknown tab action: {action}"})
 
 
 def _pinchtab_evaluate(script: str) -> str:
     """Execute JavaScript in browser."""
-    return _pinchtab_request("POST", "/evaluate", {"script": script})
+    return _pinchtab_request("POST", "/evaluate", {"expression": script})
 
