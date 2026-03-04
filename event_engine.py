@@ -57,6 +57,12 @@ VALID_EVENT_TYPES = frozenset([
     "ci.passed",
     "scan.completed",
     "scan.failed",
+    "ceo.started",
+    "ceo.job_created",
+    "ceo.alert",
+    "ceo.decision",
+    "ceo.health_check",
+    "ceo.goal_updated",
     "custom",
     "test",
 ])

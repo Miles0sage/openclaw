@@ -229,20 +229,30 @@ def init_memory_manager():
 def get_memory_manager():
     return _memory_manager_instance
 
-# Inline cron scheduler stub (replaces deleted cron_scheduler.py)
-class _CronSchedulerStub:
+# CEO Engine (replaces deleted cron_scheduler.py)
+from ceo_engine import CEOEngine, init_ceo_engine, get_ceo_engine
+
+class _CEOSchedulerAdapter:
+    """Adapter so existing cron start/stop calls work with CEO engine."""
+    def __init__(self, ceo: CEOEngine):
+        self._ceo = ceo
+        self._started = False
     def start(self):
-        pass
+        # Actual async start happens in lifespan
+        self._started = True
     def stop(self):
-        pass
+        self._started = False
     def list_jobs(self) -> list:
-        return []
+        return list(ceo_engine.SCHEDULES.keys()) if self._started else []
+
+import ceo_engine as _ceo_module
 
 _cron_scheduler_instance = None
 
 def init_cron_scheduler():
     global _cron_scheduler_instance
-    _cron_scheduler_instance = _CronSchedulerStub()
+    ceo = init_ceo_engine()
+    _cron_scheduler_instance = _CEOSchedulerAdapter(ceo)
     return _cron_scheduler_instance
 
 def get_cron_scheduler():
@@ -745,6 +755,15 @@ async def lifespan(application):
     except Exception as err:
         logger.error(f"Failed to start autonomous runner: {err}")
 
+    # AI CEO Engine
+    try:
+        ceo = get_ceo_engine()
+        if ceo:
+            await ceo.start()
+            logger.info(f"✅ AI CEO Engine started ({len(ceo.get_active_goals())} goals, 4 autonomous loops)")
+    except Exception as err:
+        logger.error(f"Failed to start CEO engine: {err}")
+
     # Review cycle + output verifier
     try:
         global _review_engine, _output_verifier
@@ -778,6 +797,14 @@ async def lifespan(application):
         logger.info("✅ Autonomous runner stopped")
     except Exception as err:
         logger.error(f"Failed to stop autonomous runner: {err}")
+
+    try:
+        ceo = get_ceo_engine()
+        if ceo:
+            await ceo.stop()
+        logger.info("✅ AI CEO Engine stopped")
+    except Exception as err:
+        logger.error(f"Failed to stop CEO engine: {err}")
 
     try:
         c = get_cron_scheduler()
@@ -828,7 +855,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/job-viewer", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research", "/api/monitoring", "/api/pa", "/api/oz"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/job-viewer", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research", "/api/monitoring", "/api/pa", "/api/oz", "/api/ceo"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -5077,6 +5104,82 @@ async def get_job_status(job_id: str):
         logger.error(f"Job status error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
+# ---------------------------------------------------------------------------
+# CEO Engine API
+# ---------------------------------------------------------------------------
+
+@app.get("/api/ceo/status")
+async def ceo_status():
+    """Get AI CEO engine status, goals, and schedule."""
+    ceo = get_ceo_engine()
+    if not ceo:
+        return JSONResponse({"error": "CEO engine not initialized"}, status_code=503)
+    return ceo.get_status()
+
+
+@app.get("/api/ceo/decisions")
+async def ceo_decisions(limit: int = 50):
+    """Get recent CEO decisions."""
+    ceo = get_ceo_engine()
+    if not ceo:
+        return JSONResponse({"error": "CEO engine not initialized"}, status_code=503)
+    return {"decisions": ceo.get_decisions(limit), "total": len(ceo.get_decisions(limit))}
+
+
+@app.get("/api/ceo/goals")
+async def ceo_goals():
+    """Get all strategic goals."""
+    ceo = get_ceo_engine()
+    if not ceo:
+        return JSONResponse({"error": "CEO engine not initialized"}, status_code=503)
+    return {"goals": ceo.goals}
+
+
+@app.post("/api/ceo/goals")
+async def ceo_add_goal(request: Request):
+    """Add a new strategic goal."""
+    ceo = get_ceo_engine()
+    if not ceo:
+        return JSONResponse({"error": "CEO engine not initialized"}, status_code=503)
+    body = await request.json()
+    title = body.get("title")
+    if not title:
+        return JSONResponse({"error": "title is required"}, status_code=400)
+    goal = ceo.add_goal(
+        title=title,
+        priority=body.get("priority", "P1"),
+        metrics=body.get("metrics", []),
+    )
+    return {"goal": goal}
+
+
+@app.put("/api/ceo/goals/{goal_id}")
+async def ceo_update_goal(goal_id: str, request: Request):
+    """Update a strategic goal."""
+    ceo = get_ceo_engine()
+    if not ceo:
+        return JSONResponse({"error": "CEO engine not initialized"}, status_code=503)
+    body = await request.json()
+    goal = ceo.update_goal(goal_id, **body)
+    if not goal:
+        return JSONResponse({"error": f"Goal {goal_id} not found"}, status_code=404)
+    return {"goal": goal}
+
+
+@app.post("/api/ceo/trigger/{task_name}")
+async def ceo_trigger_task(task_name: str):
+    """Manually trigger a CEO autonomous task."""
+    ceo = get_ceo_engine()
+    if not ceo:
+        return JSONResponse({"error": "CEO engine not initialized"}, status_code=503)
+    result = await ceo.trigger_task(task_name)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Jobs API
+# ---------------------------------------------------------------------------
 
 @app.get("/api/jobs")
 async def list_all_jobs():

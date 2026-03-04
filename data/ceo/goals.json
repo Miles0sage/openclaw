@@ -1,0 +1,59 @@
+{
+  "goals": [
+    {
+      "id": "g1",
+      "title": "Launch Stripe commercialization \u2014 freemium tiers for OpenClaw",
+      "priority": "P0",
+      "status": "active",
+      "metrics": ["revenue", "signups"],
+      "progress_pct": 10,
+      "created_at": "2026-03-04T00:00:00Z"
+    },
+    {
+      "id": "g2",
+      "title": "Maintain 90%+ autonomous job success rate",
+      "priority": "P1",
+      "status": "active",
+      "metrics": ["success_rate"],
+      "progress_pct": 90,
+      "created_at": "2026-03-04T00:00:00Z"
+    },
+    {
+      "id": "g3",
+      "title": "Keep per-job cost under $0.01 average",
+      "priority": "P1",
+      "status": "active",
+      "metrics": ["cost_per_job"],
+      "progress_pct": 95,
+      "created_at": "2026-03-04T00:00:00Z"
+    },
+    {
+      "id": "g4",
+      "title": "Daily AI research scout \u2014 stay ahead of competition",
+      "priority": "P2",
+      "status": "active",
+      "metrics": ["integrations_proposed", "tools_evaluated"],
+      "progress_pct": 0,
+      "created_at": "2026-03-04T00:00:00Z"
+    },
+    {
+      "id": "g5",
+      "title": "Build client pipeline \u2014 10 leads, 3 demos, 1 paying customer",
+      "priority": "P1",
+      "status": "active",
+      "metrics": ["leads", "demos", "clients"],
+      "progress_pct": 0,
+      "created_at": "2026-03-04T00:00:00Z"
+    },
+    {
+      "id": "g6",
+      "title": "Integrate Browser-Use for autonomous web research",
+      "priority": "P2",
+      "status": "active",
+      "metrics": ["tools_integrated"],
+      "progress_pct": 0,
+      "created_at": "2026-03-04T09:34:28.450877+00:00"
+    }
+  ],
+  "updated_at": "2026-03-04T09:34:28.450901+00:00"
+}
