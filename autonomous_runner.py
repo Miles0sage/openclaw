@@ -2214,7 +2214,10 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
         f"\nIMPORTANT: Only fail verification for issues in THIS task's changes. Pre-existing issues are NOT blockers.\n"
         f"{dept_verify}\n"
         f"STOP CONDITIONS: Run each check ONCE. Do NOT re-run tests or re-read files "
-        f"you already checked. If a test fails, note it and move on — don't try to fix it here.\n\n"
+        f"you already checked. If a test fails, note it and move on — don't try to fix it here.\n"
+        f"CRITICAL: Do NOT run full-project linting (eslint ., flake8 ., etc.) — only lint specific changed files.\n"
+        f"Pre-existing warnings/errors unrelated to this task are NOT failures.\n"
+        f"If the task was simple (add comment, read file, create small utility), a quick file_read check is sufficient.\n\n"
         f"Respond with a JSON object:\n"
         f'{{"passed": true/false, "summary": "...", "issues": ["issue1", "issue2"]}}\n'
         f"Do NOT include markdown fences or any text outside the JSON."
@@ -2268,6 +2271,8 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
             false_positive = any(fp in tool_result for fp in [
                 "deprecated", "warning:", "Warning:", "is deprecated",
                 "Compiled successfully", "Build complete",
+                "problems", "warnings found", "linting",
+                "no-unused-vars", "no-explicit-any", "@typescript-eslint",
             ])
             if not false_positive:
                 if any(pat in tool_result for pat in [
@@ -2719,7 +2724,7 @@ class JobGuardrails:
         self,
         job_id: str,
         max_cost_usd: float = 2.0,
-        max_iterations: int = 350,
+        max_iterations: int = 400,
         max_duration_secs: int = 3600,
         circuit_breaker_n: int = 3,
     ):
@@ -2956,10 +2961,16 @@ class AutonomousRunner:
         When the gateway restarts, in-flight jobs are orphaned in statuses
         like 'analyzing', 'code_generated', or 'running'. Reset them so
         the poll loop can pick them up again.
+
+        IMPORTANT: Skip jobs whose progress.json shows they already completed
+        their pipeline (phase=deliver, phase_status=done) — re-running these
+        wastes money and can create duplicate commits.
         """
-        orphan_statuses = ["running", "analyzing", "code_generated"]  # running is primary; legacy statuses for backwards compat
+        orphan_statuses = ["running", "analyzing", "code_generated"]
         try:
             from supabase_client import table_select, table_update
+            recovered = 0
+            skipped = 0
             for status in orphan_statuses:
                 rows = await asyncio.get_running_loop().run_in_executor(
                     None,
@@ -2967,6 +2978,36 @@ class AutonomousRunner:
                 )
                 for row in rows:
                     job_id = row["id"]
+
+                    # Check progress.json — if the job already completed the
+                    # deliver phase, mark it done instead of resetting to pending
+                    progress_file = JOB_RUNS_DIR / job_id / "progress.json"
+                    already_done = False
+                    if progress_file.exists():
+                        try:
+                            import json as _json
+                            pdata = _json.loads(progress_file.read_text())
+                            if (pdata.get("phase") == "deliver"
+                                    and pdata.get("phase_status") == "done"):
+                                already_done = True
+                        except Exception:
+                            pass
+
+                    if already_done:
+                        logger.info(
+                            f"Orphan job {job_id} already completed pipeline "
+                            f"(was '{status}') — marking done, not re-queuing"
+                        )
+                        await asyncio.get_running_loop().run_in_executor(
+                            None,
+                            lambda jid=job_id: table_update(
+                                "jobs", f"id=eq.{jid}",
+                                {"status": "done"},
+                            ),
+                        )
+                        skipped += 1
+                        continue
+
                     logger.warning(
                         f"Recovering orphaned job {job_id} "
                         f"(was '{status}' → resetting to 'pending')"
@@ -2978,7 +3019,8 @@ class AutonomousRunner:
                             {"status": "pending", "started_at": None, "error": None},
                         ),
                     )
-            logger.info("Orphan recovery complete")
+                    recovered += 1
+            logger.info(f"Orphan recovery complete: {recovered} recovered, {skipped} already-done skipped")
         except Exception as e:
             logger.error(f"Orphan recovery failed (non-fatal): {e}")
 
@@ -3226,9 +3268,9 @@ class AutonomousRunner:
         # --- Initialize guardrails for this job ---
         # Priority-based cost caps: P0 gets most headroom, P3 is cheapest
         job_priority = job.get("priority", "P2")
-        budget_map = {"P0": 5.0, "P1": 3.0, "P2": 3.0, "P3": 1.0}
+        budget_map = {"P0": 5.0, "P1": 3.0, "P2": 3.0, "P3": 2.0}
         job_max_cost = float(job.get("max_cost_usd", budget_map.get(job_priority, 2.0)))
-        job_max_iter = job.get("max_iterations", 200)
+        job_max_iter = job.get("max_iterations", 400)
         job_max_dur  = job.get("max_duration_seconds", 3600)
         guardrails = JobGuardrails(
             job_id=job_id,
