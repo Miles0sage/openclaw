@@ -4160,6 +4160,19 @@ async def send_sms_endpoint(req: SMSSendRequest, request: Request):
     return {"ok": success, "result": result}
 
 
+@app.get("/sms/history")
+async def sms_history_endpoint(request: Request, direction: str = "all", limit: int = 10):
+    """Get SMS history. Requires auth token."""
+    auth = request.headers.get("X-Auth-Token", "")
+    expected = os.getenv("GATEWAY_AUTH_TOKEN", "")
+    if not expected or auth != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from agent_tools import _get_sms_history
+    result = _get_sms_history(direction, limit)
+    return {"ok": True, "result": result}
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # SLACK WEBHOOK HANDLER
 # ═══════════════════════════════════════════════════════════════════════
@@ -7679,7 +7692,7 @@ async def pinch_tabs(request: Request):
 async def pinch_evaluate(request: Request):
     data = await request.json()
     from agent_tools import _pinchtab_evaluate
-    return JSONResponse({"result": _pinchtab_evaluate(data["script"])})
+    return JSONResponse({"result": _pinchtab_evaluate(data.get("expression", data.get("script", "")))})
 
 # ═══════════════════════════════════════════════════════════════════════
 # SALES CALLER — AI outbound calls via Vapi + ElevenLabs

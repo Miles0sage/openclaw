@@ -1499,6 +1499,156 @@ const OPENCLAW_TOOLS = [
       },
     ],
   },
+  // --- SMS / Phone ---
+  {
+    functionDeclarations: [
+      {
+        name: "send_sms",
+        description:
+          "Send an SMS text message via Twilio. Use to notify Miles, send alerts, or communicate with clients. Rate limited to 10/hour.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            to: {
+              type: "STRING",
+              description: "Phone number in E.164 format (e.g. +15551234567)",
+            },
+            body: {
+              type: "STRING",
+              description: "Message text (max 1600 chars)",
+            },
+          },
+          required: ["to", "body"],
+        },
+      },
+      {
+        name: "sms_history",
+        description:
+          "Get recent SMS messages sent or received. Use to check delivery status or see conversation history.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            direction: {
+              type: "STRING",
+              description: "Filter by direction: sent, received, or all (default: all)",
+            },
+            limit: {
+              type: "INTEGER",
+              description: "Max messages to return (default: 10)",
+            },
+          },
+        },
+      },
+    ],
+  },
+  // --- PinchTab Browser Automation ---
+  {
+    functionDeclarations: [
+      {
+        name: "browser_navigate",
+        description:
+          "Navigate the browser to a URL. Returns page title and URL. Use for web scraping, form filling, and automation.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            url: { type: "STRING", description: "URL to navigate to" },
+          },
+          required: ["url"],
+        },
+      },
+      {
+        name: "browser_snapshot",
+        description:
+          "Get the current page's accessibility tree. Returns structured elements with refs (e0, e1, etc.) for interaction.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            compact: {
+              type: "BOOLEAN",
+              description: "Compact output (default: true)",
+            },
+          },
+        },
+      },
+      {
+        name: "browser_action",
+        description:
+          "Perform an action on a page element by its ref. Actions: click, type, fill, press, hover, scroll, select, focus, humanClick, humanType.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description:
+                "Action: click, type, fill, press, hover, scroll, select, focus, humanClick, humanType",
+            },
+            ref: {
+              type: "STRING",
+              description: "Element ref from snapshot (e.g. e5)",
+            },
+            value: {
+              type: "STRING",
+              description: "Value for type/fill/press/select actions",
+            },
+          },
+          required: ["action", "ref"],
+        },
+      },
+      {
+        name: "browser_text",
+        description:
+          "Extract text content from the current page. Modes: readability (clean article text) or raw (all text).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            mode: {
+              type: "STRING",
+              description: "Extraction mode: readability or raw (default: readability)",
+            },
+          },
+        },
+      },
+      {
+        name: "browser_screenshot",
+        description: "Take a JPEG screenshot of the current page. Returns base64-encoded image.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+        },
+      },
+      {
+        name: "browser_tabs",
+        description:
+          "Manage browser tabs. Actions: list, open (new tab with URL), close (by tab ID).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: list, open, close (default: list)",
+            },
+            url: { type: "STRING", description: "URL for open action" },
+            tab_id: { type: "STRING", description: "Tab ID for close action" },
+          },
+        },
+      },
+      {
+        name: "browser_evaluate",
+        description:
+          "Execute JavaScript in the browser page. Returns the expression result. Use for DOM queries, data extraction, and page manipulation.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            expression: {
+              type: "STRING",
+              description: "JavaScript expression to evaluate",
+            },
+          },
+          required: ["expression"],
+        },
+      },
+    ],
+  },
   // --- PA Integration (bidirectional agency control) ---
   {
     functionDeclarations: [
@@ -2355,6 +2505,21 @@ async function executeTool(
           }),
         })
       ).json();
+    // --- SMS / Phone ---
+    case "send_sms":
+      return (
+        await gatewayFetch(env, "/sms/send", {
+          method: "POST",
+          body: JSON.stringify({ to: args.to, body: args.body }),
+        })
+      ).json();
+    case "sms_history":
+      return (
+        await gatewayFetch(
+          env,
+          `/sms/history?direction=${args.direction || "all"}&limit=${args.limit || 10}`,
+        )
+      ).json();
     // --- PinchTab Browser Automation ---
     case "browser_navigate":
       return (
@@ -2395,7 +2560,7 @@ async function executeTool(
       return (
         await gatewayFetch(env, "/api/pinch/evaluate", {
           method: "POST",
-          body: JSON.stringify({ script: args.script }),
+          body: JSON.stringify({ expression: args.expression }),
         })
       ).json();
     // --- PA Integration ---

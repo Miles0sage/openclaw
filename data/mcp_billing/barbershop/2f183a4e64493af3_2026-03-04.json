@@ -1,11 +1,15 @@
 {
   "key_hash": "2f183a4e64493af3",
   "date": "2026-03-04",
-  "calls": 5,
+  "calls": 19,
   "tools": {
-    "check_availability": 2,
-    "shop_analytics": 2,
-    "manage_walkins": 1
+    "check_availability": 5,
+    "shop_analytics": 5,
+    "manage_walkins": 2,
+    "manage_services": 2,
+    "manage_clients": 2,
+    "manage_appointments": 2,
+    "send_reminders": 1
   },
-  "last_call": "2026-03-04T09:58:51.327837+00:00"
+  "last_call": "2026-03-04T10:15:26.602711+00:00"
 }
