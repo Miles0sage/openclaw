@@ -1,401 +1,277 @@
 """
-Supervisor Pattern — OODA Multi-Agent Decomposition
-
-When Overseer detects a complex task (multi-file, multi-concern), it:
-1. OBSERVE: Analyze the task for decomposable sub-tasks
-2. ORIENT: Map sub-tasks to the right specialist agents
-3. DECIDE: Choose parallel vs sequential execution
-4. ACT: Spawn sub-agents via TmuxSpawner, collect results, synthesize
-
-Max depth: 1 (sub-agents NEVER spawn sub-agents).
-Max parallel: 4 (VPS constraint: 4 CPU / 8GB RAM).
-
-Cost: ~$0.001 per decomposition call (Grok grok-3-mini).
+Complexity Classifier for OpenClaw Router (Python port)
+Mirrors src/routing/complexity-classifier.ts logic exactly.
+Analyzes query text and determines optimal model selection (Haiku, Sonnet, Opus).
+Achieves 60-70% cost reduction through intelligent routing.
 """
 
-import asyncio
-import json
-import logging
-import time
-from dataclasses import dataclass, field
-from typing import Optional
+import re
+import math
+from dataclasses import dataclass
+from typing import List, Tuple
 
-logger = logging.getLogger("supervisor")
-
-MAX_PARALLEL_AGENTS = 4
-DECOMPOSITION_TIMEOUT = 30  # seconds for Grok to decompose
-AGENT_TIMEOUT_MINUTES = 15  # per sub-agent
-
-
-# ---------------------------------------------------------------------------
-# Data models
-# ---------------------------------------------------------------------------
-
-@dataclass
-class SubTask:
-    id: str
-    description: str
-    agent: str = "codegen_pro"  # default to cheapest
-    priority: int = 1  # 1=first, higher=later
-    depends_on: list = field(default_factory=list)  # sub-task IDs
-    result: Optional[str] = None
-    status: str = "pending"  # pending, running, done, failed
-    pane_id: Optional[str] = None
-    duration_seconds: float = 0.0
-
-
-@dataclass
-class DecompositionResult:
-    should_decompose: bool = False
-    reason: str = ""
-    sub_tasks: list = field(default_factory=list)
-    execution_mode: str = "parallel"  # parallel or sequential
-    estimated_speedup: float = 1.0
-
-
-# ---------------------------------------------------------------------------
-# Task complexity detection
-# ---------------------------------------------------------------------------
-
-COMPLEXITY_SIGNALS = {
-    "multi_file": ["multi-file", "multiple files", "across files", "several files"],
-    "multi_concern": ["refactor", "redesign", "overhaul", "rewrite", "migration"],
-    "parallel_possible": ["and also", "additionally", "as well as", "plus"],
-    "distinct_domains": [
-        "frontend and backend", "client and server", "api and ui",
-        "database and application", "tests and implementation",
-    ],
-    "testing": ["test", "coverage", "unit test", "integration test"],
+# Feb 2026 Claude API pricing (per million tokens)
+MODEL_PRICING = {
+    "haiku": {"input": 0.8, "output": 4.0},
+    "sonnet": {"input": 3.0, "output": 15.0},
+    "opus": {"input": 15.0, "output": 75.0},
 }
 
-# Minimum complexity threshold (sum of signal weights)
-DECOMPOSE_THRESHOLD = 3
+MODEL_ALIASES = {
+    "haiku": "claude-haiku-4-5-20251001",
+    "sonnet": "claude-sonnet-4-20250514",
+    "opus": "claude-opus-4-6",
+}
+
+MODEL_RATE_LIMITS = {
+    "haiku": {"requestsPerMinute": 100, "tokensPerMinute": 500000},
+    "sonnet": {"requestsPerMinute": 50, "tokensPerMinute": 200000},
+    "opus": {"requestsPerMinute": 25, "tokensPerMinute": 100000},
+}
 
 
-def detect_complexity(task: str) -> dict:
-    """Fast heuristic check — should we even try decomposition?
-
-    Returns {"score": int, "signals": list[str], "should_attempt": bool}
-    """
-    task_lower = task.lower()
-    score = 0
-    signals = []
-
-    for category, keywords in COMPLEXITY_SIGNALS.items():
-        for kw in keywords:
-            if kw in task_lower:
-                weight = 2 if category in ("multi_concern", "distinct_domains") else 1
-                score += weight
-                signals.append(f"{category}:{kw}")
-                break  # one match per category is enough
-
-    # Length heuristic: longer tasks are more likely to be decomposable
-    if len(task) > 300:
-        score += 1
-        signals.append("long_description")
-
-    return {
-        "score": score,
-        "signals": signals,
-        "should_attempt": score >= DECOMPOSE_THRESHOLD,
-    }
+@dataclass
+class ClassificationResult:
+    complexity: int  # 0-100
+    model: str  # "haiku" | "sonnet" | "opus"
+    confidence: float  # 0-1
+    reasoning: str
+    estimated_tokens: int
+    cost_estimate: float  # USD
 
 
-# ---------------------------------------------------------------------------
-# LLM-powered decomposition
-# ---------------------------------------------------------------------------
+class ComplexityClassifier:
+    HAIKU_THRESHOLD = 30
+    SONNET_THRESHOLD = 70
 
-async def decompose_task(task: str, project: str = "openclaw") -> DecompositionResult:
-    """Use Grok to decompose a complex task into parallel sub-tasks.
+    HIGH_COMPLEXITY_KEYWORDS = [
+        "architect", "design", "pattern", "refactor", "optimization",
+        "performance", "scalability", "security", "vulnerability", "exploit",
+        "threat", "strategy", "algorithm", "system design", "infrastructure",
+        "deployment", "deployment strategy", "framework", "machine learning",
+        "distributed", "consensus", "transaction", "atomic", "fault tolerance",
+        "complex reasoning", "tradeoffs", "trade-offs", "scale", "global",
+        "concurrent", "pipeline", "microservice", "approach",
+        "failover", "multi-region", "latency", "throughput",
+    ]
 
-    Cost: ~$0.001 per call (grok-3-mini).
-    """
-    from grok_executor import call_grok
+    MEDIUM_COMPLEXITY_KEYWORDS = [
+        "review", "fix", "bug", "error", "issue", "debug", "refactoring",
+        "improve", "enhancement", "feature", "implement", "integration",
+        "testing", "test case", "coverage", "documentation", "explain",
+        "how to", "guide", "setup", "authentication", "api", "endpoint",
+        "module", "component", "state", "pr",
+    ]
 
-    prompt = f"""You are a task decomposition engine for an AI agent system.
+    LOW_COMPLEXITY_KEYWORDS = [
+        "hello", "hi", "thank", "thanks", "please", "help", "format",
+        "convert", "change", "replace", "simple", "basic", "quick",
+    ]
 
-TASK: {task}
-PROJECT: {project}
+    def match_keyword(self, query: str, keyword: str) -> bool:
+        """Match keyword with word-start boundary awareness."""
+        if " " in keyword:
+            return keyword in query
+        if len(keyword) <= 3:
+            return bool(re.search(rf"\b{re.escape(keyword)}\b", query))
+        return bool(re.search(rf"\b{re.escape(keyword)}", query))
 
-Analyze this task and determine if it can be split into 2-4 independent sub-tasks
-that different specialist agents can work on IN PARALLEL.
+    def classify(self, query: str) -> ClassificationResult:
+        normalized = query.lower()
+        complexity = 0
+        factors: List[str] = []
 
-Available agents:
-- codegen_pro: Simple code (fixes, features, CSS, single-file edits). Cheapest.
-- codegen_elite: Complex code (refactors, multi-file, architecture). More capable.
-- pentest_ai: Security audits, vulnerability checks, RLS policies.
-- test_generator: Write tests, coverage analysis, edge case detection.
-- code_reviewer: Code review, tech debt assessment, pattern checks.
-- debugger: Deep debugging, race conditions, memory leaks.
+        # 1. Keyword analysis
+        ks = self._analyze_keywords(normalized)
+        complexity += ks[0]
+        factors.extend(ks[1])
 
-Rules:
-- Only decompose if sub-tasks are TRULY independent (can run in parallel)
-- Each sub-task must be self-contained (agent won't see other sub-task outputs)
-- 2-4 sub-tasks max (more = coordination overhead exceeds benefit)
-- If the task is naturally sequential, say so — don't force decomposition
+        # 2. Length analysis
+        ls = self._analyze_length(query)
+        complexity += ls[0]
+        factors.extend(ls[1])
 
-Respond ONLY in this JSON format:
-{{"decompose": true/false, "reason": "why", "mode": "parallel"/"sequential", "speedup": 1.5, "tasks": [{{"id": "t1", "description": "...", "agent": "codegen_pro", "depends_on": []}}]}}"""
+        # 3. Code block analysis
+        cs = self._analyze_code_blocks(query)
+        complexity += cs[0]
+        factors.extend(cs[1])
 
-    try:
-        resp = await call_grok(
-            prompt=prompt,
-            system_prompt="You are a strict task decomposition engine. Output ONLY valid JSON.",
-            model="grok-3-mini",
-            max_tokens=512,
-            temperature=0.0,
+        # 4. Context analysis
+        ctx = self._analyze_context(normalized)
+        complexity += ctx[0]
+        factors.extend(ctx[1])
+
+        # 5. Question analysis
+        qs = self._analyze_questions(normalized)
+        complexity += qs[0]
+        factors.extend(qs[1])
+
+        complexity = max(0, min(100, complexity))
+        model, confidence = self._select_model(complexity, normalized)
+        estimated_tokens = self._estimate_tokens(query)
+        cost_estimate = self._estimate_cost(model, estimated_tokens)
+
+        reasoning = self._build_reasoning(factors, complexity, model)
+
+        return ClassificationResult(
+            complexity=round(complexity),
+            model=model,
+            confidence=round(confidence * 100) / 100,
+            reasoning=reasoning,
+            estimated_tokens=estimated_tokens,
+            cost_estimate=round(cost_estimate * 1000000) / 1000000,
         )
 
-        text = resp.get("text", "").strip()
-        if "{" in text:
-            json_str = text[text.index("{"):text.rindex("}") + 1]
-            parsed = json.loads(json_str)
+    def _analyze_keywords(self, query: str) -> Tuple[int, List[str]]:
+        score = 0
+        factors: List[str] = []
 
-            result = DecompositionResult(
-                should_decompose=parsed.get("decompose", False),
-                reason=parsed.get("reason", ""),
-                execution_mode=parsed.get("mode", "parallel"),
-                estimated_speedup=parsed.get("speedup", 1.0),
-            )
+        high_kws = [kw for kw in self.HIGH_COMPLEXITY_KEYWORDS if self.match_keyword(query, kw.lower())]
+        if high_kws:
+            score += 30 + len(high_kws) * 18
+            factors.append(f"High complexity keywords ({', '.join(high_kws)})")
 
-            for t in parsed.get("tasks", []):
-                result.sub_tasks.append(SubTask(
-                    id=t.get("id", f"t{len(result.sub_tasks)+1}"),
-                    description=t.get("description", ""),
-                    agent=t.get("agent", "codegen_pro"),
-                    depends_on=t.get("depends_on", []),
-                ))
+        medium_kws = [kw for kw in self.MEDIUM_COMPLEXITY_KEYWORDS if self.match_keyword(query, kw.lower())]
+        if medium_kws:
+            medium_base = 5 if high_kws else 22
+            medium_per = 5 if high_kws else 10
+            score += medium_base + len(medium_kws) * medium_per
+            factors.append(f"Medium complexity keywords ({', '.join(medium_kws)})")
 
-            # Enforce limits
-            if len(result.sub_tasks) > MAX_PARALLEL_AGENTS:
-                result.sub_tasks = result.sub_tasks[:MAX_PARALLEL_AGENTS]
+        low_kws = [kw for kw in self.LOW_COMPLEXITY_KEYWORDS if self.match_keyword(query, kw.lower())]
+        if low_kws and not high_kws and not medium_kws:
+            score -= len(low_kws) * 8
+            factors.append(f"Low complexity keywords ({', '.join(low_kws)})")
+        elif low_kws:
+            score -= len(low_kws) * 3
+            factors.append(f"Low complexity keywords ({', '.join(low_kws)})")
 
-            return result
+        return max(0, score), factors
 
-    except Exception as e:
-        logger.warning(f"Task decomposition failed: {e}")
+    def _analyze_length(self, query: str) -> Tuple[int, List[str]]:
+        length = len(query)
+        factors: List[str] = []
 
-    return DecompositionResult(
-        should_decompose=False,
-        reason=f"Decomposition failed: {e}" if 'e' in dir() else "Parse error",
-    )
-
-
-# ---------------------------------------------------------------------------
-# Parallel execution via TmuxSpawner
-# ---------------------------------------------------------------------------
-
-async def execute_parallel(
-    sub_tasks: list[SubTask],
-    project: str = "openclaw",
-    project_root: str = "/root/openclaw",
-) -> list[SubTask]:
-    """Spawn sub-agents in parallel, wait for completion, collect results."""
-    from tmux_spawner import TmuxSpawner
-
-    spawner = TmuxSpawner()
-
-    # Build job specs for spawn_parallel
-    jobs = []
-    for st in sub_tasks:
-        prompt = (
-            f"You are a specialist agent. Complete this sub-task precisely.\n\n"
-            f"SUB-TASK: {st.description}\n\n"
-            f"RULES:\n"
-            f"- Complete ONLY this sub-task, nothing else\n"
-            f"- Do NOT spawn sub-agents\n"
-            f"- When done, output [AGENT_COMPLETED] on its own line\n"
-            f"- Be concise in your output\n"
-        )
-        jobs.append({
-            "job_id": f"sub_{st.id}",
-            "prompt": prompt,
-            "worktree_repo": project_root,
-            "use_worktree": True,
-            "timeout_minutes": AGENT_TIMEOUT_MINUTES,
-        })
-
-    logger.info(f"Supervisor: spawning {len(jobs)} parallel sub-agents")
-    spawn_results = spawner.spawn_parallel(jobs)
-
-    # Track pane IDs
-    pane_map = {}
-    for sr in spawn_results:
-        if sr.get("status") == "spawned":
-            pane_map[sr["job_id"]] = sr["pane_id"]
-
-    # Wait for all agents to complete (poll every 10s, max AGENT_TIMEOUT_MINUTES)
-    start = time.time()
-    timeout = AGENT_TIMEOUT_MINUTES * 60
-    completed = set()
-
-    while len(completed) < len(pane_map) and (time.time() - start) < timeout:
-        await asyncio.sleep(10)
-
-        agents = spawner.list_agents()
-        running_panes = {a["pane_id"] for a in agents if a.get("status") == "running"}
-
-        for job_id, pane_id in pane_map.items():
-            if job_id not in completed and pane_id not in running_panes:
-                completed.add(job_id)
-                logger.info(f"Supervisor: sub-agent {job_id} completed")
-
-    # Collect outputs
-    for st in sub_tasks:
-        job_id = f"sub_{st.id}"
-        pane_id = pane_map.get(job_id)
-        if pane_id:
-            try:
-                output = spawner.collect_output(pane_id, lines=2000, job_id=job_id)
-                st.result = output
-                st.status = "done" if "[AGENT_COMPLETED]" in (output or "") else "failed"
-                st.pane_id = pane_id
-            except Exception as e:
-                st.result = f"Error collecting output: {e}"
-                st.status = "failed"
+        if length < 30:
+            score = -5
+            factors.append("Very short query")
+        elif length < 100:
+            score = 0
+            factors.append("Short query")
+        elif length < 200:
+            score = 3
+            factors.append("Medium-short query")
+        elif length < 500:
+            score = 8
+            factors.append("Medium query length")
+        elif length < 1000:
+            score = 12
+            factors.append("Long query")
+        elif length < 3000:
+            score = 18
+            factors.append("Very long query")
         else:
-            st.status = "failed"
-            st.result = "Agent failed to spawn"
+            score = 25
+            factors.append("Extensive query with substantial context")
 
-        st.duration_seconds = time.time() - start
+        return score, factors
 
-    return sub_tasks
+    def _analyze_code_blocks(self, query: str) -> Tuple[int, List[str]]:
+        factors: List[str] = []
+        score = 0
+
+        backtick_count = len(re.findall(r"```", query))
+        inline_code_count = len(re.findall(r"`[^`]+`", query))
+
+        if backtick_count > 0:
+            score += backtick_count * 8
+            factors.append(f"{backtick_count} code block(s)")
+        if inline_code_count > 0:
+            score += inline_code_count * 3
+            factors.append(f"{inline_code_count} inline code snippet(s)")
+
+        file_exts = re.findall(r"\.\w{2,4}\b", query)
+        code_exts = [ext for ext in file_exts if re.match(r"\.(ts|js|py|java|go|rs|rb|php|sql|json|yaml|xml|html|css)$", ext, re.I)]
+        if code_exts:
+            score += len(code_exts) * 3
+            factors.append(f"File references ({', '.join(code_exts)})")
+
+        return max(0, score), factors
+
+    def _analyze_context(self, query: str) -> Tuple[int, List[str]]:
+        factors: List[str] = []
+        score = 0
+
+        if any(x in query for x in ["also,", "additionally,", "furthermore,"]):
+            score += 5
+            factors.append("Multi-part question")
+        if any(x in query for x in ["based on", "given the", "considering"]):
+            score += 8
+            factors.append("Contextual dependency")
+        if any(x in query for x in ["compared to", "difference between", "vs."]):
+            score += 5
+            factors.append("Comparative analysis")
+
+        return max(0, score), factors
+
+    def _analyze_questions(self, query: str) -> Tuple[int, List[str]]:
+        factors: List[str] = []
+        score = 0
+
+        q_count = query.count("?")
+        why_count = len(re.findall(r"\bwhy\b", query, re.I))
+        how_count = len(re.findall(r"\bhow\b", query, re.I))
+        what_if_count = len(re.findall(r"\bwhat if\b", query, re.I))
+
+        if q_count > 0:
+            score += min(q_count * 3, 15)
+            factors.append(f"{q_count} question(s)")
+        if why_count > 0:
+            score += why_count * 5
+            factors.append("Deep reasoning requested (why)")
+        if how_count > 0:
+            score += how_count * 4
+            factors.append("Implementation guidance requested (how)")
+        if what_if_count > 0:
+            score += what_if_count * 8
+            factors.append("Hypothetical scenario analysis (what if)")
+
+        return max(0, score), factors
+
+    def _select_model(self, complexity: int, query: str) -> Tuple[str, float]:
+        if complexity <= self.HAIKU_THRESHOLD:
+            model = "haiku"
+            confidence = min(1.0, 0.7 + (1 - complexity / self.HAIKU_THRESHOLD) * 0.3)
+        elif complexity < self.SONNET_THRESHOLD:
+            model = "sonnet"
+            relative_pos = (complexity - self.HAIKU_THRESHOLD) / (self.SONNET_THRESHOLD - self.HAIKU_THRESHOLD)
+            confidence = 0.6 + relative_pos * 0.2
+        else:
+            model = "opus"
+            confidence = min(1.0, 0.72 + ((complexity - self.SONNET_THRESHOLD) / (100 - self.SONNET_THRESHOLD)) * 0.28)
+
+        return model, confidence
+
+    def _estimate_tokens(self, query: str) -> int:
+        base = math.ceil(len(query) / 4)
+        return math.ceil(base * 2)
+
+    def _estimate_cost(self, model: str, tokens: int) -> float:
+        pricing = MODEL_PRICING[model]
+        input_tokens = tokens // 3
+        output_tokens = tokens - input_tokens
+        return (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+
+    def _build_reasoning(self, factors: List[str], complexity: int, model: str) -> str:
+        unique = list(dict.fromkeys(factors))[:3]
+        factor_str = "; ".join(unique) if unique else "minimal"
+        return f"Complexity: {complexity}/100. Factors: {factor_str}. Recommended: {model.upper()}."
 
 
-# ---------------------------------------------------------------------------
-# Result synthesis
-# ---------------------------------------------------------------------------
-
-async def synthesize_results(
-    original_task: str,
-    sub_tasks: list[SubTask],
-) -> dict:
-    """Synthesize sub-agent results into a coherent final output.
-
-    Cost: ~$0.001 (Grok grok-3-mini).
-    """
-    from grok_executor import call_grok
-
-    sub_results = []
-    for st in sub_tasks:
-        # Truncate each result to avoid blowing context
-        result_preview = (st.result or "No output")[:1000]
-        sub_results.append(
-            f"## Sub-task: {st.id} ({st.agent})\n"
-            f"Status: {st.status}\n"
-            f"Description: {st.description}\n"
-            f"Output:\n{result_preview}\n"
-        )
-
-    synthesis_prompt = f"""You are synthesizing results from {len(sub_tasks)} parallel AI agents.
-
-ORIGINAL TASK: {original_task}
-
-SUB-TASK RESULTS:
-{''.join(sub_results)}
-
-Create a unified summary that:
-1. Reports what was accomplished (or failed)
-2. Lists any files changed
-3. Notes any conflicts between sub-agent outputs
-4. Gives a clear success/failure verdict
-
-Be concise — 5-10 sentences max."""
-
-    try:
-        resp = await call_grok(
-            prompt=synthesis_prompt,
-            system_prompt="You synthesize multi-agent results concisely.",
-            model="grok-3-mini",
-            max_tokens=512,
-            temperature=0.0,
-        )
-        summary = resp.get("text", "Synthesis failed")
-    except Exception as e:
-        summary = f"Synthesis error: {e}"
-
-    succeeded = sum(1 for st in sub_tasks if st.status == "done")
-    total = len(sub_tasks)
-
-    return {
-        "success": succeeded == total,
-        "summary": summary,
-        "sub_tasks_completed": succeeded,
-        "sub_tasks_total": total,
-        "sub_tasks": [
-            {
-                "id": st.id,
-                "description": st.description,
-                "agent": st.agent,
-                "status": st.status,
-                "duration_seconds": round(st.duration_seconds, 1),
-            }
-            for st in sub_tasks
-        ],
-    }
+# Singleton instance
+_classifier = ComplexityClassifier()
 
 
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
-
-async def maybe_decompose_and_execute(
-    job: dict,
-    project_root: str = "/root/openclaw",
-) -> Optional[dict]:
-    """Check if a job should be decomposed and executed via supervisor pattern.
-
-    Returns None if task shouldn't be decomposed (caller should use normal pipeline).
-    Returns result dict if supervisor handled it.
-    """
-    task = job.get("task", "")
-    project = job.get("project", "openclaw")
-    job_id = job.get("id", "unknown")
-
-    # Step 1: Fast complexity check
-    complexity = detect_complexity(task)
-    if not complexity["should_attempt"]:
-        logger.debug(
-            f"Job {job_id}: Supervisor skip — complexity {complexity['score']} "
-            f"< threshold {DECOMPOSE_THRESHOLD}"
-        )
-        return None
-
-    logger.info(
-        f"Job {job_id}: Supervisor considering decomposition — "
-        f"score={complexity['score']}, signals={complexity['signals']}"
-    )
-
-    # Step 2: LLM decomposition
-    decomposition = await decompose_task(task, project)
-    if not decomposition.should_decompose or len(decomposition.sub_tasks) < 2:
-        logger.info(
-            f"Job {job_id}: Supervisor decided NOT to decompose — {decomposition.reason}"
-        )
-        return None
-
-    logger.info(
-        f"Job {job_id}: Supervisor decomposing into {len(decomposition.sub_tasks)} "
-        f"sub-tasks ({decomposition.execution_mode}), "
-        f"estimated speedup: {decomposition.estimated_speedup}x"
-    )
-
-    # Step 3: Execute sub-tasks in parallel
-    completed_tasks = await execute_parallel(
-        decomposition.sub_tasks,
-        project=project,
-        project_root=project_root,
-    )
-
-    # Step 4: Synthesize results
-    result = await synthesize_results(task, completed_tasks)
-    result["supervisor"] = True
-    result["decomposition"] = {
-        "reason": decomposition.reason,
-        "mode": decomposition.execution_mode,
-        "estimated_speedup": decomposition.estimated_speedup,
-        "complexity_score": complexity["score"],
-        "complexity_signals": complexity["signals"],
-    }
-
-    return result
+def classify(query: str) -> ClassificationResult:
+    """Convenience function for single classification."""
+    return _classifier.classify(query)
