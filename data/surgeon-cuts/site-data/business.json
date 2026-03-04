@@ -1,0 +1,41 @@
+{
+  "name": "Surgeon Cuts Barbershop",
+  "owner": "Sergio Beas",
+  "address": {
+    "street": "2700 South Woodlands Village Blvd",
+    "suite": "Suite 420",
+    "city": "Flagstaff",
+    "state": "AZ",
+    "zip": "86001"
+  },
+  "phone": "(928) 405-2958",
+  "website": "https://surgeoncutsbarbershop.com",
+  "booking_platform": "Vagaro",
+  "instagram": "https://www.instagram.com/surgeoncuts.flagstaff",
+  "hours": {
+    "monday": "8:00 AM - 8:00 PM",
+    "tuesday": "8:00 AM - 8:00 PM",
+    "wednesday": "8:00 AM - 8:00 PM",
+    "thursday": "8:00 AM - 8:00 PM",
+    "friday": "8:00 AM - 8:00 PM",
+    "saturday": "8:00 AM - 8:00 PM",
+    "sunday": "8:00 AM - 8:00 PM"
+  },
+  "amenities": [
+    "Walk-ins Welcome",
+    "Free Parking",
+    "LGBTQIA Friendly",
+    "Kid Friendly",
+    "TV",
+    "WiFi"
+  ],
+  "languages": ["English", "Spanish"],
+  "payment_methods": ["Cash", "Credit Card"],
+  "cancellation_policy": "24 hours advance notice required",
+  "multi_location": true,
+  "reviews": {
+    "rating": 5.0,
+    "count": 67
+  },
+  "scraped_date": "2026-03-04"
+}

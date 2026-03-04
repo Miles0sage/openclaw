@@ -1,0 +1,22 @@
+[
+  {
+    "name": "Texture Clay",
+    "brand": "Barber Surgeon",
+    "size": "4 oz",
+    "price": 25.0,
+    "description": "Hair styling texture clay for matte, textured looks"
+  },
+  {
+    "name": "Water Based Pomade",
+    "brand": "Barber Surgeon",
+    "size": "4 oz",
+    "price": 25.0,
+    "description": "Water-based pomade for slick, classic styles — easy wash out"
+  },
+  {
+    "name": "Volume Powder",
+    "brand": "Barber Surgeon",
+    "price": 25.0,
+    "description": "Hair volume powder for added lift and texture"
+  }
+]

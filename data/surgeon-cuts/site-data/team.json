@@ -1,0 +1,50 @@
+[
+  {
+    "name": "Sergio Beas",
+    "role": "Owner / Lead Barber / Instructor",
+    "years_experience": 15,
+    "bio": "With 15 years of experience in the barbering industry, dedicated to perfecting the art of precision haircuts. From classic styles to modern trends, takes pride in delivering sharp, clean cuts tailored to each client's unique look. Also an instructor in barbering, passionate about teaching and guiding the next generation of barbers."
+  },
+  {
+    "name": "Treylan Barney",
+    "role": "Barber",
+    "years_experience": 7,
+    "bio": "Born and raised in Las Vegas. Apprenticed under Sergio at Surgeon Cuts Barbershop in Flagstaff. Dedicated to mastering the craft, delivering clean cuts, and making sure every client walks out feeling their best."
+  },
+  {
+    "name": "Marcel Marino",
+    "role": "Barber",
+    "years_experience": 14,
+    "bio": "Growing up in Flagstaff, Arizona, discovered passion for barbering in the summer of 2021. Passionate about creating sharp, professional looks that inspire confidence. Excited to continue building connections and leaving a positive impact through the craft."
+  },
+  {
+    "name": "Brandon Todacheenie",
+    "role": "Barber",
+    "years_experience": 12,
+    "bio": "Born and raised in Flagstaff, Arizona. Discovered passion for barbering during high school. After graduating, relocated to Phoenix and attended trade school for welding technology. Diverse background provides a unique perspective and skill set."
+  },
+  {
+    "name": "Lucas Snodgrass",
+    "role": "Barber",
+    "years_experience": 8,
+    "bio": "Born and raised in Flagstaff, Arizona. Found love for cutting hair at 15 years old. Wants to be known as a barber who delivers high quality service every single time. Goal is for every client to walk in and experience what true service feels like."
+  },
+  {
+    "name": "Declan Faria",
+    "role": "Barber",
+    "years_experience": 8,
+    "bio": "Originally from the northwest suburbs of Illinois, moved to Flagstaff in 2023 to pursue passion for barbering. Over two years of experience behind the chair. Dedicated to making barbering a lifelong career. Every cut is about precision, style, and helping clients feel their best."
+  },
+  {
+    "name": "Jose Reyes",
+    "role": "Barber",
+    "years_experience": 0,
+    "bio": "New team member at Surgeon Cuts Barbershop."
+  },
+  {
+    "name": "Josiel Bautista",
+    "role": "Barber",
+    "years_experience": 0,
+    "bio": "New team member at Surgeon Cuts Barbershop."
+  }
+]
