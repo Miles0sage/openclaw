@@ -48,34 +48,57 @@ def _get_sales_prompt(business_name: str, business_type: str, owner_name: str = 
         "restaurant": (
             f"You helped build the online ordering system for Delhi Palace — an Indian restaurant here in Flagstaff. "
             f"They used to lose money on DoorDash and Grubhub fees — like 30% per order gone. Now customers order "
-            f"straight from their website, kitchen gets it on a screen instantly, no phone mistakes. "
-            f"You also built an AI receptionist for Surgeon Cuts barbershop that books appointments 24/7. "
-            f"Drop both naturally — 'we've done this for a couple spots around town.'"
+            f"straight from their website, kitchen gets it on a screen instantly, no phone mistakes. They kept all that money. "
+            f"You also built an AI receptionist for Surgeon Cuts barbershop that books appointments 24/7.\n\n"
+            f"PAIN POINTS TO HIT FOR RESTAURANTS:\n"
+            f"- 'How much are you guys paying DoorDash or Grubhub? Like 25-30% per order? That's brutal.'\n"
+            f"- 'Do you ever get wrong phone orders? Like someone says medium and you hear large?'\n"
+            f"- 'When it's slammed on a Friday night, who's answering the phone? Nobody, right? That's lost money.'\n"
+            f"- 'We built a system where your menu is online, people order themselves, it goes straight to the kitchen screen. No middleman.'\n"
+            f"Drop the case studies naturally — 'we've done this for a couple spots around town.'"
         ),
         "barbershop": (
             f"You built the AI phone receptionist for Surgeon Cuts barbershop right here in Flagstaff. "
             f"It picks up every call, books appointments, tells people about services and prices — "
-            f"the barbers don't even have to put down their clippers. It works 24/7. "
-            f"You also did Delhi Palace's whole online ordering system. "
-            f"Mention both — 'we work with a few local spots.'"
+            f"the barbers don't even have to put down their clippers. It works 24/7, even at midnight when "
+            f"some guy decides he needs a fade for tomorrow's date.\n\n"
+            f"PAIN POINTS TO HIT FOR BARBERSHOPS:\n"
+            f"- 'How many calls do you think you miss when you're mid-cut? Like you're blending a fade and the phone rings — you can't exactly stop.'\n"
+            f"- 'Do you ever lose walk-ins because people called first and nobody picked up so they went somewhere else?'\n"
+            f"- 'Are you still doing the whole DM-to-book thing on Instagram? That's a lot of back and forth.'\n"
+            f"- 'The AI we built for Surgeon Cuts picks up every single call. Books the appointment. Tells them prices. Done. Barbers never touch the phone.'\n"
+            f"Also mention Delhi Palace — 'we work with a few local spots, not just barbers.'"
         ),
         "dental": (
-            f"You built tech for local businesses — an AI receptionist for Surgeon Cuts barbershop that handles "
-            f"all their booking calls, and an online ordering system for Delhi Palace restaurant. "
-            f"For dental offices, the AI receptionist is a game-changer — answers calls, schedules appointments, "
-            f"handles insurance questions. Front desk can focus on patients instead of being glued to the phone."
+            f"You built tech for local Flagstaff businesses — an AI receptionist for Surgeon Cuts barbershop "
+            f"and an online ordering system for Delhi Palace restaurant. "
+            f"For dental, this is where it really shines.\n\n"
+            f"PAIN POINTS TO HIT FOR DENTAL OFFICES:\n"
+            f"- 'How many calls go to voicemail during lunch or when the front desk is with a patient? Every missed call is a new patient going to the dentist down the street.'\n"
+            f"- 'Does your team spend half their day on the phone doing scheduling? That's expensive — you're paying a skilled person to be a phone operator.'\n"
+            f"- 'The AI receptionist we build answers every call, books appointments based on your real availability, handles rescheduling, even answers insurance questions.'\n"
+            f"- 'Your front desk staff can actually focus on the patients in the office instead of being chained to the phone.'\n"
+            f"- 'New patient calls at 8pm? AI picks up, books them, confirms next day. Instead of that lead going to the dentist who answered first.'"
         ),
         "auto": (
             f"You've built tech for local Flagstaff businesses — online ordering for Delhi Palace restaurant, "
-            f"AI receptionist for Surgeon Cuts barbershop. For auto shops, you can build an online booking system "
-            f"where customers schedule oil changes, tire rotations, inspections right from their phone. "
-            f"Plus a website that actually shows up when people Google 'auto repair Flagstaff.'"
+            f"AI receptionist for Surgeon Cuts barbershop. Auto shops have a huge opportunity.\n\n"
+            f"PAIN POINTS TO HIT FOR AUTO SHOPS:\n"
+            f"- 'When someone Googles \"oil change Flagstaff\" or \"mechanic near me,\" does your shop come up? Because that's where 90% of new customers start.'\n"
+            f"- 'Can people book an appointment online right now, or do they have to call during business hours? Because a lot of people want to book at 10pm from their couch.'\n"
+            f"- 'Do you guys still do estimates over the phone? We can build a system where customers describe the issue online, upload a photo even, and you send a quote — saves you 20 minutes per call.'\n"
+            f"- 'We built an AI receptionist for a barbershop in town — answers every call, books appointments. Same thing works for auto — oil changes, tire rotations, inspections, all bookable 24/7.'\n"
+            f"- 'Plus we build websites that actually rank on Google. Not just a pretty page — one that shows up when people search.'"
         ),
         "real_estate": (
             f"You've built AI systems for local businesses — a receptionist for Surgeon Cuts barbershop, "
-            f"ordering system for Delhi Palace restaurant. For real estate, imagine an AI that answers "
-            f"buyer calls at 9pm on a Saturday, qualifies them, answers questions about listings, "
-            f"and books showings — instead of that lead going to voicemail and never calling back."
+            f"ordering system for Delhi Palace restaurant. Real estate is where AI gets really powerful.\n\n"
+            f"PAIN POINTS TO HIT FOR REAL ESTATE:\n"
+            f"- 'How many buyer leads call at 8pm or on a Sunday? And what happens — voicemail? That lead is calling three other agents too. First one to actually talk to them wins.'\n"
+            f"- 'We can set up an AI that answers those calls instantly — qualifies the buyer, answers questions about your listings, and books a showing. All while you're at dinner.'\n"
+            f"- 'Do you use a CRM right now? A lot of agents have leads scattered across texts, emails, sticky notes. We build a system where everything's in one place.'\n"
+            f"- 'The AI doesn't just pick up — it knows your listings. Square footage, price, neighborhood, schools. It can actually have a real conversation.'\n"
+            f"- 'Think about it — you're basically cloning yourself for the boring stuff so you can focus on closings.'"
         ),
     }
 
@@ -127,11 +150,22 @@ RULES:
 """
 
 
-def _get_first_message(business_name: str, owner_name: str = "") -> str:
-    """Opening line for the call — casual and human."""
+def _get_first_message(business_name: str, owner_name: str = "", business_type: str = "") -> str:
+    """Opening line for the call — tailored to business type."""
     if owner_name:
-        return f"Hey, is this {owner_name}? Oh cool — hey, this is Chris. I work with a small tech company here in Flagstaff. Got like one minute? I promise I'll be quick."
-    return f"Hey! How's it going? This is Chris — I work with a tech company here in Flagstaff. Is the owner or manager around by any chance?"
+        base = f"Hey, is this {owner_name}? Oh cool — hey, this is Chris. I work with a small tech company here in Flagstaff."
+    else:
+        base = f"Hey! How's it going? This is Chris — I work with a tech company here in Flagstaff. Is the owner or manager around by any chance?"
+
+    # Add a type-specific hook to the opener so it's immediately relevant
+    type_openers = {
+        "restaurant": " Got like one minute? I just helped a restaurant in town save a ton on delivery app fees and wanted to see if you guys might be interested in something similar.",
+        "barbershop": " Got like one minute? We just built something pretty cool for a barbershop here in town and I thought you guys might dig it.",
+        "dental": " Got like one minute? We've been helping local businesses with their phones and I had an idea for your office.",
+        "auto": " Got like one minute? We help local shops get more customers through Google and online booking — thought I'd reach out.",
+        "real_estate": " Got like one minute? We built an AI that answers buyer calls after hours and books showings — thought you might find it interesting.",
+    }
+    return base + type_openers.get(business_type, " Got like one minute? I promise I'll be quick.")
 
 
 async def call_lead(
@@ -167,7 +201,7 @@ async def call_lead(
 
     # Build the sales assistant config
     system_prompt = _get_sales_prompt(business_name, business_type, owner_name)
-    first_message = _get_first_message(business_name, owner_name)
+    first_message = _get_first_message(business_name, owner_name, business_type)
 
     payload = {
         "assistant": {
