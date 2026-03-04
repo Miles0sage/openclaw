@@ -4338,6 +4338,64 @@
 
       refreshAll();
       refreshTimer = setInterval(refreshAll, 30000);
+
+      // ─── SSE Real-Time Connection ─────────────────────────────
+      (function initSSE() {
+        var dashUrl = localStorage.getItem("ocGatewayUrl") || location.origin;
+        // Dashboard API runs on port 9001
+        var sseBase = dashUrl.replace(/:\d+$/, "") + ":9001";
+        var evtSource;
+
+        function connectSSE() {
+          try {
+            evtSource = new EventSource(sseBase + "/api/stream");
+
+            evtSource.addEventListener("connected", function (e) {
+              console.log("[SSE] Connected:", JSON.parse(e.data));
+              showToast("Live updates connected");
+            });
+
+            evtSource.addEventListener("jobs", function (e) {
+              try {
+                var data = JSON.parse(e.data);
+                var el = document.getElementById("sse-jobs-widget");
+                if (el && data.jobs) {
+                  var running = data.jobs.filter(function (j) {
+                    return j.status === "running";
+                  });
+                  el.innerHTML = "<b>" + running.length + "</b> running";
+                }
+              } catch (err) {
+                console.debug("SSE jobs parse error:", err);
+              }
+            });
+
+            evtSource.addEventListener("costs", function (e) {
+              try {
+                var data = JSON.parse(e.data);
+                var el = document.getElementById("sse-costs-widget");
+                if (el) {
+                  var total = data.total_cost_usd || data.daily_cost_usd || 0;
+                  el.innerHTML = "$" + total.toFixed(4);
+                }
+              } catch (err) {
+                console.debug("SSE costs parse error:", err);
+              }
+            });
+
+            evtSource.onerror = function () {
+              console.warn("[SSE] Connection lost, reconnecting in 5s...");
+              evtSource.close();
+              setTimeout(connectSSE, 5000);
+            };
+          } catch (err) {
+            console.debug("[SSE] Init failed:", err);
+            setTimeout(connectSSE, 10000);
+          }
+        }
+
+        connectSSE();
+      })();
     </script>
   </body>
 </html>

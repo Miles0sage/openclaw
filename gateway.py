@@ -855,7 +855,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/job-viewer", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research", "/api/monitoring", "/api/pa", "/api/oz", "/api/ceo", "/api/pinch", "/api/mcp"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/job-viewer", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research", "/api/monitoring", "/api/pa", "/api/oz", "/api/ceo", "/api/pinch", "/api/mcp", "/api/eval", "/api/onboard", "/api/billing"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -5069,12 +5069,24 @@ async def get_workflow_status(workflow_id: str):
 
 @app.post("/api/job/create")
 async def create_new_job(request: Request):
-    """Create a new autonomous job"""
+    """Create a new autonomous job. Supports optional X-Client-Key for billing."""
     try:
         data = await request.json()
         project = data.get("project", "unknown")
         task = data.get("task", "")
         priority = data.get("priority", "P1")
+
+        # Billing gate: if X-Client-Key is provided, check plan limits
+        client_key = request.headers.get("X-Client-Key")
+        client_record = None
+        if client_key:
+            from client_auth import authenticate_client, check_job_limit, deduct_credit
+            client_record = authenticate_client(client_key)
+            if not client_record:
+                return JSONResponse({"error": "Invalid or inactive API key"}, status_code=401)
+            can_submit, reason = check_job_limit(client_record)
+            if not can_submit:
+                return JSONResponse({"error": f"Plan limit reached: {reason}"}, status_code=429)
 
         # Validate inputs (returns 400 on bad input)
         try:
@@ -5083,6 +5095,13 @@ async def create_new_job(request: Request):
             return JSONResponse({"error": str(ve)}, status_code=400)
 
         job = create_job(project, task, priority)
+
+        # Deduct credit if billing is active
+        if client_record:
+            try:
+                deduct_credit(client_record["client_id"], reason=f"job:{job.id}")
+            except Exception as e:
+                logger.warning(f"Credit deduction failed for {client_record['client_id']}: {e}")
         logger.info(f"Job created: {job.id}")
 
         # Emit event for closed-loop
@@ -8415,6 +8434,254 @@ async def list_leads():
     except Exception as e:
         logger.error(f"List leads error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ITEM 2: Eval Harness Endpoints
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_eval_runs_in_progress: dict = {}  # run_id -> {"status": ..., "task": asyncio.Task}
+
+@app.post("/api/eval/run")
+async def run_eval_endpoint(request: Request):
+    """Launch an eval run in the background. Returns run_id immediately."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    subset_str = body.get("subset", "all")
+    dry_run = body.get("dry_run", False)
+    use_llm_judge = body.get("use_llm_judge", True)
+
+    # Parse subset
+    if subset_str == "all":
+        task_subset = None
+    else:
+        task_subset = [s.strip() for s in subset_str.split(",")]
+
+    run_id = f"eval-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+    async def _run_eval_bg():
+        try:
+            from eval_harness import run_eval
+            _eval_runs_in_progress[run_id]["status"] = "running"
+            report = await run_eval(
+                task_subset=task_subset,
+                dry_run=dry_run,
+                use_llm_judge=use_llm_judge,
+            )
+            _eval_runs_in_progress[run_id]["status"] = "completed"
+            _eval_runs_in_progress[run_id]["result"] = report.to_dict()
+        except Exception as e:
+            logger.error(f"Eval run {run_id} failed: {e}")
+            _eval_runs_in_progress[run_id]["status"] = "failed"
+            _eval_runs_in_progress[run_id]["error"] = str(e)
+
+    task = asyncio.create_task(_run_eval_bg())
+    _eval_runs_in_progress[run_id] = {
+        "status": "starting",
+        "task": task,
+        "started_at": _now_iso() if '_now_iso' in dir() else datetime.now(timezone.utc).isoformat(),
+        "subset": subset_str,
+    }
+
+    return {"run_id": run_id, "status": "running", "subset": subset_str}
+
+
+@app.get("/api/eval/results")
+async def list_eval_results():
+    """List all past eval runs with summary info."""
+    from eval_harness import list_eval_runs
+    runs = list_eval_runs()
+
+    # Add any in-progress runs
+    for rid, info in _eval_runs_in_progress.items():
+        if info["status"] in ("starting", "running"):
+            runs.insert(0, {
+                "run_id": rid,
+                "status": info["status"],
+                "started_at": info.get("started_at", ""),
+                "subset": info.get("subset", "all"),
+            })
+
+    return {"runs": runs, "total": len(runs)}
+
+
+@app.get("/api/eval/results/{run_id}")
+async def get_eval_result(run_id: str):
+    """Get detailed results for a specific eval run."""
+    # Check in-progress runs first
+    if run_id in _eval_runs_in_progress:
+        info = _eval_runs_in_progress[run_id]
+        if info["status"] == "completed" and "result" in info:
+            return info["result"]
+        elif info["status"] == "failed":
+            return JSONResponse({"error": info.get("error", "Unknown error"), "status": "failed"}, status_code=500)
+        else:
+            return {"run_id": run_id, "status": info["status"]}
+
+    # Check saved results on disk
+    from eval_harness import _load_report
+    report = _load_report(run_id)
+    if report:
+        return report
+
+    raise HTTPException(status_code=404, detail=f"Eval run not found: {run_id}")
+
+
+@app.post("/api/eval/compare")
+async def compare_eval_runs(request: Request):
+    """Compare two eval runs for regression detection."""
+    body = await request.json()
+    run_a = body.get("run_a")
+    run_b = body.get("run_b")
+    if not run_a or not run_b:
+        raise HTTPException(status_code=400, detail="Both run_a and run_b are required")
+
+    from eval_harness import compare_runs
+    return compare_runs(run_a, run_b)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ITEM 5: Client Onboarding Pipeline Endpoint
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/onboard")
+async def onboard_client(request: Request):
+    """
+    Full client onboarding pipeline:
+    Phase 1: Find leads (lead_finder)
+    Phase 2: Generate proposals (proposal_generator)
+    Phase 3: Make sales calls (sales_caller) — optional, requires explicit enable
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    business_type = body.get("business_type", "barbershop")
+    location = body.get("location", "Flagstaff, AZ")
+    count = body.get("count", 10)
+    auto_call = body.get("auto_call", False)  # Safety: calls cost real money
+    services = body.get("services", ["full_package"])
+
+    pipeline_id = f"onboard-{uuid.uuid4().hex[:8]}"
+    results = {
+        "pipeline_id": pipeline_id,
+        "status": "running",
+        "business_type": business_type,
+        "location": location,
+        "phases": {},
+    }
+
+    # Phase 1: Find Leads
+    try:
+        from lead_finder import search_google_maps
+        leads = await search_google_maps(
+            query=f"{business_type} in {location}",
+            location=location,
+            limit=count,
+        )
+        results["phases"]["find_leads"] = {
+            "status": "completed",
+            "leads_found": len(leads),
+            "leads": leads[:5],  # Preview first 5
+        }
+    except Exception as e:
+        logger.error(f"Onboarding lead find failed: {e}")
+        leads = []
+        results["phases"]["find_leads"] = {"status": "failed", "error": str(e)}
+
+    # Phase 2: Generate Proposals for top leads
+    proposals = []
+    for lead in leads[:3]:  # Top 3 leads get proposals
+        try:
+            from proposal_generator import generate_proposal
+            owner_name = lead.get("owner_name", "Owner")
+            biz_name = lead.get("business_name", lead.get("title", "Business"))
+            proposal_path = generate_proposal(
+                business_name=biz_name,
+                business_type=business_type,
+                owner_name=owner_name,
+                selected_services=services,
+            )
+            proposals.append({"business": biz_name, "proposal_path": proposal_path, "status": "generated"})
+        except Exception as e:
+            proposals.append({"business": lead.get("business_name", "?"), "status": "failed", "error": str(e)})
+
+    results["phases"]["proposals"] = {
+        "status": "completed" if proposals else "skipped",
+        "count": len(proposals),
+        "proposals": proposals,
+    }
+
+    # Phase 3: Sales Calls (only if explicitly enabled — costs real money via Vapi)
+    calls = []
+    if auto_call and leads:
+        for lead in leads[:2]:  # Max 2 calls per pipeline run
+            phone = lead.get("phone", "")
+            if not phone:
+                continue
+            try:
+                from sales_caller import call_lead
+                call_result = await call_lead(
+                    phone=phone,
+                    business_name=lead.get("business_name", ""),
+                    business_type=business_type,
+                    owner_name=lead.get("owner_name", ""),
+                )
+                calls.append({"business": lead.get("business_name", ""), "status": "called", "result": call_result})
+            except Exception as e:
+                calls.append({"business": lead.get("business_name", ""), "status": "failed", "error": str(e)})
+
+    results["phases"]["sales_calls"] = {
+        "status": "completed" if calls else ("skipped" if not auto_call else "no_phones"),
+        "auto_call_enabled": auto_call,
+        "count": len(calls),
+        "calls": calls,
+    }
+
+    # Conversion tracking — save pipeline result
+    pipeline_dir = os.path.join(DATA_DIR, "onboarding")
+    os.makedirs(pipeline_dir, exist_ok=True)
+    pipeline_file = os.path.join(pipeline_dir, f"{pipeline_id}.json")
+    results["status"] = "completed"
+    results["completed_at"] = datetime.now(timezone.utc).isoformat()
+    with open(pipeline_file, "w") as f:
+        json.dump(results, f, indent=2, default=str)
+
+    # Slack notification
+    try:
+        await send_slack_message(
+            os.environ.get("SLACK_REPORT_CHANNEL", "C0AFE4QHKH7"),
+            f"Onboarding pipeline {pipeline_id} completed\n"
+            f"Type: {business_type} | Location: {location}\n"
+            f"Leads: {len(leads)} | Proposals: {len(proposals)} | Calls: {len(calls)}"
+        )
+    except Exception:
+        pass
+
+    return results
+
+
+@app.get("/api/onboard/history")
+async def list_onboarding_pipelines():
+    """List all past onboarding pipeline runs."""
+    pipeline_dir = os.path.join(DATA_DIR, "onboarding")
+    if not os.path.isdir(pipeline_dir):
+        return {"pipelines": [], "total": 0}
+
+    pipelines = []
+    for fname in sorted(os.listdir(pipeline_dir), reverse=True):
+        if fname.endswith(".json"):
+            try:
+                with open(os.path.join(pipeline_dir, fname)) as f:
+                    pipelines.append(json.load(f))
+            except Exception:
+                continue
+
+    return {"pipelines": pipelines, "total": len(pipelines)}
 
 
 if __name__ == "__main__":

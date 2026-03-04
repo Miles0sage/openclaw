@@ -65,7 +65,11 @@ from memory_policies import inject_context, auto_extract_learnings, save_learnin
 from agent_templates import get_template, get_failure_recovery, get_model_preference
 from agent_sessions import get_session, record_job, build_agent_context
 from phase_scoring import score_all_phases, validate_phase_output
-from supervisor import maybe_decompose_and_execute
+try:
+    from supervisor import maybe_decompose_and_execute
+except ImportError:
+    async def maybe_decompose_and_execute(*args, **kwargs):
+        return None  # supervisor not available — skip decomposition
 # Cost tracking — import from cost_tracker (single source of truth)
 from cost_tracker import (
     calculate_cost,
@@ -91,49 +95,100 @@ MAX_PLAN_STEPS = 10               # safety cap on plan step count (fewer = less 
 # Error Classification — transient errors get retried, permanent ones don't
 # ---------------------------------------------------------------------------
 
-TRANSIENT_ERROR_PATTERNS = [
-    "rate limit", "rate_limit", "429", "too many requests",
-    "timeout", "timed out", "deadline exceeded",
-    "connection reset", "connection refused", "connection error",
-    "temporary failure", "service unavailable", "503",
-    "internal server error", "500",
-    "network error", "dns resolution",
-    "overloaded", "capacity", "try again",
-    "econnrefused", "econnreset", "etimedout",
-    "ssl error", "handshake",
-]
+# ---------------------------------------------------------------------------
+# 6-Category Error Classification (inspired by Devin MCP HTTP matrix)
+# Each category has: max_retries, backoff_strategy, recovery_action
+# ---------------------------------------------------------------------------
 
-PERMANENT_ERROR_PATTERNS = [
-    "file not found", "no such file", "filenotfounderror",
-    "permission denied", "permissionerror", "access denied",
-    "syntax error", "syntaxerror", "invalid syntax",
-    "import error", "importerror", "modulenotfounderror",
-    "name error", "nameerror", "is not defined",
-    "type error", "typeerror", "not callable",
-    "attribute error", "attributeerror", "has no attribute",
-    "value error", "valueerror",
-    "key error", "keyerror",
-    "index error", "indexerror",
-    "authentication", "unauthorized", "401", "403",
-    "not found", "404",
-]
+ERROR_CATEGORIES = {
+    "network": {
+        "max_retries": 3, "backoff": "exponential", "action": "retry_same",
+        "patterns": [
+            "rate limit", "rate_limit", "429", "too many requests",
+            "timeout", "timed out", "deadline exceeded",
+            "connection reset", "connection refused", "connection error",
+            "temporary failure", "service unavailable", "503",
+            "internal server error", "500",
+            "network error", "dns resolution",
+            "overloaded", "capacity", "try again",
+            "econnrefused", "econnreset", "etimedout",
+            "ssl error", "handshake", "502", "504",
+        ],
+    },
+    "auth": {
+        "max_retries": 0, "backoff": "none", "action": "escalate",
+        "patterns": [
+            "authentication", "unauthorized", "401", "403",
+            "forbidden", "invalid api key", "invalid token",
+            "expired token", "access denied",
+        ],
+    },
+    "not_found": {
+        "max_retries": 1, "backoff": "none", "action": "diagnose_and_rewrite",
+        "patterns": [
+            "file not found", "no such file", "filenotfounderror",
+            "not found", "404", "does not exist",
+            "no such directory", "path not found",
+        ],
+    },
+    "code_error": {
+        "max_retries": 2, "backoff": "fixed", "action": "diagnose_and_rewrite",
+        "patterns": [
+            "syntax error", "syntaxerror", "invalid syntax",
+            "import error", "importerror", "modulenotfounderror",
+            "name error", "nameerror", "is not defined",
+            "type error", "typeerror", "not callable",
+            "attribute error", "attributeerror", "has no attribute",
+            "value error", "valueerror",
+            "key error", "keyerror",
+            "index error", "indexerror",
+        ],
+    },
+    "permission": {
+        "max_retries": 0, "backoff": "none", "action": "skip",
+        "patterns": [
+            "permission denied", "permissionerror",
+            "read-only file system", "operation not permitted",
+        ],
+    },
+    "resource": {
+        "max_retries": 1, "backoff": "exponential", "action": "retry_same",
+        "patterns": [
+            "out of memory", "oom", "memory error",
+            "disk full", "no space left", "quota exceeded",
+        ],
+    },
+}
+
+# Flatten for backward compat
+TRANSIENT_ERROR_PATTERNS = ERROR_CATEGORIES["network"]["patterns"]
+PERMANENT_ERROR_PATTERNS = (
+    ERROR_CATEGORIES["auth"]["patterns"]
+    + ERROR_CATEGORIES["permission"]["patterns"]
+)
 
 
 def _classify_error(error_str: str) -> str:
-    """Classify an error as 'transient' (retry) or 'permanent' (skip/escalate).
+    """Classify an error into one of 6 categories with specific recovery actions.
 
-    Returns 'transient' if the error matches a known transient pattern,
-    'permanent' if it matches a known permanent pattern,
-    or 'unknown' if neither (treated as transient for safety).
+    Returns a category key from ERROR_CATEGORIES, or 'unknown'.
+    For backward compat, also maps to 'transient'/'permanent' where needed.
     """
     err_lower = error_str.lower()
-    for pattern in PERMANENT_ERROR_PATTERNS:
-        if pattern in err_lower:
-            return "permanent"
-    for pattern in TRANSIENT_ERROR_PATTERNS:
-        if pattern in err_lower:
-            return "transient"
-    return "unknown"  # Default: retry once, then give up
+    # Check categories in priority order (most specific first)
+    for category in ["auth", "permission", "resource", "network", "not_found", "code_error"]:
+        cat = ERROR_CATEGORIES[category]
+        for pattern in cat["patterns"]:
+            if pattern in err_lower:
+                return category
+    return "unknown"
+
+
+def _get_error_config(error_class: str) -> dict:
+    """Get retry/recovery config for an error category."""
+    return ERROR_CATEGORIES.get(error_class, {
+        "max_retries": 2, "backoff": "fixed", "action": "diagnose_and_rewrite",
+    })
 
 
 async def _diagnose_failure(
@@ -141,16 +196,40 @@ async def _diagnose_failure(
     original_prompt: str,
     phase: str,
     error_history: list[dict] | None = None,
+    error_class: str = "unknown",
+    job_task: str = "",
 ) -> dict:
     """Diagnose a failure and suggest a modified prompt for retry.
+
+    Enhanced with patterns from Devin, Manus, Cursor leaked prompts:
+    1. Root cause vs symptom distinction (Cursor pattern)
+    2. Past reflexion injection — learn from similar past failures
+    3. Error-category-specific diagnosis prompts (Manus modular pattern)
+    4. Partial result preservation context
 
     Calls Grok grok-3-mini (~$0.0004) to analyze the error and rewrite the prompt.
 
     Returns:
-        {"diagnosis": str, "modified_prompt": str, "strategy": "retry|skip|escalate"}
+        {"diagnosis": str, "modified_prompt": str, "strategy": "retry|skip|escalate",
+         "root_cause": str, "lesson": str}
     """
     try:
         from grok_executor import call_grok
+
+        # --- Past reflexion injection (learn from similar past failures) ---
+        reflexion_context = ""
+        try:
+            past = search_reflections(job_task or error_text[:100], limit=2)
+            if past:
+                lessons = []
+                for r in past[:2]:
+                    lesson = r.get("lesson", r.get("summary", ""))
+                    if lesson:
+                        lessons.append(f"  - {lesson[:150]}")
+                if lessons:
+                    reflexion_context = "\nLessons from similar past failures:\n" + "\n".join(lessons)
+        except Exception:
+            pass  # Non-fatal — reflexion search failure shouldn't block diagnosis
 
         history_context = ""
         if error_history:
@@ -161,22 +240,38 @@ async def _diagnose_failure(
                 )
             history_context = f"\nPrevious failures:\n" + "\n".join(history_lines)
 
+        # --- Error-category-specific diagnosis guidance (Manus modular pattern) ---
+        category_guidance = {
+            "network": "This is a network/API error. Keep the prompt nearly identical. Suggest 'retry' with minimal changes.",
+            "auth": "This is an authentication/authorization error. The prompt cannot fix this — suggest 'escalate' unless the prompt can use a different API or approach.",
+            "not_found": "A file or resource was not found. The prompt likely references a wrong path. Rewrite to use correct paths or add a file-discovery step first.",
+            "code_error": "The generated code has a bug (syntax/type/name error). Identify the ROOT CAUSE of the bug and rewrite the prompt to produce correct code. Do NOT just suppress the error.",
+            "permission": "Permission denied. Suggest 'skip' unless the prompt can use a different file or approach.",
+            "resource": "System resource issue (memory/disk). Suggest 'retry' — may be transient.",
+            "unknown": "Unknown error type. Analyze carefully and determine the best strategy.",
+        }
+        guidance = category_guidance.get(error_class, category_guidance["unknown"])
+
         diag_prompt = (
             f"An AI agent step failed during the '{phase}' phase.\n\n"
+            f"Error category: {error_class}\n"
             f"Error: {error_text[:500]}\n"
-            f"{history_context}\n\n"
+            f"{history_context}\n"
+            f"{reflexion_context}\n\n"
             f"Original prompt (first 800 chars):\n{original_prompt[:800]}\n\n"
+            f"Category guidance: {guidance}\n\n"
+            f"IMPORTANT: Distinguish the ROOT CAUSE from the SYMPTOM. "
+            f"The error message is a symptom — what is the underlying cause? "
+            f"Address the root cause in your modified prompt, not just the symptom.\n\n"
             f"Respond with EXACTLY this JSON format (no markdown, no extra text):\n"
             f'{{"diagnosis": "brief explanation of what went wrong",'
+            f' "root_cause": "the underlying cause (not the symptom)",'
             f' "modified_prompt": "the rewritten prompt that avoids the error",'
-            f' "strategy": "retry"}}\n\n'
+            f' "strategy": "retry",'
+            f' "lesson": "one-sentence lesson for future jobs with similar errors"}}\n\n'
             f'strategy must be one of: "retry" (try again with modified prompt), '
             f'"skip" (this step cannot succeed, move on), '
             f'"escalate" (needs human/PM review).\n'
-            f'If the error is a transient API/network issue, set strategy to "retry" '
-            f'and keep the modified_prompt close to the original.\n'
-            f'If the error indicates a fundamental problem (wrong file path, missing '
-            f'dependency), rewrite the prompt to work around it.'
         )
 
         result = await call_grok(
@@ -194,18 +289,34 @@ async def _diagnose_failure(
         json_match = re.search(r'\{.*\}', text, re.DOTALL)
         if json_match:
             parsed = json.loads(json_match.group())
-            return {
+            diag_result = {
                 "diagnosis": parsed.get("diagnosis", ""),
+                "root_cause": parsed.get("root_cause", ""),
                 "modified_prompt": parsed.get("modified_prompt", ""),
                 "strategy": parsed.get("strategy", "retry"),
+                "lesson": parsed.get("lesson", ""),
                 "cost_usd": result.get("cost_usd", 0),
             }
+            # Auto-save lesson for future jobs if present
+            lesson = diag_result.get("lesson", "")
+            if lesson and len(lesson) > 10:
+                try:
+                    save_reflection(
+                        job_id=f"diag-{phase}",
+                        job_data={"task": job_task[:200], "project": "openclaw"},
+                        outcome="failure_diagnosed",
+                        lesson=lesson,
+                        phase_scores={},
+                    )
+                except Exception:
+                    pass  # Non-fatal
+            return diag_result
         else:
-            return {"diagnosis": text[:200], "modified_prompt": "", "strategy": "retry", "cost_usd": result.get("cost_usd", 0)}
+            return {"diagnosis": text[:200], "root_cause": "", "modified_prompt": "", "strategy": "retry", "lesson": "", "cost_usd": result.get("cost_usd", 0)}
 
     except Exception as e:
         logger.debug(f"Failure diagnosis failed (non-fatal): {e}")
-        return {"diagnosis": f"Diagnosis unavailable: {e}", "modified_prompt": "", "strategy": "retry", "cost_usd": 0}
+        return {"diagnosis": f"Diagnosis unavailable: {e}", "root_cause": "", "modified_prompt": "", "strategy": "retry", "lesson": "", "cost_usd": 0}
 
 
 def _make_call_signature(tool_name: str, tool_input) -> str:
@@ -1896,26 +2007,39 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                         f"API credit/billing error (non-retryable): {e}"
                     ) from e
 
-                # Classify error: transient → retry, permanent → skip step
+                # 6-category error classification (Devin MCP matrix pattern)
                 error_class = _classify_error(str(e))
-                if error_class == "permanent":
+                error_config = _get_error_config(error_class)
+
+                # Immediate-stop categories: auth, permission
+                if error_config["action"] in ("escalate", "skip") and error_config["max_retries"] == 0:
                     logger.warning(
-                        f"Step {step.index} PERMANENT error for {job['id']}: {e}. "
-                        f"Skipping step (no retry)."
+                        f"Step {step.index} {error_class.upper()} error for {job['id']}: {e}. "
+                        f"Action: {error_config['action']} (no retry)."
                     )
                     _log_phase(job["id"], "execute", {
-                        "event": "step_permanent_error",
+                        "event": f"step_{error_config['action']}",
                         "step": step.index,
                         "error": str(e),
-                        "error_class": "permanent",
+                        "error_class": error_class,
                     })
-                    break  # Exit retry loop — this step won't succeed
+                    break
 
                 # Record error for circuit breaker
                 if guardrails:
                     guardrails.record_error(str(e))
                 step.attempts = attempt + 1
-                backoff = (2 ** attempt) * 2  # 2s, 4s, 8s
+
+                # Category-aware backoff
+                if error_config["backoff"] == "exponential":
+                    backoff = (2 ** attempt) * 2  # 2s, 4s, 8s
+                elif error_config["backoff"] == "fixed":
+                    backoff = 3  # Fixed 3s for code errors
+                else:
+                    backoff = 1
+
+                # Max retries per error category
+                max_retries_for_error = error_config["max_retries"]
 
                 # --- Adaptive Retry: diagnose failure and modify prompt ---
                 error_entry = {"attempt": attempt + 1, "error": str(e)[:500], "error_class": error_class}
@@ -1924,25 +2048,30 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                     original_prompt=prompt,
                     phase="execute",
                     error_history=error_history,
+                    error_class=error_class,
+                    job_task=job.get("task", ""),
                 )
                 error_entry["diagnosis"] = diagnosis.get("diagnosis", "")[:300]
+                error_entry["root_cause"] = diagnosis.get("root_cause", "")[:200]
                 error_entry["strategy"] = diagnosis.get("strategy", "retry")
                 error_history.append(error_entry)
 
-                # Use diagnosis strategy
+                # Use diagnosis strategy (overrides category default if diagnosis is smarter)
                 diag_strategy = diagnosis.get("strategy", "retry")
                 if diag_strategy == "skip":
                     logger.info(f"Step {step.index}: diagnosis recommends SKIP — moving on")
                     break
                 elif diag_strategy == "escalate":
                     logger.info(f"Step {step.index}: diagnosis recommends ESCALATE")
-                    # Will be handled by template failure_recovery below
 
-                # Use modified prompt from diagnosis if available
+                # Use modified prompt from diagnosis (for diagnose_and_rewrite categories)
                 modified_prompt = diagnosis.get("modified_prompt", "")
                 if modified_prompt and len(modified_prompt) > 50:
                     prompt = modified_prompt
-                    logger.info(f"Step {step.index}: using diagnosed modified prompt ({len(prompt)} chars)")
+                    logger.info(
+                        f"Step {step.index}: using diagnosed modified prompt ({len(prompt)} chars). "
+                        f"Root cause: {diagnosis.get('root_cause', 'n/a')[:60]}"
+                    )
 
                 # Check agent template failure recovery strategy
                 agent_recovery = get_failure_recovery(step_agent)
@@ -1958,12 +2087,10 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                     })
                     break
 
-                # Unknown errors: only retry once (not full 3 attempts)
-                max_retries_for_error = DEFAULT_MAX_RETRIES if error_class == "transient" else 2
                 logger.warning(
                     f"Step {step.index} attempt {attempt+1} failed for {job['id']} "
-                    f"[{error_class}]: {e}. Diagnosis: {diagnosis.get('diagnosis', 'n/a')[:80]}. "
-                    f"Retrying in {backoff}s..."
+                    f"[{error_class}]: {e}. Root cause: {diagnosis.get('root_cause', 'n/a')[:60]}. "
+                    f"Retrying in {backoff}s (max {max_retries_for_error})..."
                 )
                 _log_phase(job["id"], "execute", {
                     "event": "step_retry",
@@ -1971,13 +2098,14 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                     "attempt": attempt + 1,
                     "error": str(e),
                     "error_class": error_class,
+                    "root_cause": diagnosis.get("root_cause", "")[:200],
                     "diagnosis": diagnosis.get("diagnosis", "")[:200],
                     "backoff_seconds": backoff,
                 })
                 if attempt < max_retries_for_error - 1:
                     await asyncio.sleep(backoff)
-                elif error_class == "unknown":
-                    break  # Unknown errors: gave it 2 tries, move on
+                else:
+                    break  # Exhausted retries for this error category
 
         if step_result is None:
             step.status = "failed"

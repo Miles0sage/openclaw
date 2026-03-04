@@ -62,7 +62,7 @@ PLANS = {
         "price": 0.0,
         "currency": "USD",
         "billing_period": "monthly",
-        "job_limit": 5,
+        "job_limit": 10,
         "features": ["Basic job submission", "24h job history", "Email support"],
     },
     "starter": {
@@ -70,22 +70,22 @@ PLANS = {
         "price": 49.0,
         "currency": "USD",
         "billing_period": "monthly",
-        "job_limit": 50,
-        "features": ["50 jobs/month", "30-day history", "Priority support", "API access"],
+        "job_limit": 100,
+        "features": ["100 jobs/month", "30-day history", "Priority support", "API access"],
     },
     "pro": {
         "name": "Pro",
-        "price": 199.0,
+        "price": 149.0,
         "currency": "USD",
         "billing_period": "monthly",
-        "job_limit": 200,
-        "features": ["200 jobs/month", "90-day history", "24/7 support", "Advanced analytics", "Webhooks"],
+        "job_limit": 500,
+        "features": ["500 jobs/month", "90-day history", "24/7 support", "Advanced analytics", "Webhooks"],
     },
     "enterprise": {
         "name": "Enterprise",
-        "price": None,  # Custom pricing
+        "price": 499.0,
         "currency": "USD",
-        "billing_period": "custom",
+        "billing_period": "monthly",
         "job_limit": None,  # Unlimited
         "features": ["Unlimited jobs", "Forever history", "Dedicated support", "SLA", "Custom integrations"],
     },
@@ -117,7 +117,8 @@ PLAN_STRIPE_PRICES = {
 # Fallback: in-line price amounts in cents (used only when Price IDs are not set)
 PLAN_PRICES_CENTS = {
     "starter": 4900,   # $49.00/month
-    "pro": 19900,      # $199.00/month
+    "pro": 14900,      # $149.00/month
+    "enterprise": 49900,  # $499.00/month
 }
 
 

@@ -1,14 +1,23 @@
 """
-Complexity Classifier for OpenClaw Router (Python port)
-Mirrors src/routing/complexity-classifier.ts logic exactly.
-Analyzes query text and determines optimal model selection (Haiku, Sonnet, Opus).
-Achieves 60-70% cost reduction through intelligent routing.
+Supervisor for OpenClaw — Complexity Classification + Task Decomposition
+
+1. ComplexityClassifier: Routes queries to optimal model (Haiku/Sonnet/Opus).
+2. maybe_decompose_and_execute: Analyzes if a job should be split into parallel
+   sub-tasks via tmux agents. Returns aggregated result or None (skip).
 """
 
 import re
 import math
+import os
+import json
+import asyncio
+import logging
+import time
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Optional
+from pathlib import Path
+
+logger = logging.getLogger("supervisor")
 
 # Feb 2026 Claude API pricing (per million tokens)
 MODEL_PRICING = {
@@ -275,3 +284,261 @@ _classifier = ComplexityClassifier()
 def classify(query: str) -> ClassificationResult:
     """Convenience function for single classification."""
     return _classifier.classify(query)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Task Decomposition + Parallel Execution via TmuxSpawner
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Signals that a task might benefit from parallel decomposition
+DECOMPOSITION_SIGNALS = [
+    # Multi-file indicators
+    r"\b\d+\s*files?\b",
+    r"multiple\s+(files?|components?|modules?|endpoints?)",
+    r"across\s+(the\s+)?(codebase|project|repo)",
+    # Parallel-friendly task patterns
+    r"\band\b.*\band\b",  # "do X and Y and Z"
+    r"(?:first|then|also|additionally).*(?:first|then|also|additionally)",
+    # Explicit multi-step
+    r"\b(step\s*\d|phase\s*\d|part\s*\d)\b",
+]
+
+# Tasks that should NEVER be decomposed (ordering matters)
+NO_DECOMPOSE_PATTERNS = [
+    r"simple\s+fix",
+    r"typo",
+    r"change\s+color",
+    r"update\s+text",
+    r"rename\s+\w+",
+    r"add\s+a?\s*comment",
+]
+
+# Minimum estimated duration (seconds) to justify decomposition overhead
+MIN_DURATION_FOR_DECOMPOSE = 300  # 5 minutes
+
+# Max sub-tasks to prevent resource exhaustion
+MAX_SUB_TASKS = 4
+
+# Timeout for waiting on all sub-tasks
+SUB_TASK_TIMEOUT = 1800  # 30 minutes
+
+
+def _should_decompose(job: dict) -> Tuple[bool, str]:
+    """
+    Analyze whether a job should be decomposed into parallel sub-tasks.
+    Returns (should_decompose, reason).
+    """
+    task = job.get("task", "")
+    task_lower = task.lower()
+
+    # Never decompose simple tasks
+    for pat in NO_DECOMPOSE_PATTERNS:
+        if re.search(pat, task_lower):
+            return False, f"Simple task pattern: {pat}"
+
+    # Check for decomposition signals
+    signals_found = []
+    for pat in DECOMPOSITION_SIGNALS:
+        if re.search(pat, task_lower):
+            signals_found.append(pat)
+
+    if not signals_found:
+        return False, "No decomposition signals found"
+
+    # Need at least 2 signals to justify the overhead
+    if len(signals_found) < 2:
+        # Unless the task is explicitly long
+        word_count = len(task.split())
+        if word_count < 50:
+            return False, f"Only {len(signals_found)} signal(s) and short task ({word_count} words)"
+
+    # Check complexity via classifier
+    result = _classifier.classify(task)
+    if result.complexity < 50:
+        return False, f"Complexity too low ({result.complexity}/100) for decomposition"
+
+    return True, f"Decomposition justified: {len(signals_found)} signals, complexity={result.complexity}"
+
+
+def _decompose_task(job: dict) -> List[dict]:
+    """
+    Split a job's task into independent sub-tasks.
+    Uses heuristic parsing — looks for bullet points, numbered steps,
+    "and" conjunctions, or multi-file references.
+    """
+    task = job.get("task", "")
+    sub_tasks = []
+
+    # Strategy 1: Explicit numbered steps or bullets
+    # Match "1. ...", "- ...", "* ..."
+    numbered = re.findall(r"(?:^|\n)\s*(?:\d+[.)]\s+|[-*]\s+)(.+?)(?=\n\s*(?:\d+[.)]\s+|[-*]\s+)|\Z)", task, re.DOTALL)
+    if len(numbered) >= 2:
+        for i, step in enumerate(numbered[:MAX_SUB_TASKS]):
+            sub_tasks.append({
+                "index": i,
+                "description": step.strip(),
+                "independent": True,
+            })
+        return sub_tasks
+
+    # Strategy 2: Split on "and" / "also" / "additionally" conjunctions
+    # Only if the task has clear independent clauses
+    parts = re.split(r"\.\s+(?:Also|Additionally|Then|Next|Furthermore)\s*,?\s*", task, flags=re.IGNORECASE)
+    if len(parts) >= 2:
+        for i, part in enumerate(parts[:MAX_SUB_TASKS]):
+            part = part.strip().rstrip(".")
+            if len(part) > 20:  # Skip trivially short fragments
+                sub_tasks.append({
+                    "index": i,
+                    "description": part,
+                    "independent": True,
+                })
+        if len(sub_tasks) >= 2:
+            return sub_tasks
+
+    # Strategy 3: If task mentions multiple files, split by file
+    file_refs = re.findall(r"(?:[\w./]+\.(?:py|ts|js|tsx|jsx|html|css|json|yaml|md))", task)
+    if len(file_refs) >= 3:
+        # Group by file — create one sub-task per unique file
+        seen = set()
+        for f in file_refs[:MAX_SUB_TASKS]:
+            if f not in seen:
+                seen.add(f)
+                sub_tasks.append({
+                    "index": len(sub_tasks),
+                    "description": f"Handle changes for {f}: {task[:200]}",
+                    "independent": True,
+                    "target_file": f,
+                })
+        if len(sub_tasks) >= 2:
+            return sub_tasks
+
+    # Can't decompose cleanly — return empty
+    return []
+
+
+async def maybe_decompose_and_execute(job: dict, project_root: str = "/root/openclaw") -> Optional[dict]:
+    """
+    Analyze if a job should be decomposed into parallel sub-tasks.
+    If yes, spawn tmux agents for each sub-task, wait for completion,
+    and return aggregated results.
+
+    Returns None if the job should NOT be decomposed (normal pipeline continues).
+    Returns a result dict if decomposition was used.
+    """
+    should, reason = _should_decompose(job)
+    if not should:
+        logger.info(f"Job {job.get('id', '?')}: No decomposition — {reason}")
+        return None
+
+    sub_tasks = _decompose_task(job)
+    if len(sub_tasks) < 2:
+        logger.info(f"Job {job.get('id', '?')}: Decomposition produced <2 sub-tasks, skipping")
+        return None
+
+    job_id = job.get("id", "unknown")
+    logger.info(f"Job {job_id}: Decomposing into {len(sub_tasks)} parallel sub-tasks")
+
+    # Import tmux_spawner here to avoid circular imports
+    try:
+        from tmux_spawner import TmuxSpawner
+    except ImportError:
+        logger.warning(f"Job {job_id}: tmux_spawner not available, skipping decomposition")
+        return None
+
+    spawner = TmuxSpawner()
+
+    # Build prompts for each sub-task
+    project = job.get("project", "openclaw")
+    base_context = (
+        f"You are working on project '{project}'. "
+        f"Project root: {project_root}\n"
+        f"Original task: {job.get('task', '')}\n\n"
+        f"Your specific sub-task:\n"
+    )
+
+    spawn_jobs = []
+    for st in sub_tasks:
+        sub_job_id = f"{job_id}-sub{st['index']}"
+        prompt = base_context + st["description"]
+        spawn_jobs.append({
+            "job_id": sub_job_id,
+            "prompt": prompt,
+            "cwd": project_root,
+            "timeout_minutes": 15,
+        })
+
+    # Spawn all sub-tasks in parallel
+    spawn_results = spawner.spawn_parallel(spawn_jobs)
+    spawned = [r for r in spawn_results if r["status"] == "spawned"]
+
+    if not spawned:
+        logger.error(f"Job {job_id}: All sub-task spawns failed")
+        return None
+
+    logger.info(f"Job {job_id}: {len(spawned)}/{len(spawn_jobs)} agents spawned")
+
+    # Wait for all agents to complete (poll every 10s, timeout after SUB_TASK_TIMEOUT)
+    start_time = time.time()
+    completed = {}
+    while time.time() - start_time < SUB_TASK_TIMEOUT:
+        all_done = True
+        for sr in spawned:
+            if sr["job_id"] in completed:
+                continue
+            agent_status = spawner.get_agent_status(sr["pane_id"])
+            if agent_status and agent_status.get("status") == "exited":
+                output = spawner.collect_output(sr["pane_id"], job_id=sr["job_id"])
+                completed[sr["job_id"]] = {
+                    "job_id": sr["job_id"],
+                    "status": "completed",
+                    "output": output[:5000] if output else "",
+                    "runtime_seconds": agent_status.get("runtime_seconds", 0),
+                }
+                logger.info(f"Sub-task {sr['job_id']} completed ({agent_status.get('runtime_seconds', 0)}s)")
+            else:
+                all_done = False
+
+        if all_done:
+            break
+        await asyncio.sleep(10)
+
+    # Kill any still-running agents after timeout
+    for sr in spawned:
+        if sr["job_id"] not in completed:
+            try:
+                spawner.kill_agent(sr["pane_id"])
+            except Exception:
+                pass
+            completed[sr["job_id"]] = {
+                "job_id": sr["job_id"],
+                "status": "timeout",
+                "output": "",
+                "runtime_seconds": int(time.time() - start_time),
+            }
+            logger.warning(f"Sub-task {sr['job_id']} timed out after {SUB_TASK_TIMEOUT}s")
+
+    # Aggregate results
+    successful = [c for c in completed.values() if c["status"] == "completed"]
+    total_runtime = sum(c.get("runtime_seconds", 0) for c in completed.values())
+
+    result = {
+        "success": len(successful) == len(spawned),
+        "sub_tasks_completed": len(successful),
+        "sub_tasks_total": len(spawned),
+        "decomposition": {
+            "reason": reason,
+            "sub_task_count": len(sub_tasks),
+            "descriptions": [st["description"][:200] for st in sub_tasks],
+        },
+        "sub_tasks": list(completed.values()),
+        "summary": (
+            f"Decomposed into {len(sub_tasks)} sub-tasks. "
+            f"{len(successful)}/{len(spawned)} completed successfully. "
+            f"Total agent runtime: {total_runtime}s."
+        ),
+        "total_runtime_seconds": total_runtime,
+    }
+
+    logger.info(f"Job {job_id}: Decomposition complete — {result['summary']}")
+    return result

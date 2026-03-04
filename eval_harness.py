@@ -278,14 +278,14 @@ async def run_eval(task_subset: list[str] = None, dry_run: bool = False,
 
         try:
             # Create a real job
-            job_id = create_job(
+            job = create_job(
                 project=task.get("project", "openclaw"),
                 task=description,
                 priority=task.get("priority", "P3"),
             )
 
-            # Run through pipeline
-            result = await runner.execute_job(job_id)
+            # Run through pipeline (create_job returns Job object, execute_job wants job_id string)
+            result = await runner.execute_job(job.id)
             duration = time.time() - start_time
             cost = result.get("cost_usd", 0)
 

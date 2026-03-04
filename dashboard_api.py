@@ -22,14 +22,15 @@ import hmac
 import base64
 import subprocess
 import pathlib
+import asyncio
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
-from fastapi import FastAPI, HTTPException, Depends, Header, status
+from fastapi import FastAPI, HTTPException, Depends, Header, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
@@ -685,6 +686,192 @@ async def docs():
         "token": "[redacted]",
         "password": "[redacted]"
     }
+
+
+# ============================================================================
+# SSE (Server-Sent Events) — Real-time Dashboard Updates
+# ============================================================================
+
+_sse_clients: list[asyncio.Queue] = []
+
+
+async def _broadcast_sse(event_type: str, data: dict):
+    """Push an event to all connected SSE clients."""
+    message = f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+    dead = []
+    for q in _sse_clients:
+        try:
+            q.put_nowait(message)
+        except asyncio.QueueFull:
+            dead.append(q)
+    for q in dead:
+        _sse_clients.remove(q)
+
+
+def _load_gateway_data(endpoint: str) -> dict:
+    """Fetch data from the main gateway API."""
+    import urllib.request
+    try:
+        url = f"http://{GATEWAY_HOST}:{GATEWAY_PORT}{endpoint}"
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read().decode())
+    except Exception as e:
+        logger.debug(f"Gateway fetch {endpoint} failed: {e}")
+        return {}
+
+
+@app.get("/api/stream")
+async def sse_stream(request: Request):
+    """SSE endpoint — pushes real-time updates to dashboard clients."""
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    _sse_clients.append(queue)
+
+    async def event_generator():
+        try:
+            # Send initial snapshot
+            yield f"event: connected\ndata: {json.dumps({'status': 'connected', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
+
+            while True:
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+
+                try:
+                    message = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield message
+                except asyncio.TimeoutError:
+                    # Send keepalive ping every 15s
+                    yield f": keepalive {datetime.now(timezone.utc).isoformat()}\n\n"
+        finally:
+            if queue in _sse_clients:
+                _sse_clients.remove(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/live/jobs")
+async def live_jobs():
+    """Active jobs with real-time status."""
+    data = _load_gateway_data("/api/jobs?status=all&limit=20")
+    if isinstance(data, dict) and "jobs" in data:
+        return {"jobs": data["jobs"], "timestamp": datetime.now(timezone.utc).isoformat()}
+    # Fallback: read from job files
+    jobs_dir = pathlib.Path(DATA_DIR) / "jobs"
+    jobs = []
+    if jobs_dir.exists():
+        for f in sorted(jobs_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:20]:
+            try:
+                jobs.append(json.loads(f.read_text()))
+            except Exception:
+                pass
+    return {"jobs": jobs, "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/live/costs")
+async def live_costs():
+    """Rolling 24h cost burn rate."""
+    try:
+        from cost_tracker import get_cost_metrics
+        metrics = get_cost_metrics()
+        return {
+            "metrics": metrics,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        return {"error": str(e), "metrics": {}, "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/live/eval")
+async def live_eval():
+    """Latest eval run results."""
+    eval_dir = pathlib.Path(DATA_DIR) / "eval_results"
+    if not eval_dir.exists():
+        return {"latest": None, "runs": [], "timestamp": datetime.now(timezone.utc).isoformat()}
+    runs = sorted(eval_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    latest = None
+    run_summaries = []
+    for r in runs[:10]:
+        try:
+            data = json.loads(r.read_text())
+            summary = {
+                "run_id": data.get("run_id", r.stem),
+                "score": data.get("score", data.get("overall_score")),
+                "total": data.get("total_tasks"),
+                "passed": data.get("passed"),
+                "timestamp": data.get("timestamp", data.get("completed_at")),
+            }
+            run_summaries.append(summary)
+            if latest is None:
+                latest = data
+        except Exception:
+            pass
+    return {"latest": latest, "runs": run_summaries, "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/live/billing")
+async def live_billing():
+    """Current billing plan usage (from client_auth)."""
+    try:
+        from client_auth import list_clients
+        clients = list_clients()
+        return {
+            "clients": clients[:50],
+            "total_clients": len(clients),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        return {"error": str(e), "clients": [], "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/live/agents")
+async def live_agents():
+    """Active tmux agents and their status."""
+    try:
+        from tmux_spawner import TmuxSpawner
+        spawner = TmuxSpawner()
+        agents = spawner.list_agents()
+        return {"agents": agents, "timestamp": datetime.now(timezone.utc).isoformat()}
+    except Exception as e:
+        return {"error": str(e), "agents": [], "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+# Background task: poll gateway and push updates via SSE every 10s
+async def _sse_poller():
+    """Periodically push updates to SSE clients."""
+    while True:
+        await asyncio.sleep(10)
+        if not _sse_clients:
+            continue
+        try:
+            # Push job status
+            jobs_data = _load_gateway_data("/api/jobs?status=running&limit=10")
+            if jobs_data:
+                await _broadcast_sse("jobs", jobs_data)
+
+            # Push cost metrics
+            try:
+                from cost_tracker import get_cost_metrics
+                costs = get_cost_metrics()
+                await _broadcast_sse("costs", costs if isinstance(costs, dict) else {})
+            except Exception:
+                pass
+        except Exception as e:
+            logger.debug(f"SSE poller error: {e}")
+
+
+@app.on_event("startup")
+async def start_sse_poller():
+    """Start the SSE background poller."""
+    asyncio.create_task(_sse_poller())
 
 
 # ============================================================================
