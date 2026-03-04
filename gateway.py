@@ -7865,6 +7865,54 @@ async def get_job_phases(job_id: str):
     return {"job_id": job_id, "phases": timeline}
 
 
+@app.get("/api/jobs/{job_id}/detail")
+async def get_job_detail(job_id: str):
+    """Get full execution details for a completed job from run logs."""
+    run_dir = os.path.join(os.path.dirname(__file__), "data", "jobs", "runs", job_id)
+    if not os.path.isdir(run_dir):
+        return JSONResponse({"error": "Run data not found"}, status_code=404)
+
+    detail = {"job_id": job_id, "phases": {}}
+
+    # Read result.json (overall summary)
+    result_path = os.path.join(run_dir, "result.json")
+    if os.path.exists(result_path):
+        with open(result_path) as f:
+            detail["result"] = json.loads(f.read())
+
+    # Read progress.json
+    progress_path = os.path.join(run_dir, "progress.json")
+    if os.path.exists(progress_path):
+        with open(progress_path) as f:
+            detail["progress"] = json.loads(f.read())
+
+    # Read plan.json
+    plan_path = os.path.join(run_dir, "plan.json")
+    if os.path.exists(plan_path):
+        with open(plan_path) as f:
+            detail["plan"] = json.loads(f.read())
+
+    # Read phase JSONL logs (research, execute, verify, deliver)
+    for phase_name in ["research", "plan", "execute", "verify", "deliver"]:
+        jsonl_path = os.path.join(run_dir, f"{phase_name}.jsonl")
+        if os.path.exists(jsonl_path):
+            events = []
+            with open(jsonl_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            events.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            pass
+            detail["phases"][phase_name] = {
+                "event_count": len(events),
+                "events": events[-100:],  # Last 100 events per phase (cap size)
+            }
+
+    return detail
+
+
 @app.get("/api/jobs/{job_id}/costs")
 async def get_job_costs(job_id: str):
     """Get detailed cost breakdown for a job (per-phase, per-tool, per-agent, per-model)."""
