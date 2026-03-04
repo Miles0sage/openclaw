@@ -828,7 +828,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research", "/api/monitoring", "/api/pa", "/api/oz"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/job-viewer", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research", "/api/monitoring", "/api/pa", "/api/oz"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -7277,6 +7277,20 @@ async def mission_control_page():
     except FileNotFoundError:
         from starlette.responses import RedirectResponse
         return RedirectResponse(url="/dashboard.html", status_code=302)
+
+
+@app.get("/job-viewer")
+@app.get("/job-viewer.html")
+@app.get("/job_viewer.html")
+async def job_viewer_page():
+    """Serve Job Execution Viewer"""
+    from starlette.responses import HTMLResponse
+    jv_path = os.path.join(os.path.dirname(__file__), "job_viewer.html")
+    try:
+        with open(jv_path, "r") as f:
+            return HTMLResponse(content=f.read(), status_code=200)
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Job Viewer not found</h1>", status_code=404)
 
 
 # ═══════════════════════════════════════════════════════════════════════
