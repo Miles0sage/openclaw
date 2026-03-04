@@ -824,11 +824,11 @@ if not AUTH_TOKEN:
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # WEBHOOK & DASHBOARD EXEMPTIONS: Allow without auth
-    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/coderclaw/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl", "/visionclaw", "/webhook/twilio", "/webhook/openclaw-jobs", "/webhook/slack-test", "/api/digest", "/api/ping", "/api/version"]
+    exempt_paths = ["/", "/health", "/metrics", "/test-exempt", "/test-version", "/dashboard", "/dashboard.html", "/monitoring", "/terms", "/intake", "/telegram/webhook", "/coderclaw/webhook", "/slack/events", "/api/audit", "/client-portal", "/client_portal.html", "/api/billing/plans", "/api/billing/webhook", "/api/github/webhook", "/api/notifications/config", "/secrets", "/metrics-dashboard", "/mobile", "/sales", "/nightowl", "/visionclaw", "/oz", "/oz-status", "/webhook/twilio", "/webhook/openclaw-jobs", "/webhook/slack-test", "/api/digest", "/api/ping", "/api/version"]
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research", "/api/monitoring", "/api/pa"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research", "/api/monitoring", "/api/pa", "/api/oz"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -5110,6 +5110,132 @@ async def approve_job(job_id: str, request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# OZ ↔ OPENCLAW BIDIRECTIONAL — Webhook callbacks from Oz scheduled tasks
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/oz/callback")
+async def oz_callback(request: Request):
+    """Handle Oz scheduled task results (nightly scans, weekly reviews, health checks).
+
+    Oz agents call this endpoint to report results back to OpenClaw.
+    Results are logged as events and stored in reports/.
+    """
+    try:
+        data = await request.json()
+        task_name = data.get("task_name", "unknown")
+        task_id = data.get("task_id", "")
+        status = data.get("status", "completed")
+        output = data.get("output", "")
+        findings = data.get("findings", [])
+
+        # Store report
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_dir = os.path.join(os.path.dirname(__file__), "reports")
+        os.makedirs(report_dir, exist_ok=True)
+        report_path = os.path.join(report_dir, f"{task_name.lower().replace(' ', '_')}_{timestamp}.json")
+        with open(report_path, "w") as f:
+            json.dump({"task_name": task_name, "task_id": task_id, "status": status,
+                       "output": output, "findings": findings, "timestamp": timestamp}, f, indent=2)
+
+        # Emit event
+        engine = get_event_engine()
+        if engine:
+            engine.emit("oz.callback", {
+                "task_name": task_name, "task_id": task_id, "status": status,
+                "findings_count": len(findings), "report": report_path
+            })
+
+        # Auto-create jobs for critical findings
+        jobs_created = []
+        for finding in findings:
+            if finding.get("severity") in ("critical", "high"):
+                try:
+                    job = create_job(
+                        project=finding.get("project", "openclaw"),
+                        task=f"[Oz {task_name}] {finding.get('description', 'Fix finding')}",
+                        priority="P0" if finding["severity"] == "critical" else "P1"
+                    )
+                    jobs_created.append(job.id)
+                    logger.info(f"Auto-created job {job.id} for {finding['severity']} finding")
+                except Exception as je:
+                    logger.warning(f"Failed to create job for finding: {je}")
+
+        logger.info(f"Oz callback: {task_name} ({status}), {len(findings)} findings, {len(jobs_created)} jobs created")
+        return {
+            "received": True, "task_name": task_name, "report": report_path,
+            "jobs_created": jobs_created
+        }
+    except Exception as e:
+        logger.error(f"Oz callback error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/oz/reports")
+async def oz_reports():
+    """List all Oz scheduled task reports."""
+    try:
+        report_dir = os.path.join(os.path.dirname(__file__), "reports")
+        if not os.path.exists(report_dir):
+            return {"reports": [], "total": 0}
+        reports = []
+        for f in sorted(os.listdir(report_dir), reverse=True)[:50]:
+            if f.endswith(".json"):
+                path = os.path.join(report_dir, f)
+                try:
+                    with open(path) as fh:
+                        reports.append(json.load(fh))
+                except Exception:
+                    reports.append({"file": f, "error": "parse_failed"})
+        return {"reports": reports, "total": len(reports)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/oz/status")
+async def oz_agent_status():
+    """Get Oz integration status — schedules, MCP bridge, environment."""
+    try:
+        # Check MCP bridge
+        import aiohttp
+        mcp_ok = False
+        mcp_tools = 0
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get("http://localhost:8787/health", timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    if resp.status == 200:
+                        d = await resp.json()
+                        mcp_ok = True
+                        mcp_tools = d.get("tools_available", 0)
+        except Exception:
+            pass
+
+        # Check schedules
+        schedules = []
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "oz", "schedule", "list", "--output-format", "json",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+            if stdout:
+                schedules = json.loads(stdout.decode())
+        except Exception:
+            pass
+
+        return {
+            "oz_available": os.path.exists("/usr/bin/oz"),
+            "environment_id": os.environ.get("OZ_ENVIRONMENT_ID", "wguVnlBs2L6GmchuiGLKAL"),
+            "mcp_bridge": {"running": mcp_ok, "tools": mcp_tools, "port": 8787},
+            "schedules": schedules if isinstance(schedules, list) else [],
+            "callback_endpoint": "/api/oz/callback",
+            "reports_endpoint": "/api/oz/reports",
+        }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # REFLEXION LOOP — Self-improving agent memory
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -7123,6 +7249,20 @@ async def event_stream():
 async def recent_events():
     """Get recent events (non-streaming fallback)"""
     return {"success": True, "events": _event_log[-50:], "total": len(_event_log)}
+
+
+@app.get("/oz")
+@app.get("/oz-status")
+async def oz_status_page():
+    """Serve Oz Cloud Agent status & capabilities page"""
+    from starlette.responses import HTMLResponse
+    oz_path = os.path.join(os.path.dirname(__file__), "oz_status.html")
+    try:
+        with open(oz_path, "r") as f:
+            return HTMLResponse(content=f.read(), status_code=200)
+    except FileNotFoundError:
+        from starlette.responses import HTMLResponse
+        return HTMLResponse(content="<h1>Oz status page not found</h1>", status_code=404)
 
 
 @app.get("/mission-control")
