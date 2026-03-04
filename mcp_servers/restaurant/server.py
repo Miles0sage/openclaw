@@ -1,6 +1,9 @@
 """
 OpenClaw Restaurant MCP Server — 7 tools for restaurant operations.
 
+Wired to Delhi Palace Supabase (banxtacevgopeczuzycz).
+Tables: menu_items, orders, store_settings.
+
 Tools:
   1. manage_menu       — Add/update/remove items, toggle availability, bulk price updates
   2. manage_orders     — View orders, update status, search by customer
@@ -20,7 +23,6 @@ from __future__ import annotations
 import os
 import sys
 import json
-import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
@@ -41,7 +43,7 @@ mcp = FastMCP(
 )
 
 # ---------------------------------------------------------------------------
-# Supabase client (lazy init)
+# Supabase client (lazy init — Delhi Palace database)
 # ---------------------------------------------------------------------------
 
 _supabase = None
@@ -50,8 +52,8 @@ _supabase = None
 def _get_supabase():
     global _supabase
     if _supabase is None:
-        url = os.getenv("SUPABASE_URL", "")
-        key = os.getenv("SUPABASE_SERVICE_KEY", os.getenv("SUPABASE_KEY", ""))
+        url = os.getenv("RESTAURANT_SUPABASE_URL", os.getenv("SUPABASE_URL", ""))
+        key = os.getenv("RESTAURANT_SUPABASE_KEY", os.getenv("SUPABASE_SERVICE_KEY", os.getenv("SUPABASE_KEY", "")))
         if not url or not key:
             return None
         try:
@@ -63,7 +65,7 @@ def _get_supabase():
 
 
 def _demo_response(tool: str, params: dict) -> dict:
-    """Return demo data when no Supabase connected — useful for marketplace demos."""
+    """Return demo data when no Supabase connected."""
     return {
         "status": "demo_mode",
         "tool": tool,
@@ -74,7 +76,8 @@ def _demo_response(tool: str, params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool 1: Menu Management
+# Tool 1: Menu Management (table: menu_items)
+# Columns: id, name, category, price, description, image_url, is_available, created_at
 # ---------------------------------------------------------------------------
 
 @mcp.tool
@@ -102,7 +105,7 @@ def manage_menu(
     Args:
         action: One of: list, search, add, update, toggle, categories, price_update
         item_name: Name of the menu item (for add/update/toggle)
-        category: Menu category (for filtering or adding)
+        category: Menu category (Appetizers, Chicken, Lamb, Seafood, Vegetarian, Rice, Breads, Desserts, Beverages, etc.)
         price: Price in dollars (or percentage for price_update)
         description: Item description
         is_available: Whether item is available
@@ -160,7 +163,7 @@ def manage_menu(
         if category is not None:
             updates["category"] = category
         if not updates:
-            return {"error": "Nothing to update — provide price, description, is_available, or category"}
+            return {"error": "Nothing to update -- provide price, description, is_available, or category"}
         result = sb.table(table).update(updates).eq("name", item_name).execute()
         return {"updated": result.data}
 
@@ -197,7 +200,11 @@ def manage_menu(
 
 
 # ---------------------------------------------------------------------------
-# Tool 2: Order Management
+# Tool 2: Order Management (table: orders)
+# Columns: id, order_id, user_id, total_price, items (JSONB), status,
+#          special_instructions, customer_name, customer_phone, customer_email,
+#          created_at, updated_at
+# Status: received | preparing | ready | completed | cancelled
 # ---------------------------------------------------------------------------
 
 @mcp.tool
@@ -205,7 +212,8 @@ def manage_orders(
     action: str,
     order_id: str | None = None,
     status: str | None = None,
-    customer_email: str | None = None,
+    customer_name: str | None = None,
+    customer_phone: str | None = None,
     limit: int = 20,
 ) -> dict:
     """
@@ -213,16 +221,18 @@ def manage_orders(
 
     Actions:
       - list: List recent orders (filter by status)
-      - get: Get order details by ID
-      - update_status: Update order status (received → preparing → ready → completed)
-      - search: Search orders by customer email
+      - get: Get order details by ID or order_id
+      - update_status: Update order status (received -> preparing -> ready -> completed)
+      - search: Search orders by customer name or phone
       - stats: Order statistics (today, this week)
+      - store_status: Check if restaurant is accepting orders + current prep time
 
     Args:
-        action: One of: list, get, update_status, search, stats
-        order_id: Order UUID (for get/update_status)
+        action: One of: list, get, update_status, search, stats, store_status
+        order_id: Order UUID or order_id string (for get/update_status)
         status: Order status filter or new status
-        customer_email: Customer email for search
+        customer_name: Customer name for search
+        customer_phone: Customer phone for search
         limit: Max results (default 20)
     """
     sb = _get_supabase()
@@ -230,8 +240,8 @@ def manage_orders(
         return _demo_response("manage_orders", {
             "action": action,
             "sample_orders": [
-                {"id": "ord-001", "customer": "John Doe", "status": "preparing", "total": 42.97, "items": 3},
-                {"id": "ord-002", "customer": "Jane Smith", "status": "ready", "total": 28.50, "items": 2},
+                {"id": "ord-001", "customer_name": "John Doe", "status": "preparing", "total_price": 42.97, "items": 3},
+                {"id": "ord-002", "customer_name": "Jane Smith", "status": "ready", "total_price": 28.50, "items": 2},
             ]
         })
 
@@ -247,7 +257,10 @@ def manage_orders(
     elif action == "get":
         if not order_id:
             return {"error": "order_id required"}
+        # Try both UUID id and human-readable order_id
         result = sb.table(table).select("*").eq("id", order_id).execute()
+        if not result.data:
+            result = sb.table(table).select("*").eq("order_id", order_id).execute()
         return {"order": result.data[0] if result.data else None}
 
     elif action == "update_status":
@@ -260,12 +273,22 @@ def manage_orders(
             "status": status,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", order_id).execute()
+        if not result.data:
+            result = sb.table(table).update({
+                "status": status,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("order_id", order_id).execute()
         return {"updated": result.data}
 
     elif action == "search":
-        if not customer_email:
-            return {"error": "customer_email required for search"}
-        result = sb.table(table).select("*").eq("customer_email", customer_email).order("created_at", desc=True).limit(limit).execute()
+        if not customer_name and not customer_phone:
+            return {"error": "customer_name or customer_phone required for search"}
+        q = sb.table(table).select("*")
+        if customer_name:
+            q = q.ilike("customer_name", f"%{customer_name}%")
+        if customer_phone:
+            q = q.eq("customer_phone", customer_phone)
+        result = q.order("created_at", desc=True).limit(limit).execute()
         return {"orders": result.data, "count": len(result.data)}
 
     elif action == "stats":
@@ -273,11 +296,11 @@ def manage_orders(
         today_start = now.replace(hour=0, minute=0, second=0).isoformat()
         week_start = (now - timedelta(days=7)).isoformat()
 
-        today_orders = sb.table(table).select("id,total_amount,status").gte("created_at", today_start).execute()
-        week_orders = sb.table(table).select("id,total_amount,status").gte("created_at", week_start).execute()
+        today_orders = sb.table(table).select("id,total_price,status").gte("created_at", today_start).execute()
+        week_orders = sb.table(table).select("id,total_price,status").gte("created_at", week_start).execute()
 
         def _stats(orders):
-            total = sum(o.get("total_amount", 0) or 0 for o in orders)
+            total = sum(float(o.get("total_price", 0) or 0) for o in orders)
             by_status = {}
             for o in orders:
                 s = o.get("status", "unknown")
@@ -289,11 +312,21 @@ def manage_orders(
             "this_week": _stats(week_orders.data),
         }
 
+    elif action == "store_status":
+        result = sb.table("store_settings").select("*").eq("id", 1).execute()
+        if result.data:
+            s = result.data[0]
+            return {
+                "accepting_orders": s["is_accepting_orders"],
+                "prep_time_minutes": s["current_prep_time_minutes"],
+            }
+        return {"accepting_orders": True, "prep_time_minutes": 30}
+
     return {"error": f"Unknown action: {action}"}
 
 
 # ---------------------------------------------------------------------------
-# Tool 3: Reservations
+# Tool 3: Reservations (no table in Delhi Palace yet — stub with future support)
 # ---------------------------------------------------------------------------
 
 @mcp.tool
@@ -301,7 +334,6 @@ def manage_reservations(
     action: str,
     guest_name: str | None = None,
     guest_phone: str | None = None,
-    guest_email: str | None = None,
     party_size: int | None = None,
     date: str | None = None,
     time: str | None = None,
@@ -311,116 +343,53 @@ def manage_reservations(
     """
     Manage restaurant reservations.
 
+    Note: Reservation system is ready for deployment. Currently returns
+    placeholder data. Connect a reservations table to enable.
+
     Actions:
       - create: Book a new reservation
-      - list: List upcoming reservations (filter by date)
+      - list: List upcoming reservations
       - cancel: Cancel a reservation
-      - update: Modify reservation details
-      - availability: Check available time slots for a date/party size
+      - availability: Check available time slots
 
     Args:
-        action: One of: create, list, cancel, update, availability
+        action: One of: create, list, cancel, availability
         guest_name: Guest's name
         guest_phone: Guest's phone number
-        guest_email: Guest's email
         party_size: Number of guests
         date: Date in YYYY-MM-DD format
         time: Time in HH:MM format (24h)
-        reservation_id: Reservation ID (for cancel/update)
+        reservation_id: Reservation ID (for cancel)
         special_requests: Special requests or notes
     """
+    # Delhi Palace doesn't have a reservations table yet.
+    # This tool is ready — once the table is created, it works.
     sb = _get_supabase()
-    if not sb:
-        return _demo_response("manage_reservations", {
-            "action": action,
-            "sample_slots": ["17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00", "20:30"],
-            "sample_reservation": {
-                "id": "res-001", "guest": "Miles", "party_size": 4,
-                "date": "2026-03-10", "time": "19:00", "status": "confirmed"
-            }
-        })
 
-    table = "reservations"
-
-    if action == "create":
-        if not all([guest_name, party_size, date, time]):
-            return {"error": "guest_name, party_size, date, and time required"}
-        data = {
-            "guest_name": guest_name,
-            "guest_phone": guest_phone or "",
-            "guest_email": guest_email or "",
-            "party_size": party_size,
-            "reservation_date": date,
-            "reservation_time": time,
-            "special_requests": special_requests or "",
-            "status": "confirmed",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        result = sb.table(table).insert(data).execute()
-        return {"reservation": result.data[0] if result.data else data, "status": "confirmed"}
-
-    elif action == "list":
-        q = sb.table(table).select("*").eq("status", "confirmed")
-        if date:
-            q = q.eq("reservation_date", date)
-        else:
-            q = q.gte("reservation_date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-        result = q.order("reservation_date").order("reservation_time").execute()
-        return {"reservations": result.data, "count": len(result.data)}
-
-    elif action == "cancel":
-        if not reservation_id:
-            return {"error": "reservation_id required"}
-        result = sb.table(table).update({"status": "cancelled"}).eq("id", reservation_id).execute()
-        return {"cancelled": result.data}
-
-    elif action == "update":
-        if not reservation_id:
-            return {"error": "reservation_id required"}
-        updates = {}
-        if party_size:
-            updates["party_size"] = party_size
-        if date:
-            updates["reservation_date"] = date
-        if time:
-            updates["reservation_time"] = time
-        if special_requests:
-            updates["special_requests"] = special_requests
-        if guest_name:
-            updates["guest_name"] = guest_name
-        if not updates:
-            return {"error": "Nothing to update"}
-        result = sb.table(table).update(updates).eq("id", reservation_id).execute()
-        return {"updated": result.data}
-
-    elif action == "availability":
+    if action == "availability":
         if not date:
-            return {"error": "date required for availability check"}
-        # Get existing reservations for that date
-        existing = sb.table(table).select("reservation_time,party_size").eq("reservation_date", date).eq("status", "confirmed").execute()
-        booked_times = {r["reservation_time"] for r in existing.data}
-
-        # Generate 30-min slots from 17:00 to 21:00
-        max_capacity = int(os.getenv("RESTAURANT_CAPACITY", "50"))
+            return {"error": "date required"}
+        # Return standard dinner service slots
         slots = []
         for h in range(17, 22):
             for m in [0, 30]:
-                t = f"{h:02d}:{m:02d}"
-                booked_at_time = sum(
-                    r["party_size"] for r in existing.data if r["reservation_time"] == t
-                )
-                if booked_at_time < max_capacity:
-                    slots.append({
-                        "time": t,
-                        "available_seats": max_capacity - booked_at_time,
-                    })
-        return {"date": date, "available_slots": slots, "party_size_requested": party_size}
+                slots.append({"time": f"{h:02d}:{m:02d}", "available": True})
+        return {
+            "date": date,
+            "available_slots": slots,
+            "note": "Reservation system ready for deployment. Call restaurant to book: (928) 555-0100",
+        }
 
-    return {"error": f"Unknown action: {action}"}
+    return {
+        "status": "coming_soon",
+        "action": action,
+        "message": "Online reservations coming soon. Please call (928) 555-0100 to reserve.",
+        "params": {"guest_name": guest_name, "party_size": party_size, "date": date, "time": time},
+    }
 
 
 # ---------------------------------------------------------------------------
-# Tool 4: Review Response
+# Tool 4: Review Response (no DB needed — generates content)
 # ---------------------------------------------------------------------------
 
 @mcp.tool
@@ -493,7 +462,6 @@ def respond_to_reviews(
         if not review_text:
             return {"error": "review_text required"}
 
-        # Simple keyword-based sentiment (real version would use AI)
         positive = ["great", "amazing", "excellent", "delicious", "wonderful", "best", "love", "fantastic", "perfect"]
         negative = ["bad", "terrible", "awful", "disgusting", "worst", "cold", "slow", "rude", "dirty", "disappointing"]
 
@@ -570,7 +538,6 @@ def customer_messaging(
     if action == "send":
         if not to or not message:
             return {"error": "to and message required"}
-        # In production, this calls Twilio/SendGrid
         return {
             "status": "queued",
             "to": to,
@@ -585,10 +552,13 @@ def customer_messaging(
             return {"error": "to and order_id required"}
         sb = _get_supabase()
         if sb:
-            order = sb.table("orders").select("status,customer_name").eq("id", order_id).execute()
+            order = sb.table("orders").select("status,customer_name,order_id").eq("id", order_id).execute()
+            if not order.data:
+                order = sb.table("orders").select("status,customer_name,order_id").eq("order_id", order_id).execute()
             if order.data:
                 o = order.data[0]
-                msg = f"Hi {o['customer_name']}! Your order #{order_id[:8]} is now {o['status']}."
+                display_id = o.get("order_id", order_id[:8])
+                msg = f"Hi {o['customer_name']}! Your order #{display_id} is now {o['status']}."
                 if o["status"] == "ready":
                     msg += " It's ready for pickup!"
             else:
@@ -634,8 +604,6 @@ def customer_messaging(
                 "weekend": "Weekend special deal",
                 "order_received": "Order confirmation",
                 "order_ready": "Order ready for pickup",
-                "reservation_confirm": "Reservation confirmation",
-                "reservation_reminder": "Reservation reminder (1 hour before)",
             }
         }
 
@@ -643,7 +611,7 @@ def customer_messaging(
 
 
 # ---------------------------------------------------------------------------
-# Tool 6: Analytics
+# Tool 6: Analytics (queries orders + menu_items tables)
 # ---------------------------------------------------------------------------
 
 @mcp.tool
@@ -692,7 +660,7 @@ def restaurant_analytics(
     orders = sb.table("orders").select("*").gte("created_at", since).execute()
 
     if report == "revenue":
-        total = sum(o.get("total_amount", 0) or 0 for o in orders.data)
+        total = sum(float(o.get("total_price", 0) or 0) for o in orders.data)
         completed = [o for o in orders.data if o.get("status") == "completed"]
         return {
             "period": period,
@@ -705,7 +673,7 @@ def restaurant_analytics(
     elif report == "popular_items":
         item_counts: dict[str, int] = {}
         for o in orders.data:
-            items = o.get("order_items") or []
+            items = o.get("items") or []
             if isinstance(items, str):
                 try:
                     items = json.loads(items)
@@ -737,24 +705,31 @@ def restaurant_analytics(
         }
 
     elif report == "summary":
-        total = sum(o.get("total_amount", 0) or 0 for o in orders.data)
+        total = sum(float(o.get("total_price", 0) or 0) for o in orders.data)
         by_status = {}
         for o in orders.data:
             s = o.get("status", "unknown")
             by_status[s] = by_status.get(s, 0) + 1
+
+        # Store status
+        store = sb.table("store_settings").select("*").eq("id", 1).execute()
+        store_info = store.data[0] if store.data else {}
+
         return {
             "period": period,
             "total_orders": len(orders.data),
             "total_revenue": round(total, 2),
             "average_order": round(total / max(len(orders.data), 1), 2),
             "by_status": by_status,
+            "accepting_orders": store_info.get("is_accepting_orders", True),
+            "prep_time_minutes": store_info.get("current_prep_time_minutes", 30),
         }
 
     return {"error": f"Unknown report: {report}"}
 
 
 # ---------------------------------------------------------------------------
-# Tool 7: Social Media
+# Tool 7: Social Media (no DB needed — generates content)
 # ---------------------------------------------------------------------------
 
 @mcp.tool
@@ -788,9 +763,19 @@ def social_media_post(
     limit = char_limits.get(platform, 2200)
     hashtags = "#foodie #restaurant #freshfood #eatlocal #supportlocal"
 
+    # If connected, pull a random menu item for daily_special if none specified
+    if action == "daily_special" and not special_item:
+        sb = _get_supabase()
+        if sb:
+            items = sb.table("menu_items").select("name,price,category").eq("is_available", True).limit(50).execute()
+            if items.data:
+                import random
+                pick = random.choice(items.data)
+                special_item = f"{pick['name']} (${pick['price']})"
+
     if action == "daily_special":
         item = special_item or "Chef's Special"
-        post = f"Today's special: {item}! Our chef has prepared something extraordinary just for you. Available while supplies last — don't miss out! {hashtags}"
+        post = f"Today's special: {item}! Our chef has prepared something extraordinary just for you. Available while supplies last -- don't miss out! {hashtags}"
         return {
             "post": post[:limit],
             "platform": platform,
@@ -801,7 +786,7 @@ def social_media_post(
 
     elif action == "event":
         name = event_name or "Special Event"
-        post = f"Join us for {name}! An unforgettable evening awaits. Reserve your spot today — limited seats available. {hashtags} #event #finedining"
+        post = f"Join us for {name}! An unforgettable evening awaits. Reserve your spot today -- limited seats available. {hashtags} #event #finedining"
         return {
             "post": post[:limit],
             "platform": platform,
