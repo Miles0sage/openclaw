@@ -4,7 +4,7 @@ If you believe you've found a security issue in OpenClaw, please report it priva
 
 ## Reporting
 
-- Email: `steipete@gmail.com`
+- Email: `hello@overseerclaw.uk`
 - What to include: reproduction steps, impact assessment, and (if possible) a minimal PoC.
 
 ## Bug Bounties

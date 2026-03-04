@@ -1,13 +1,13 @@
 ---
 name: Bug report
-about: Report a problem or unexpected behavior in Clawdbot.
+about: Report a problem or unexpected behavior in OpenClaw.
 title: "[Bug]: "
 labels: bug
 ---
 
 ## Summary
 
-What went wrong?
+What went wrong? Provide a clear, concise description of the bug.
 
 ## Steps to reproduce
 
@@ -25,10 +25,32 @@ What actually happened?
 
 ## Environment
 
-- Clawdbot version:
-- OS:
-- Install method (pnpm/npx/docker/etc):
+- **OpenClaw version**: (e.g., v4.1)
+- **OS**: (e.g., Debian 13, Ubuntu 24.04, macOS 15)
+- **Python version**: (e.g., 3.13.5)
+- **Node.js version**: (e.g., v22.12.0)
+- **Install method**: (git clone / pip / docker)
+- **Deployment**: (local / systemd / Docker)
 
-## Logs or screenshots
+## Relevant log output
 
-Paste relevant logs or add screenshots (redact secrets).
+```
+Paste relevant logs here. Redact any API keys or secrets!
+Use: journalctl -u openclaw-gateway -n 100
+```
+
+## Configuration
+
+If relevant, share your config (with secrets redacted):
+
+- Which AI providers are configured?
+- Which channels are enabled?
+- Any custom agent routing?
+
+## Screenshots
+
+If applicable, add screenshots to help explain your problem.
+
+## Additional context
+
+Any other context about the problem (related issues, recent changes, etc).

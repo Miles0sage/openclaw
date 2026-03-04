@@ -1,0 +1,1537 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenClaw Job Viewer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg-void: #05060a;
+        --bg-primary: #08090c;
+        --bg-panel: #0d0f14;
+        --bg-card: #111318;
+        --bg-elevated: #161820;
+        --bg-hover: #1c1f28;
+        --border-dim: #1a1d26;
+        --border-mid: #252834;
+        --border-bright: #333848;
+        --amber: #e8a832;
+        --amber-bright: #f0be50;
+        --amber-dim: #b8842a;
+        --amber-glow: rgba(232, 168, 50, 0.12);
+        --amber-ghost: rgba(232, 168, 50, 0.05);
+        --text-primary: #e4e4e8;
+        --text-secondary: #8e919e;
+        --text-dim: #5c5f6c;
+        --green: #34d399;
+        --green-dim: rgba(52, 211, 153, 0.15);
+        --red: #f87171;
+        --red-dim: rgba(248, 113, 113, 0.15);
+        --blue: #60a5fa;
+        --blue-dim: rgba(96, 165, 250, 0.15);
+        --yellow: #fbbf24;
+        --yellow-dim: rgba(251, 191, 36, 0.15);
+        --purple: #a78bfa;
+        --purple-dim: rgba(167, 139, 250, 0.15);
+        --cyan: #22d3ee;
+        --font-display: "Outfit", sans-serif;
+        --font-body: "IBM Plex Sans", sans-serif;
+        --font-mono: "JetBrains Mono", monospace;
+        --radius-sm: 4px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        background: var(--bg-void);
+        color: var(--text-primary);
+        font-family: var(--font-body);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      body {
+        display: flex;
+        overflow: hidden;
+        position: relative;
+      }
+
+      /* Scanline overlay */
+      body::before {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        background: repeating-linear-gradient(
+          0deg,
+          rgba(0, 0, 0, 0.15),
+          rgba(0, 0, 0, 0.15) 1px,
+          transparent 1px,
+          transparent 2px
+        );
+        z-index: 9999;
+      }
+
+      /* Sidebar */
+      .sidebar {
+        width: 280px;
+        background: var(--bg-primary);
+        border-right: 1px solid var(--border-dim);
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      .sidebar-header {
+        padding: 16px;
+        border-bottom: 1px solid var(--border-dim);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .sidebar-title {
+        font-family: var(--font-display);
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--amber);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .refresh-btn {
+        background: var(--bg-card);
+        border: 1px solid var(--border-mid);
+        color: var(--amber);
+        width: 32px;
+        height: 32px;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+      }
+
+      .refresh-btn:hover {
+        background: var(--amber-glow);
+        border-color: var(--amber-dim);
+      }
+
+      .refresh-btn.spinning {
+        animation: spin 0.6s linear infinite;
+      }
+
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .job-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .job-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-dim);
+        border-radius: var(--radius-md);
+        padding: 12px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .job-card:hover {
+        background: var(--bg-hover);
+        border-color: var(--border-bright);
+      }
+
+      .job-card.active {
+        background: var(--amber-glow);
+        border-color: var(--amber-dim);
+      }
+
+      .job-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      .job-id {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--text-dim);
+        flex-shrink: 0;
+      }
+
+      .job-project {
+        font-family: var(--font-display);
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .status-badge {
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        flex-shrink: 0;
+      }
+
+      .status-pending {
+        background: var(--yellow-dim);
+        color: var(--yellow);
+      }
+
+      .status-analyzing {
+        background: var(--blue-dim);
+        color: var(--blue);
+      }
+
+      .status-running {
+        background: var(--amber-glow);
+        color: var(--amber-bright);
+        animation: pulse-glow 2s ease-in-out infinite;
+      }
+
+      .status-completed {
+        background: var(--green-dim);
+        color: var(--green);
+      }
+
+      .status-failed {
+        background: var(--red-dim);
+        color: var(--red);
+      }
+
+      @keyframes pulse-glow {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.7;
+        }
+      }
+
+      .job-card-content {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .job-summary {
+        font-size: 11px;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .job-meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 10px;
+        color: var(--text-dim);
+      }
+
+      .job-cost {
+        color: var(--amber);
+        font-weight: 600;
+      }
+
+      .job-phase {
+        display: inline-block;
+        padding: 1px 6px;
+        background: var(--bg-elevated);
+        border-radius: var(--radius-sm);
+        font-family: var(--font-mono);
+        font-size: 9px;
+        color: var(--amber);
+      }
+
+      /* Empty state */
+      .empty-state {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: var(--text-dim);
+        text-align: center;
+        padding: 20px;
+        font-style: italic;
+      }
+
+      /* Main content */
+      .main-content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-primary);
+        overflow: hidden;
+      }
+
+      /* Toolbar */
+      .toolbar {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border-dim);
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        background: var(--bg-panel);
+        flex-wrap: wrap;
+      }
+
+      .connection-status {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--text-dim);
+      }
+
+      .status-dot.connected {
+        background: var(--green);
+        animation: pulse 2s ease-in-out infinite;
+      }
+
+      .status-dot.fallback {
+        background: var(--amber);
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      .toolbar-btn {
+        padding: 6px 12px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-mid);
+        color: var(--text-secondary);
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+      }
+
+      .toolbar-btn:hover {
+        background: var(--bg-hover);
+        border-color: var(--border-bright);
+        color: var(--amber);
+      }
+
+      .toolbar-btn.active {
+        background: var(--amber-glow);
+        border-color: var(--amber-dim);
+        color: var(--amber-bright);
+      }
+
+      /* Phase timeline */
+      .phase-timeline {
+        padding: 16px;
+        background: var(--bg-panel);
+        border-bottom: 1px solid var(--border-dim);
+      }
+
+      .timeline-bar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .timeline-phase {
+        flex: 1;
+        height: 24px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-mid);
+        border-radius: var(--radius-sm);
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-mono);
+        font-size: 9px;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        transition: all 0.3s ease;
+      }
+
+      .timeline-phase.active {
+        background: var(--amber-glow);
+        border-color: var(--amber-dim);
+        color: var(--amber-bright);
+        animation: pulse-phase 1.5s ease-in-out infinite;
+      }
+
+      .timeline-phase.completed {
+        background: var(--green-dim);
+        border-color: var(--green);
+        color: var(--green);
+      }
+
+      .timeline-phase.future {
+        background: var(--bg-elevated);
+        border-color: var(--border-dim);
+        color: var(--text-dim);
+      }
+
+      @keyframes pulse-phase {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 var(--amber-glow);
+        }
+        50% {
+          box-shadow: 0 0 8px 2px var(--amber-glow);
+        }
+      }
+
+      .timeline-progress {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        color: var(--text-secondary);
+      }
+
+      /* Event stream */
+      .event-stream-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-primary);
+        padding: 16px;
+        overflow: hidden;
+      }
+
+      .event-stream-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-secondary);
+      }
+
+      .event-stream {
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-right: 4px;
+      }
+
+      .event-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-dim);
+        border-left: 3px solid var(--border-mid);
+        border-radius: var(--radius-md);
+        padding: 12px;
+        animation: slide-in 0.3s ease;
+      }
+
+      @keyframes slide-in {
+        from {
+          opacity: 0;
+          transform: translateX(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateX(0);
+        }
+      }
+
+      .event-card.phase {
+        border-left-color: var(--amber);
+        background: linear-gradient(90deg, var(--amber-ghost) 0%, transparent 100%);
+      }
+
+      .event-card.error {
+        border-left-color: var(--red);
+        background: linear-gradient(90deg, rgba(248, 113, 113, 0.05) 0%, transparent 100%);
+      }
+
+      .event-card.tool_call {
+        border-left-color: var(--blue);
+      }
+
+      .event-card.complete {
+        border-left-color: var(--green);
+      }
+
+      .event-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+
+      .event-time {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        color: var(--text-dim);
+        flex-shrink: 0;
+      }
+
+      .event-type-badge {
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        font-size: 9px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        flex-shrink: 0;
+      }
+
+      .event-type-phase {
+        background: var(--amber-glow);
+        color: var(--amber-bright);
+      }
+
+      .event-type-tool_call {
+        background: var(--blue-dim);
+        color: var(--blue);
+      }
+
+      .event-type-error {
+        background: var(--red-dim);
+        color: var(--red);
+      }
+
+      .event-type-complete {
+        background: var(--green-dim);
+        color: var(--green);
+      }
+
+      .event-type-heartbeat {
+        background: transparent;
+        color: var(--text-dim);
+        font-size: 8px;
+      }
+
+      .event-content {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .event-title {
+        font-weight: 600;
+        color: var(--text-primary);
+        font-family: var(--font-display);
+      }
+
+      .event-detail {
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+
+      .event-tool-name {
+        color: var(--amber);
+        font-family: var(--font-mono);
+        font-weight: 600;
+      }
+
+      .event-cost {
+        color: var(--green);
+        font-family: var(--font-mono);
+        font-weight: 600;
+      }
+
+      .event-duration {
+        color: var(--blue);
+        font-family: var(--font-mono);
+      }
+
+      .event-input {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-dim);
+        border-radius: var(--radius-sm);
+        padding: 8px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-top: 4px;
+      }
+
+      /* Cost counter */
+      .cost-section {
+        display: flex;
+        gap: 12px;
+        padding: 12px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-dim);
+        border-radius: var(--radius-md);
+        font-size: 12px;
+      }
+
+      .cost-counter {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .cost-label {
+        color: var(--text-dim);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .cost-value {
+        font-family: var(--font-mono);
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--amber-bright);
+      }
+
+      .cost-value.updating {
+        animation: cost-pulse 0.6s ease;
+      }
+
+      @keyframes cost-pulse {
+        0%,
+        100% {
+          color: var(--amber-bright);
+        }
+        50% {
+          color: var(--amber);
+        }
+      }
+
+      .cost-breakdown {
+        display: flex;
+        gap: 12px;
+        flex: 1;
+      }
+
+      .cost-phase-item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .cost-phase-label {
+        font-size: 9px;
+        color: var(--text-dim);
+        text-transform: uppercase;
+      }
+
+      .cost-phase-value {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--amber);
+      }
+
+      /* Terminal */
+      .terminal {
+        background: var(--bg-void);
+        border: 1px solid var(--border-dim);
+        border-radius: var(--radius-md);
+        padding: 12px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--text-secondary);
+        overflow-y: auto;
+        max-height: 200px;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        line-height: 1.4;
+      }
+
+      .terminal-line {
+        display: flex;
+        gap: 8px;
+      }
+
+      .terminal-time {
+        color: var(--text-dim);
+        flex-shrink: 0;
+        min-width: 50px;
+      }
+
+      .terminal-content {
+        flex: 1;
+        color: var(--text-secondary);
+      }
+
+      .terminal-content.error {
+        color: var(--red);
+      }
+
+      .terminal-content.success {
+        color: var(--green);
+      }
+
+      .terminal-content.warn {
+        color: var(--yellow);
+      }
+
+      /* Scrollbar styling */
+      .job-list::-webkit-scrollbar,
+      .event-stream::-webkit-scrollbar,
+      .terminal::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      .job-list::-webkit-scrollbar-track,
+      .event-stream::-webkit-scrollbar-track,
+      .terminal::-webkit-scrollbar-track {
+        background: var(--bg-card);
+        border-radius: 3px;
+      }
+
+      .job-list::-webkit-scrollbar-thumb,
+      .event-stream::-webkit-scrollbar-thumb,
+      .terminal::-webkit-scrollbar-thumb {
+        background: var(--border-mid);
+        border-radius: 3px;
+      }
+
+      .job-list::-webkit-scrollbar-thumb:hover,
+      .event-stream::-webkit-scrollbar-thumb:hover,
+      .terminal::-webkit-scrollbar-thumb:hover {
+        background: var(--border-bright);
+      }
+
+      /* Responsive */
+      @media (max-width: 768px) {
+        .sidebar {
+          width: 100%;
+          max-height: 30vh;
+          border-right: none;
+          border-bottom: 1px solid var(--border-dim);
+        }
+
+        body {
+          flex-direction: column;
+        }
+
+        .main-content {
+          height: auto;
+        }
+
+        .event-stream-container {
+          max-height: calc(70vh - 100px);
+        }
+      }
+
+      /* Loading spinner */
+      .spinner {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 2px solid var(--border-mid);
+        border-top-color: var(--amber);
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-title">Job Queue</div>
+        <button class="refresh-btn" id="refreshBtn" title="Refresh job list">↻</button>
+      </div>
+      <div class="job-list" id="jobList">
+        <div class="empty-state">No jobs yet</div>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <div class="connection-status">
+          <div class="status-dot" id="statusDot"></div>
+          <span id="statusText">Connecting...</span>
+        </div>
+        <div style="flex: 1"></div>
+        <button class="toolbar-btn" id="filterAllBtn" data-filter="all">All Events</button>
+        <button class="toolbar-btn" id="filterToolBtn" data-filter="tool_call">Tool Calls</button>
+        <button class="toolbar-btn" id="filterPhaseBtn" data-filter="phase">Phases</button>
+        <button class="toolbar-btn" id="filterErrorBtn" data-filter="error">Errors</button>
+        <button class="toolbar-btn" id="autoScrollBtn">Auto-Scroll: ON</button>
+        <button class="toolbar-btn" id="exportBtn">Export</button>
+      </div>
+
+      <!-- Phase Timeline -->
+      <div class="phase-timeline" id="phaseTimeline" style="display: none">
+        <div class="timeline-bar">
+          <div class="timeline-phase future" data-phase="research">RESEARCH</div>
+          <div class="timeline-phase future" data-phase="plan">PLAN</div>
+          <div class="timeline-phase future" data-phase="execute">EXECUTE</div>
+          <div class="timeline-phase future" data-phase="verify">VERIFY</div>
+          <div class="timeline-phase future" data-phase="deliver">DELIVER</div>
+        </div>
+        <div class="timeline-progress">
+          <span id="phaseProgress">0%</span>
+          <span id="currentPhaseText">Idle</span>
+          <span id="phaseEta">-</span>
+        </div>
+      </div>
+
+      <!-- Event Stream -->
+      <div class="event-stream-container">
+        <div class="event-stream-header">
+          <span>Live Event Stream</span>
+          <span id="eventCount" style="color: var(--amber)">0 events</span>
+        </div>
+        <div class="event-stream" id="eventStream">
+          <div class="empty-state">Waiting for events...</div>
+        </div>
+      </div>
+
+      <!-- Cost Counter -->
+      <div class="cost-section">
+        <div class="cost-counter">
+          <div class="cost-label">Total Cost</div>
+          <div class="cost-value" id="totalCost">$0.0000</div>
+        </div>
+        <div class="cost-breakdown" id="costBreakdown">
+          <div class="cost-phase-item">
+            <div class="cost-phase-label">Research</div>
+            <div class="cost-phase-value" id="costResearch">$0.0000</div>
+          </div>
+          <div class="cost-phase-item">
+            <div class="cost-phase-label">Plan</div>
+            <div class="cost-phase-value" id="costPlan">$0.0000</div>
+          </div>
+          <div class="cost-phase-item">
+            <div class="cost-phase-label">Execute</div>
+            <div class="cost-phase-value" id="costExecute">$0.0000</div>
+          </div>
+          <div class="cost-phase-item">
+            <div class="cost-phase-label">Verify</div>
+            <div class="cost-phase-value" id="costVerify">$0.0000</div>
+          </div>
+          <div class="cost-phase-item">
+            <div class="cost-phase-label">Deliver</div>
+            <div class="cost-phase-value" id="costDeliver">$0.0000</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Terminal Output -->
+      <div class="terminal" id="terminal"></div>
+    </div>
+
+    <script>
+      // ============================================================================
+      // State Management
+      // ============================================================================
+
+      const state = {
+        jobs: [],
+        selectedJobId: null,
+        currentJob: null,
+        events: [],
+        filteredEvents: [],
+        filter: "all",
+        autoScroll: true,
+        ws: null,
+        reconnectAttempts: 0,
+        maxReconnectAttempts: 5,
+        reconnectDelay: 5000,
+        isSSEFallback: false,
+        eventSource: null,
+        jobRefreshInterval: null,
+      };
+
+      const phases = ["research", "plan", "execute", "verify", "deliver"];
+      const phaseRanges = {
+        research: [0, 20],
+        plan: [20, 40],
+        execute: [40, 70],
+        verify: [70, 90],
+        deliver: [90, 100],
+      };
+
+      // ============================================================================
+      // DOM Elements
+      // ============================================================================
+
+      const elements = {
+        jobList: document.getElementById("jobList"),
+        eventStream: document.getElementById("eventStream"),
+        statusDot: document.getElementById("statusDot"),
+        statusText: document.getElementById("statusText"),
+        refreshBtn: document.getElementById("refreshBtn"),
+        autoScrollBtn: document.getElementById("autoScrollBtn"),
+        exportBtn: document.getElementById("exportBtn"),
+        totalCost: document.getElementById("totalCost"),
+        costBreakdown: document.getElementById("costBreakdown"),
+        terminal: document.getElementById("terminal"),
+        phaseTimeline: document.getElementById("phaseTimeline"),
+        eventCount: document.getElementById("eventCount"),
+        filterBtns: {
+          all: document.getElementById("filterAllBtn"),
+          tool_call: document.getElementById("filterToolBtn"),
+          phase: document.getElementById("filterPhaseBtn"),
+          error: document.getElementById("filterErrorBtn"),
+        },
+      };
+
+      // ============================================================================
+      // API Functions
+      // ============================================================================
+
+      async function fetchJobs() {
+        try {
+          const response = await fetch("/api/jobs");
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return await response.json();
+        } catch (error) {
+          console.error("Failed to fetch jobs:", error);
+          return [];
+        }
+      }
+
+      async function fetchActiveJobs() {
+        try {
+          const response = await fetch("/api/monitoring/active");
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return await response.json();
+        } catch (error) {
+          console.error("Failed to fetch active jobs:", error);
+          return [];
+        }
+      }
+
+      async function fetchJobState(jobId) {
+        try {
+          const response = await fetch(`/api/jobs/${jobId}/live`);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return await response.json();
+        } catch (error) {
+          console.error(`Failed to fetch job state for ${jobId}:`, error);
+          return null;
+        }
+      }
+
+      // ============================================================================
+      // WebSocket Management
+      // ============================================================================
+
+      function connectWebSocket(jobId) {
+        if (state.ws) {
+          state.ws.close();
+        }
+
+        const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+        const url = `${protocol}//${location.host}/ws/jobs/${jobId}`;
+
+        try {
+          state.ws = new WebSocket(url);
+
+          state.ws.onopen = () => {
+            console.log(`WebSocket connected for job ${jobId}`);
+            state.reconnectAttempts = 0;
+            updateConnectionStatus("connected");
+            logTerminal(`Connected to job ${jobId}`, "success");
+          };
+
+          state.ws.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              handleWebSocketMessage(data);
+            } catch (error) {
+              console.error("Failed to parse WebSocket message:", error);
+            }
+          };
+
+          state.ws.onerror = (error) => {
+            console.error("WebSocket error:", error);
+            logTerminal("WebSocket error occurred", "error");
+          };
+
+          state.ws.onclose = () => {
+            console.log("WebSocket disconnected");
+            attemptReconnect(jobId);
+          };
+        } catch (error) {
+          console.error("Failed to create WebSocket:", error);
+          attemptReconnect(jobId);
+        }
+      }
+
+      function attemptReconnect(jobId) {
+        if (state.reconnectAttempts >= state.maxReconnectAttempts) {
+          console.log("Max reconnect attempts reached, using SSE fallback");
+          setupSSEFallback(jobId);
+          updateConnectionStatus("fallback");
+          return;
+        }
+
+        state.reconnectAttempts++;
+        const delay = state.reconnectDelay * state.reconnectAttempts;
+        console.log(`Reconnecting in ${delay}ms (attempt ${state.reconnectAttempts})`);
+        updateConnectionStatus("reconnecting");
+
+        setTimeout(() => connectWebSocket(jobId), delay);
+      }
+
+      function setupSSEFallback(jobId) {
+        if (state.eventSource) {
+          state.eventSource.close();
+        }
+
+        try {
+          state.eventSource = new EventSource("/api/events/stream");
+          state.isSSEFallback = true;
+
+          state.eventSource.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              if (data.job_id === jobId) {
+                handleEventStreamMessage(data);
+              }
+            } catch (error) {
+              console.error("Failed to parse SSE message:", error);
+            }
+          };
+
+          state.eventSource.onerror = () => {
+            console.error("SSE error");
+            state.eventSource.close();
+            updateConnectionStatus("disconnected");
+          };
+
+          logTerminal("Using SSE fallback for real-time updates", "warn");
+        } catch (error) {
+          console.error("Failed to setup SSE fallback:", error);
+        }
+      }
+
+      // ============================================================================
+      // Message Handlers
+      // ============================================================================
+
+      function handleWebSocketMessage(data) {
+        if (data.type === "snapshot") {
+          state.currentJob = data.state;
+          updateJobDisplay();
+        } else if (data.type === "heartbeat") {
+          // Update last seen
+        } else if (data.type === "event") {
+          addEvent(data.event);
+        } else if (data.type === "phase_update") {
+          updatePhaseTimeline(data);
+        } else if (data.type === "cost_update") {
+          updateCosts(data);
+        }
+      }
+
+      function handleEventStreamMessage(data) {
+        if (data.type === "event") {
+          addEvent(data.event);
+        } else if (data.type === "phase_update") {
+          updatePhaseTimeline(data);
+        } else if (data.type === "cost_update") {
+          updateCosts(data);
+        }
+      }
+
+      // ============================================================================
+      // Event Management
+      // ============================================================================
+
+      function addEvent(event) {
+        event.timestamp = event.timestamp || new Date().toISOString();
+        state.events.push(event);
+
+        // Keep only last 1000 events
+        if (state.events.length > 1000) {
+          state.events.shift();
+        }
+
+        applyFilter();
+        renderEventStream();
+        updateEventCount();
+
+        // Add to terminal log
+        logTerminalEvent(event);
+      }
+
+      function applyFilter() {
+        if (state.filter === "all") {
+          state.filteredEvents = [...state.events];
+        } else {
+          state.filteredEvents = state.events.filter((e) => e.type === state.filter);
+        }
+      }
+
+      function renderEventStream() {
+        const container = elements.eventStream;
+
+        if (state.filteredEvents.length === 0) {
+          container.innerHTML = '<div class="empty-state">No events to display</div>';
+          return;
+        }
+
+        const html = state.filteredEvents.map((event) => createEventCard(event)).join("");
+        container.innerHTML = html;
+
+        if (state.autoScroll) {
+          container.scrollTop = container.scrollHeight;
+        }
+      }
+
+      function createEventCard(event) {
+        const time = formatTime(event.timestamp);
+        const typeClass = `event-type-${event.type}`;
+        const cardClass = `event-card ${event.type}`;
+
+        let content = "";
+
+        if (event.type === "tool_call") {
+          const cost = event.cost ? `$${event.cost.toFixed(6)}` : "N/A";
+          const duration = event.duration ? `${event.duration.toFixed(2)}s` : "-";
+          content = `
+                    <div class="event-title">Tool Call: <span class="event-tool-name">${event.tool_name || "Unknown"}</span></div>
+                    <div class="event-detail">
+                        Cost: <span class="event-cost">${cost}</span> | Duration: <span class="event-duration">${duration}</span>
+                    </div>
+                `;
+          if (event.input) {
+            content += `<div class="event-input">${truncateJson(event.input, 100)}</div>`;
+          }
+        } else if (event.type === "phase") {
+          content = `<div class="event-title">Phase: <strong>${event.phase}</strong></div>
+                          <div class="event-detail">${event.message || "Phase started"}</div>`;
+        } else if (event.type === "error") {
+          content = `<div class="event-title">Error</div>
+                          <div class="event-detail">${event.message || "An error occurred"}</div>`;
+          if (event.details) {
+            content += `<div class="event-input">${truncateJson(event.details, 150)}</div>`;
+          }
+        } else if (event.type === "complete") {
+          content = `<div class="event-title">Job Complete</div>
+                          <div class="event-detail">${event.message || "Job finished successfully"}</div>`;
+        } else {
+          content = `<div class="event-title">${event.type}</div>
+                          <div class="event-detail">${event.message || JSON.stringify(event).substring(0, 100)}</div>`;
+        }
+
+        return `
+                <div class="${cardClass}">
+                    <div class="event-header">
+                        <span class="event-time">${time}</span>
+                        <span class="event-type-badge ${typeClass}">${event.type}</span>
+                    </div>
+                    <div class="event-content">
+                        ${content}
+                    </div>
+                </div>
+            `;
+      }
+
+      function logTerminalEvent(event) {
+        const time = formatTime(event.timestamp);
+        let message = "";
+
+        if (event.type === "tool_call") {
+          message = `[${time}] Tool: ${event.tool_name} (cost: $${event.cost?.toFixed(6) || "0"})`;
+        } else if (event.type === "phase") {
+          message = `[${time}] Phase: ${event.phase}`;
+        } else if (event.type === "error") {
+          message = `[${time}] ERROR: ${event.message}`;
+          logTerminal(message, "error");
+          return;
+        } else {
+          message = `[${time}] ${event.type}: ${event.message || ""}`;
+        }
+
+        logTerminal(message, "warn");
+      }
+
+      // ============================================================================
+      // Phase Timeline
+      // ============================================================================
+
+      function updatePhaseTimeline(data) {
+        const timeline = elements.phaseTimeline;
+        timeline.style.display = "block";
+
+        const progress = data.progress || 0;
+        const currentPhase = data.current_phase || "unknown";
+        const eta = data.eta || "-";
+
+        document.getElementById("phaseProgress").textContent = `${Math.round(progress)}%`;
+        document.getElementById("currentPhaseText").textContent = currentPhase.toUpperCase();
+        document.getElementById("phaseEta").textContent = eta;
+
+        // Update timeline phases
+        phases.forEach((phase) => {
+          const phaseEl = timeline.querySelector(`[data-phase="${phase}"]`);
+          if (!phaseEl) return;
+
+          const [minRange, maxRange] = phaseRanges[phase];
+          phaseEl.classList.remove("active", "completed", "future");
+
+          if (progress >= maxRange) {
+            phaseEl.classList.add("completed");
+          } else if (progress >= minRange) {
+            phaseEl.classList.add("active");
+          } else {
+            phaseEl.classList.add("future");
+          }
+        });
+      }
+
+      // ============================================================================
+      // Cost Management
+      // ============================================================================
+
+      function updateCosts(data) {
+        const totalCost = data.total || 0;
+        const breakdown = data.breakdown || {};
+
+        const costEl = elements.totalCost;
+        const oldValue = parseFloat(costEl.textContent.replace("$", ""));
+
+        if (totalCost !== oldValue) {
+          costEl.textContent = `$${totalCost.toFixed(4)}`;
+          costEl.classList.add("updating");
+          setTimeout(() => costEl.classList.remove("updating"), 600);
+        }
+
+        // Update phase costs
+        phases.forEach((phase) => {
+          const phaseEl = document.getElementById(
+            `cost${phase.charAt(0).toUpperCase() + phase.slice(1)}`,
+          );
+          if (phaseEl) {
+            const phaseCost = breakdown[phase] || 0;
+            phaseEl.textContent = `$${phaseCost.toFixed(4)}`;
+          }
+        });
+      }
+
+      // ============================================================================
+      // Job Display
+      // ============================================================================
+
+      async function loadJobs() {
+        const jobs = await fetchJobs();
+        state.jobs = jobs;
+        renderJobList();
+
+        if (!state.selectedJobId && state.jobs.length > 0) {
+          selectJob(state.jobs[0].id);
+        }
+      }
+
+      function renderJobList() {
+        const container = elements.jobList;
+
+        if (state.jobs.length === 0) {
+          container.innerHTML = '<div class="empty-state">No jobs available</div>';
+          return;
+        }
+
+        const html = state.jobs.map((job) => createJobCard(job)).join("");
+        container.innerHTML = html;
+
+        // Add click handlers
+        container.querySelectorAll(".job-card").forEach((card) => {
+          card.addEventListener("click", () => {
+            const jobId = card.dataset.jobId;
+            selectJob(jobId);
+          });
+        });
+      }
+
+      function createJobCard(job) {
+        const statusClass = `status-${job.status}`;
+        const isActive = job.id === state.selectedJobId ? "active" : "";
+        const cost = job.cost_so_far ? `$${job.cost_so_far.toFixed(4)}` : "$0.0000";
+        const phase = job.phase || "IDLE";
+        const summary = job.task ? job.task.substring(0, 50) : "No description";
+
+        return `
+                <div class="job-card ${isActive}" data-job-id="${job.id}">
+                    <div class="job-card-header">
+                        <div class="job-project">${job.project}</div>
+                        <span class="status-badge ${statusClass}">${job.status}</span>
+                    </div>
+                    <div class="job-card-content">
+                        <div class="job-summary">${summary}...</div>
+                        <div class="job-meta">
+                            <span class="job-cost">${cost}</span>
+                            <span class="job-phase">${phase}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+      }
+
+      function selectJob(jobId) {
+        state.selectedJobId = jobId;
+        state.events = [];
+        state.filteredEvents = [];
+
+        renderJobList();
+        elements.eventStream.innerHTML = '<div class="empty-state">Loading events...</div>';
+        elements.phaseTimeline.style.display = "none";
+
+        logTerminal(`Selected job: ${jobId}`, "success");
+
+        connectWebSocket(jobId);
+      }
+
+      function updateJobDisplay() {
+        if (!state.currentJob) return;
+
+        const job = state.jobs.find((j) => j.id === state.selectedJobId);
+        if (job) {
+          Object.assign(job, state.currentJob);
+          renderJobList();
+        }
+      }
+
+      // ============================================================================
+      // UI Event Handlers
+      // ============================================================================
+
+      elements.refreshBtn.addEventListener("click", async () => {
+        elements.refreshBtn.classList.add("spinning");
+        await loadJobs();
+        setTimeout(() => elements.refreshBtn.classList.remove("spinning"), 600);
+      });
+
+      elements.autoScrollBtn.addEventListener("click", () => {
+        state.autoScroll = !state.autoScroll;
+        elements.autoScrollBtn.textContent = `Auto-Scroll: ${state.autoScroll ? "ON" : "OFF"}`;
+        elements.autoScrollBtn.classList.toggle("active");
+
+        if (state.autoScroll) {
+          elements.eventStream.scrollTop = elements.eventStream.scrollHeight;
+        }
+      });
+
+      elements.exportBtn.addEventListener("click", () => {
+        const exportData = {
+          job_id: state.selectedJobId,
+          timestamp: new Date().toISOString(),
+          events: state.events,
+        };
+
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `job-${state.selectedJobId}-${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        logTerminal("Exported job execution log", "success");
+      });
+
+      // Filter buttons
+      Object.entries(elements.filterBtns).forEach(([filter, btn]) => {
+        btn.addEventListener("click", () => {
+          state.filter = filter;
+          Object.values(elements.filterBtns).forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          applyFilter();
+          renderEventStream();
+        });
+      });
+
+      // Set initial active filter button
+      elements.filterBtns.all.classList.add("active");
+
+      // ============================================================================
+      // Connection Status
+      // ============================================================================
+
+      function updateConnectionStatus(status) {
+        const dot = elements.statusDot;
+        const text = elements.statusText;
+
+        dot.classList.remove("connected", "fallback");
+
+        switch (status) {
+          case "connected":
+            dot.classList.add("connected");
+            text.textContent = "WebSocket Connected";
+            break;
+          case "fallback":
+            dot.classList.add("fallback");
+            text.textContent = "SSE Fallback";
+            break;
+          case "reconnecting":
+            dot.classList.remove("connected");
+            text.textContent = `Reconnecting... (${state.reconnectAttempts}/${state.maxReconnectAttempts})`;
+            break;
+          case "disconnected":
+            dot.classList.remove("connected");
+            text.textContent = "Disconnected";
+            break;
+        }
+      }
+
+      // ============================================================================
+      // Terminal Logging
+      // ============================================================================
+
+      function logTerminal(message, type = "default") {
+        const terminal = elements.terminal;
+        const time = formatTime(new Date().toISOString());
+        const contentClass = type ? `terminal-content ${type}` : "terminal-content";
+
+        const line = document.createElement("div");
+        line.className = "terminal-line";
+        line.innerHTML = `
+                <span class="terminal-time">${time}</span>
+                <span class="${contentClass}">${escapeHtml(message)}</span>
+            `;
+
+        terminal.appendChild(line);
+
+        // Keep only last 100 lines
+        const lines = terminal.querySelectorAll(".terminal-line");
+        if (lines.length > 100) {
+          lines[0].remove();
+        }
+
+        terminal.scrollTop = terminal.scrollHeight;
+      }
+
+      // ============================================================================
+      // Utility Functions
+      // ============================================================================
+
+      function formatTime(timestamp) {
+        try {
+          const date = new Date(timestamp);
+          return date.toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          });
+        } catch {
+          return "--:--:--";
+        }
+      }
+
+      function truncateJson(obj, maxLength = 100) {
+        let str;
+        if (typeof obj === "string") {
+          str = obj;
+        } else {
+          try {
+            str = JSON.stringify(obj);
+          } catch {
+            str = String(obj);
+          }
+        }
+
+        if (str.length > maxLength) {
+          return str.substring(0, maxLength) + "...";
+        }
+        return str;
+      }
+
+      function escapeHtml(text) {
+        const map = {
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#039;",
+        };
+        return text.replace(/[&<>"']/g, (m) => map[m]);
+      }
+
+      function updateEventCount() {
+        elements.eventCount.textContent = `${state.filteredEvents.length} events`;
+      }
+
+      // ============================================================================
+      // Initialization
+      // ============================================================================
+
+      async function initialize() {
+        logTerminal("OpenClaw Job Viewer Starting...", "success");
+        await loadJobs();
+
+        // Refresh job list every 10 seconds
+        state.jobRefreshInterval = setInterval(loadJobs, 10000);
+
+        logTerminal(`Loaded ${state.jobs.length} job(s)`, "success");
+      }
+
+      // Start the app
+      initialize();
+
+      // Cleanup on page unload
+      window.addEventListener("beforeunload", () => {
+        if (state.ws) state.ws.close();
+        if (state.eventSource) state.eventSource.close();
+        if (state.jobRefreshInterval) clearInterval(state.jobRefreshInterval);
+      });
+    </script>
+  </body>
+</html>

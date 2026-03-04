@@ -4,26 +4,18 @@ Welcome to the lobster tank! 🦞
 
 ## Quick Links
 
-- **GitHub:** https://github.com/openclaw/openclaw
+- **GitHub:** https://github.com/Miles0sage/openclaw
 - **Discord:** https://discord.gg/qkhbAGHRBT
-- **X/Twitter:** [@steipete](https://x.com/steipete) / [@openclaw](https://x.com/openclaw)
+- **X/Twitter:** [@OverSeerClaw](https://x.com/OverSeerClaw)
 
 ## Maintainers
 
-- **Peter Steinberger** - Benevolent Dictator
-  - GitHub: [@steipete](https://github.com/steipete) · X: [@steipete](https://x.com/steipete)
+- **Miles** - Creator & Lead
+  - GitHub: [@Miles0sage](https://github.com/Miles0sage)
 
-- **Shadow** - Discord + Slack subsystem
-  - GitHub: [@thewilloftheshadow](https://github.com/thewilloftheshadow) · X: [@4shad0wed](https://x.com/4shad0wed)
+## Documentation
 
-- **Jos** - Telegram, API, Nix mode
-  - GitHub: [@joshp123](https://github.com/joshp123) · X: [@jjpcodes](https://x.com/jjpcodes)
-
-- **Christoph Nakazawa** - JS Infra
-  - GitHub: [@cpojer](https://github.com/cpojer) · X: [@cnakazawa](https://x.com/cnakazawa)
-
-- **Gustavo Madeira Santana** - Multi-agents, CLI, web UI
-  - GitHub: [@gumadeiras](https://github.com/gumadeiras) · X: [@gumadeiras](https://x.com/gumadeiras)
+- **Architecture:** see [ARCHITECTURE.md](ARCHITECTURE.md) and [docs/](docs/)
 
 ## How to Contribute
 

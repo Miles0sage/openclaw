@@ -74,6 +74,30 @@ openclaw agent --message "Ship checklist" --thinking high
 
 Upgrading? [Updating guide](https://docs.openclaw.ai/install/updating) (and run `openclaw doctor`).
 
+## Architecture
+
+OpenClaw uses a 5-phase job pipeline with multi-agent orchestration:
+
+```
+User Message → Gateway → Overseer (PM) → Specialist Agent → Verification → Response
+```
+
+- **Gateway**: FastAPI server handling all channels (WhatsApp, Telegram, Slack, Discord, etc.)
+- **Overseer**: Routes tasks to the optimal agent based on complexity and cost
+- **Agents**: CodeGen Pro, CodeGen Elite, Pentest AI, Code Reviewer, and more
+- **Job Viewer**: Real-time execution monitoring at `/job_viewer.html`
+- **Mission Control**: Dashboard at `/mission_control.html`
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design.
+
+| Documentation                                  | Description                                  |
+| ---------------------------------------------- | -------------------------------------------- |
+| [ARCHITECTURE.md](ARCHITECTURE.md)             | System overview, pipeline, component diagram |
+| [docs/API.md](docs/API.md)                     | REST and WebSocket API reference             |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)       | Installation, systemd, Cloudflare setup      |
+| [docs/JOB_EXECUTION.md](docs/JOB_EXECUTION.md) | Job anatomy, monitoring, cost tracking       |
+| [docs/COMMUNITY.md](docs/COMMUNITY.md)         | Social media and monetization strategy       |
+
 ## Development channels
 
 - **stable**: tagged releases (`vYYYY.M.D` or `vYYYY.M.D-<patch>`), npm dist-tag `latest`.
