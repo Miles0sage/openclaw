@@ -49,7 +49,7 @@ async def call_grok(
 
     api_key = _get_api_key()
     if not api_key:
-        raise RuntimeError("XAI_API_KEY not set")
+        raise ValueError("XAI_API_KEY not set")
 
     messages = []
     if system_prompt:
@@ -65,16 +65,29 @@ async def call_grok(
     }
 
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(
-            f"{XAI_BASE_URL}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        try:
+            resp = await client.post(
+                f"{XAI_BASE_URL}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            resp.raise_for_status()  # Raise an exception for 4xx or 5xx responses
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error calling Grok API: {e}")
+            raise
+        except httpx.RequestError as e:
+            logger.error(f"Request error calling Grok API: {e}")
+            raise
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error from Grok API response: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"An unexpected error occurred during Grok API call: {e}")
+            raise
 
     # Extract response
     choice = data["choices"][0]
