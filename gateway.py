@@ -7398,6 +7398,34 @@ async def runner_status():
     stats = runner.get_stats()
     active = runner.get_active_jobs()
     return {"running": runner._running, "active_jobs": active, "stats": stats}
+@app.get("/api/runner/stats")
+async def runner_stats(request: Request):
+    """Get autonomous runner stats summary (auth required)."""
+    token = request.headers.get("X-Auth-Token") or request.query_params.get("token")
+    if token != AUTH_TOKEN:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    runner = get_runner()
+    if not runner:
+        return {
+            "running": False,
+            "active_jobs_count": 0,
+            "active_job_ids": [],
+            "total_cost_usd": 0.0,
+            "poll_interval": None,
+            "max_concurrent": None,
+            "message": "Runner not initialized",
+        }
+
+    stats = runner.get_stats()
+    return {
+        "running": bool(stats.get("running", runner._running)),
+        "active_jobs_count": int(stats.get("active_jobs", len(stats.get("active_job_ids", [])))),
+        "active_job_ids": stats.get("active_job_ids", []),
+        "total_cost_usd": float(stats.get("total_cost_usd", 0.0)),
+        "poll_interval": stats.get("poll_interval"),
+        "max_concurrent": stats.get("max_concurrent"),
+    }
 
 
 @app.post("/api/runner/execute/{job_id}")
