@@ -15,8 +15,12 @@ import httpx
 
 logger = logging.getLogger("openclaw.grok_executor")
 
-XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
 XAI_BASE_URL = "https://api.x.ai/v1"
+
+
+def _get_api_key() -> str:
+    """Get API key lazily (after dotenv is loaded)."""
+    return os.environ.get("XAI_API_KEY", "")
 
 # Model selection by priority
 MODELS = {
@@ -43,7 +47,8 @@ async def call_grok(
 ) -> dict:
     """Call Grok API and return response text + cost estimate."""
 
-    if not XAI_API_KEY:
+    api_key = _get_api_key()
+    if not api_key:
         raise RuntimeError("XAI_API_KEY not set")
 
     messages = []
@@ -63,7 +68,7 @@ async def call_grok(
         resp = await client.post(
             f"{XAI_BASE_URL}/chat/completions",
             headers={
-                "Authorization": f"Bearer {XAI_API_KEY}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json=payload,
@@ -89,6 +94,7 @@ async def call_grok(
         "tokens": input_tokens + output_tokens,
         "cost_usd": cost_usd,
         "model": model,
+        "tool_calls": [],
     }
 
 

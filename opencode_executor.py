@@ -271,7 +271,28 @@ async def execute_with_fallback(
             f"Unexpected OpenCode error for {job_id}/{phase}: {e} — falling back to SDK"
         )
 
-    # Fall back to Agent SDK
+    # Fall back to Grok (cheap xAI API, ~$0.00005/call)
+    try:
+        from grok_executor import execute_with_grok
+
+        logger.info(f"Falling back to Grok for {job_id}/{phase}")
+        grok_result = await execute_with_grok(
+            prompt=prompt,
+            job_id=job_id,
+            phase=phase,
+            priority=priority,
+            system_prompt=system_prompt or "",
+        )
+        if grok_result and grok_result.get("text"):
+            logger.info(f"Grok completed {job_id}/{phase} for ${grok_result.get('cost_usd', 0):.4f}")
+            return grok_result
+        logger.warning(f"Grok returned empty response for {job_id}/{phase} — falling back to SDK")
+    except ImportError:
+        logger.warning("grok_executor not available — falling back to SDK")
+    except Exception as grok_err:
+        logger.warning(f"Grok failed for {job_id}/{phase}: {grok_err} — falling back to SDK")
+
+    # Fall back to Agent SDK (last resort, costs real API money)
     from autonomous_runner import _call_agent_sdk
 
     logger.info(f"Falling back to Agent SDK for {job_id}/{phase}")
