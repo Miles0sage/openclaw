@@ -82,6 +82,54 @@ TOOL_NUDGE_THRESHOLD = 10         # after this many iterations, nudge agent to f
 LOOP_DETECT_THRESHOLD = 3         # same tool+args called this many times → force break
 MAX_PLAN_STEPS = 10               # safety cap on plan step count (fewer = less iteration burn)
 
+# ---------------------------------------------------------------------------
+# Error Classification — transient errors get retried, permanent ones don't
+# ---------------------------------------------------------------------------
+
+TRANSIENT_ERROR_PATTERNS = [
+    "rate limit", "rate_limit", "429", "too many requests",
+    "timeout", "timed out", "deadline exceeded",
+    "connection reset", "connection refused", "connection error",
+    "temporary failure", "service unavailable", "503",
+    "internal server error", "500",
+    "network error", "dns resolution",
+    "overloaded", "capacity", "try again",
+    "econnrefused", "econnreset", "etimedout",
+    "ssl error", "handshake",
+]
+
+PERMANENT_ERROR_PATTERNS = [
+    "file not found", "no such file", "filenotfounderror",
+    "permission denied", "permissionerror", "access denied",
+    "syntax error", "syntaxerror", "invalid syntax",
+    "import error", "importerror", "modulenotfounderror",
+    "name error", "nameerror", "is not defined",
+    "type error", "typeerror", "not callable",
+    "attribute error", "attributeerror", "has no attribute",
+    "value error", "valueerror",
+    "key error", "keyerror",
+    "index error", "indexerror",
+    "authentication", "unauthorized", "401", "403",
+    "not found", "404",
+]
+
+
+def _classify_error(error_str: str) -> str:
+    """Classify an error as 'transient' (retry) or 'permanent' (skip/escalate).
+
+    Returns 'transient' if the error matches a known transient pattern,
+    'permanent' if it matches a known permanent pattern,
+    or 'unknown' if neither (treated as transient for safety).
+    """
+    err_lower = error_str.lower()
+    for pattern in PERMANENT_ERROR_PATTERNS:
+        if pattern in err_lower:
+            return "permanent"
+    for pattern in TRANSIENT_ERROR_PATTERNS:
+        if pattern in err_lower:
+            return "transient"
+    return "unknown"  # Default: retry once, then give up
+
 
 def _make_call_signature(tool_name: str, tool_input) -> str:
     """Create a deterministic signature for loop detection.
@@ -1735,24 +1783,45 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                         f"API credit/billing error (non-retryable): {e}"
                     ) from e
 
+                # Classify error: transient → retry, permanent → skip step
+                error_class = _classify_error(str(e))
+                if error_class == "permanent":
+                    logger.warning(
+                        f"Step {step.index} PERMANENT error for {job['id']}: {e}. "
+                        f"Skipping step (no retry)."
+                    )
+                    _log_phase(job["id"], "execute", {
+                        "event": "step_permanent_error",
+                        "step": step.index,
+                        "error": str(e),
+                        "error_class": "permanent",
+                    })
+                    break  # Exit retry loop — this step won't succeed
+
                 # Record error for circuit breaker
                 if guardrails:
                     guardrails.record_error(str(e))
                 step.attempts = attempt + 1
                 backoff = (2 ** attempt) * 2  # 2s, 4s, 8s
+
+                # Unknown errors: only retry once (not full 3 attempts)
+                max_retries_for_error = DEFAULT_MAX_RETRIES if error_class == "transient" else 2
                 logger.warning(
-                    f"Step {step.index} attempt {attempt+1} failed for {job['id']}: {e}. "
-                    f"Retrying in {backoff}s..."
+                    f"Step {step.index} attempt {attempt+1} failed for {job['id']} "
+                    f"[{error_class}]: {e}. Retrying in {backoff}s..."
                 )
                 _log_phase(job["id"], "execute", {
                     "event": "step_retry",
                     "step": step.index,
                     "attempt": attempt + 1,
                     "error": str(e),
+                    "error_class": error_class,
                     "backoff_seconds": backoff,
                 })
-                if attempt < DEFAULT_MAX_RETRIES - 1:
+                if attempt < max_retries_for_error - 1:
                     await asyncio.sleep(backoff)
+                elif error_class == "unknown":
+                    break  # Unknown errors: gave it 2 tries, move on
 
         if step_result is None:
             step.status = "failed"
@@ -3053,7 +3122,12 @@ class AutonomousRunner:
             try:
                 await self._run_job_pipeline(job)
             except Exception as e:
-                logger.error(f"Job {job_id} failed: {e}")
+                logger.error(f"Job {job_id} failed (uncaught): {e}\n{traceback.format_exc()}")
+                # Ensure the job is marked as failed with an error message
+                try:
+                    update_job_status(job_id, "failed", error=f"Uncaught error: {str(e)[:500]}")
+                except Exception:
+                    pass
             finally:
                 self._active_jobs.pop(job_id, None)
                 self._active_jobs_meta.pop(job_id, None)
@@ -3253,6 +3327,32 @@ class AutonomousRunner:
             if progress.cancelled:
                 raise CancelledError(job_id)
 
+            # ---- Pre-flight validation before EXECUTE ----
+            if not _should_skip("execute"):
+                preflight_issues = []
+                ws_path = Path(workspace)
+                if not ws_path.exists():
+                    preflight_issues.append(f"Workspace does not exist: {workspace}")
+                elif not ws_path.is_dir():
+                    preflight_issues.append(f"Workspace is not a directory: {workspace}")
+                # Check git status if this is a git repo
+                if ws_path.exists() and (ws_path / ".git").exists():
+                    try:
+                        git_status = subprocess.run(
+                            ["git", "status", "--porcelain"], capture_output=True,
+                            text=True, cwd=str(ws_path), timeout=10,
+                        )
+                        if git_status.returncode != 0:
+                            preflight_issues.append(f"Git status check failed: {git_status.stderr[:100]}")
+                    except Exception as git_err:
+                        preflight_issues.append(f"Git check error: {git_err}")
+                # Check plan has steps
+                if not plan.steps:
+                    preflight_issues.append("Plan has no steps — nothing to execute")
+                if preflight_issues:
+                    logger.warning(f"Job {job_id} pre-flight issues: {preflight_issues}")
+                    _log_phase(job_id, "execute", {"event": "preflight_warning", "issues": preflight_issues})
+
             # ---- Phase 3: EXECUTE ----
             if ide_session:
                 ide_session.set_phase("execute")
@@ -3384,11 +3484,19 @@ class AutonomousRunner:
 
             # Update job to done
             final_status = "done" if result["success"] else "failed"
-            update_job_status(
-                job_id, final_status,
-                completed_at=_now_iso(),
-                cost_usd=round(progress.cost_usd, 6),
-            )
+            final_kwargs = {
+                "completed_at": _now_iso(),
+                "cost_usd": round(progress.cost_usd, 6),
+            }
+            if not result["success"]:
+                # Build error message from failed steps so it's always recorded
+                failed_phases = [
+                    f"{p}: {d.get('error', d.get('status', 'unknown'))}"
+                    for p, d in result.get("phases", {}).items()
+                    if isinstance(d, dict) and d.get("status") in ("failed", "partial")
+                ]
+                final_kwargs["error"] = "; ".join(failed_phases) if failed_phases else "Pipeline completed but delivery failed"
+            update_job_status(job_id, final_status, **final_kwargs)
 
             logger.info(
                 f"Job {job_id} COMPLETED: success={result['success']}, "
