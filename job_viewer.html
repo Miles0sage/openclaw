@@ -803,7 +803,7 @@
       <div class="toolbar">
         <div class="connection-status">
           <div class="status-dot" id="statusDot"></div>
-          <span id="statusText">Connecting...</span>
+          <span id="statusText">Loading jobs...</span>
         </div>
         <div style="flex: 1"></div>
         <button class="toolbar-btn" id="filterAllBtn" data-filter="all">All Events</button>
@@ -939,7 +939,20 @@
         try {
           const response = await fetch("/api/jobs");
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return await response.json();
+          const data = await response.json();
+          // API returns {"jobs": [...]} — unwrap and normalize field names
+          const jobs = Array.isArray(data) ? data : data.jobs || [];
+          return jobs.map((j) => ({
+            id: j.job_id || j.id,
+            project: j.project_name || j.project || "unknown",
+            task: j.description || j.task || "",
+            status: j.status || "unknown",
+            cost_so_far: j.cost_so_far || 0,
+            phase: j.phase || null,
+            priority: j.priority || "P2",
+            created_at: j.created_at,
+            updated_at: j.updated_at,
+          }));
         } catch (error) {
           console.error("Failed to fetch jobs:", error);
           return [];
@@ -950,10 +963,11 @@
         try {
           const response = await fetch("/api/monitoring/active");
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return await response.json();
+          const data = await response.json();
+          return data.jobs || {};
         } catch (error) {
           console.error("Failed to fetch active jobs:", error);
-          return [];
+          return {};
         }
       }
 
@@ -1342,7 +1356,7 @@
       function updateJobDisplay() {
         if (!state.currentJob) return;
 
-        const job = state.jobs.find((j) => j.id === state.selectedJobId);
+        const job = state.jobs.find((j) => (j.id || j.job_id) === state.selectedJobId);
         if (job) {
           Object.assign(job, state.currentJob);
           renderJobList();
@@ -1521,6 +1535,13 @@
         state.jobRefreshInterval = setInterval(loadJobs, 10000);
 
         logTerminal(`Loaded ${state.jobs.length} job(s)`, "success");
+
+        // Update status after initial load
+        if (state.jobs.length > 0 && !state.selectedJobId) {
+          elements.statusText.textContent = `${state.jobs.length} jobs loaded — select one to stream`;
+        } else if (state.jobs.length === 0) {
+          elements.statusText.textContent = "No active jobs";
+        }
       }
 
       // Start the app
