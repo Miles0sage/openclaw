@@ -53,12 +53,42 @@ AGENT_TOOL_PROFILES: dict[str, set[str]] = {
         "save_memory", "search_memory",
         "github_repo_info",
     },
+    "code_reviewer": {
+        "file_read", "glob_files", "grep_search",
+        "git_operations",
+        "github_repo_info",
+    },
+    "test_generator": {
+        "shell_execute", "git_operations",
+        "file_read", "file_write", "file_edit",
+        "glob_files", "grep_search",
+        "process_manage",
+    },
+    "debugger": {
+        "shell_execute", "git_operations",
+        "file_read", "file_write", "file_edit",
+        "glob_files", "grep_search",
+        "process_manage", "env_manage",
+    },
+    "architecture_designer": {
+        "file_read", "glob_files", "grep_search",
+        "web_search", "web_fetch", "research_task",
+        "github_repo_info",
+    },
 }
 
 
 def get_tools_for_agent(agent_key: str) -> Optional[Set[str]]:
     """Return the tool allowlist for an agent, or None if unrestricted."""
     return AGENT_TOOL_PROFILES.get(agent_key)
+
+
+def is_tool_allowed(agent_key: str, tool_name: str) -> bool:
+    """Check if a specific tool is allowed for an agent. Returns True if unrestricted."""
+    allowlist = AGENT_TOOL_PROFILES.get(agent_key)
+    if allowlist is None:
+        return True  # unrestricted
+    return tool_name in allowlist
 
 
 def get_available_agents() -> list[str]:

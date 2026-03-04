@@ -99,6 +99,11 @@ __pycache__/
 ci.yml.wanted
 logs/
 
+data/agent_outputs/
+data/agent_sessions/
+data/jobs/worktrees/
+data/eval_results/
+
 # Sensitive data files
 data/semantic_metadata.json
 data/semantic_index.pkl

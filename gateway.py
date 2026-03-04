@@ -764,6 +764,16 @@ async def lifespan(application):
     except Exception as err:
         logger.error(f"Failed to start CEO engine: {err}")
 
+    # Scheduled Hands (autonomous workers)
+    try:
+        from scheduled_hands import get_scheduler
+        hands_scheduler = get_scheduler()
+        hands_scheduler.start()
+        status = hands_scheduler.get_status()
+        logger.info(f"✅ Scheduled Hands started ({len(status['hands'])} hands registered)")
+    except Exception as err:
+        logger.error(f"Failed to start Scheduled Hands: {err}")
+
     # Review cycle + output verifier
     try:
         global _review_engine, _output_verifier
@@ -784,6 +794,14 @@ async def lifespan(application):
     yield  # ── APP RUNNING ──
 
     # ── SHUTDOWN ─────────────────────────────────────────────────────
+    try:
+        from scheduled_hands import get_scheduler
+        hs = get_scheduler()
+        hs.stop()
+        logger.info("✅ Scheduled Hands stopped")
+    except Exception as err:
+        logger.error(f"Failed to stop Scheduled Hands: {err}")
+
     try:
         stop_heartbeat_monitor()
         logger.info("✅ Heartbeat monitor stopped")
@@ -855,7 +873,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Dashboard APIs exempt from auth (for monitoring UI + client portal)
-    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/job-viewer", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research", "/api/monitoring", "/api/pa", "/api/oz", "/api/ceo", "/api/pinch", "/api/mcp", "/api/eval", "/api/onboard", "/api/billing"]
+    dashboard_exempt_prefixes = ["/api/costs", "/api/heartbeat", "/api/quotas", "/api/agents", "/api/route/health", "/api/proposal", "/api/proposals", "/api/policy", "/api/events", "/api/memories", "/api/memory", "/api/cron", "/api/tasks", "/api/workflows", "/api/dashboard", "/mission-control", "/job-viewer", "/api/intake", "/api/jobs", "/api/reviews", "/api/verify", "/api/runner", "/api/cache", "/api/health", "/api/reactions", "/api/metrics", "/oauth", "/api/gmail", "/api/calendar", "/api/polymarket", "/api/prediction", "/api/kalshi", "/api/arb", "/api/trading", "/api/sportsbook", "/api/sports", "/api/research", "/api/leads", "/api/calls", "/api/security", "/api/reflections", "/api/reminders", "/api/ai-news", "/api/tweets", "/api/perplexity-research", "/api/monitoring", "/api/pa", "/api/oz", "/api/ceo", "/api/pinch", "/api/mcp", "/api/eval", "/api/onboard", "/api/billing", "/api/hands"]
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
@@ -5094,6 +5112,16 @@ async def create_new_job(request: Request):
         except JobValidationError as ve:
             return JSONResponse({"error": str(ve)}, status_code=400)
 
+        # Prompt injection scan
+        try:
+            from prompt_shield import scan_input
+            scan_result = scan_input(task)
+            if scan_result.blocked:
+                logger.warning(f"Job blocked by prompt shield: {scan_result.reason}")
+                return JSONResponse({"error": f"Input blocked: {scan_result.reason}"}, status_code=422)
+        except ImportError:
+            pass  # prompt_shield not available, skip
+
         job = create_job(project, task, priority)
 
         # Deduct credit if billing is active
@@ -8544,6 +8572,36 @@ async def compare_eval_runs(request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SECURITY: Prompt Shield Endpoint
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/security/prompt-scan")
+async def security_scan_input(request: Request):
+    """Scan text for prompt injection attempts."""
+    try:
+        from prompt_shield import scan_input, scan_output, scan_skill, is_url_safe
+        body = await request.json()
+        text = body.get("text", "")
+        scan_type = body.get("type", "input")  # input, output, skill, url
+
+        if scan_type == "output":
+            result = scan_output(text)
+        elif scan_type == "skill":
+            result = scan_skill(text)
+        elif scan_type == "url":
+            safe, reason = is_url_safe(text)
+            return {"safe": safe, "reason": reason}
+        else:
+            result = scan_input(text)
+
+        return result.to_dict()
+    except ImportError:
+        return {"error": "prompt_shield not available"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # ITEM 5: Client Onboarding Pipeline Endpoint
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -8682,6 +8740,93 @@ async def list_onboarding_pipelines():
                 continue
 
     return {"pipelines": pipelines, "total": len(pipelines)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Scheduled Hands Management Endpoints
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/hands/status")
+async def hands_status():
+    """List all scheduled Hands with their status."""
+    try:
+        from scheduled_hands import get_scheduler
+        scheduler = get_scheduler()
+        return scheduler.get_status()
+    except ImportError:
+        return {"error": "scheduled_hands not available"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/hands/run/{hand_name}")
+async def run_hand(hand_name: str):
+    """Manually trigger a Hand to run immediately."""
+    try:
+        from scheduled_hands import get_scheduler
+        scheduler = get_scheduler()
+        ok = scheduler.run_now(hand_name)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"Hand '{hand_name}' not found")
+        return {"hand": hand_name, "triggered": True, "message": "Running in background"}
+    except HTTPException:
+        raise
+    except ImportError:
+        return {"error": "scheduled_hands not available"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/hands/enable/{hand_name}")
+async def enable_hand(hand_name: str):
+    """Enable a disabled Hand (resets circuit breaker)."""
+    try:
+        from scheduled_hands import get_scheduler
+        scheduler = get_scheduler()
+        ok = scheduler.enable(hand_name)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"Hand '{hand_name}' not found")
+        return {"hand": hand_name, "enabled": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/hands/disable/{hand_name}")
+async def disable_hand(hand_name: str):
+    """Disable a Hand (stops scheduled execution)."""
+    try:
+        from scheduled_hands import get_scheduler
+        scheduler = get_scheduler()
+        ok = scheduler.disable(hand_name)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"Hand '{hand_name}' not found")
+        return {"hand": hand_name, "enabled": False}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/hands/logs/{hand_name}")
+async def hand_logs(hand_name: str, limit: int = 20):
+    """Get recent execution logs for a Hand."""
+    try:
+        import os as _os
+        log_file = _os.path.join("/root/openclaw/data/hands_logs", f"{hand_name}.jsonl")
+        if not _os.path.exists(log_file):
+            return {"hand": hand_name, "logs": [], "count": 0}
+        logs = []
+        with open(log_file) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    logs.append(json.loads(line))
+        logs = logs[-limit:]  # last N entries
+        return {"hand": hand_name, "logs": logs, "count": len(logs)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

@@ -46,7 +46,15 @@ _DEFAULT_PRICING = {"input": 3.0, "output": 15.0}
 # ---------------------------------------------------------------------------
 
 def _calc_cost(model: str, tokens_in: int, tokens_out: int) -> float:
-    """Return USD cost for the given token counts."""
+    """Return USD cost for the given token counts.
+    Handles edge cases like zero or negative tokens to prevent invalid cost calculation.
+    """
+    if tokens_in < 0 or tokens_out < 0:
+        logger.warning(f"Negative token counts provided for model {model}: tokens_in={tokens_in}, tokens_out={tokens_out}. Returning 0 cost.")
+        return 0.0
+    if tokens_in == 0 and tokens_out == 0:
+        return 0.0
+
     pricing = COST_PRICING.get(model, _DEFAULT_PRICING)
     return round(
         (tokens_in * pricing["input"] + tokens_out * pricing["output"]) / 1_000_000,

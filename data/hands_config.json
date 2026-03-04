@@ -1,0 +1,72 @@
+{
+  "daily_cost_report": {
+    "name": "daily_cost_report",
+    "description": "Generate and send daily cost summary to Slack",
+    "schedule": "0 9 * * *",
+    "enabled": true,
+    "max_consecutive_failures": 5,
+    "consecutive_failures": 0,
+    "last_run": "",
+    "last_result": "",
+    "total_runs": 0,
+    "total_successes": 0,
+    "total_cost_usd": 0.0,
+    "tags": ["cost", "reporting"]
+  },
+  "eval_regression_check": {
+    "name": "eval_regression_check",
+    "description": "Run simple eval tasks weekly to check for regressions",
+    "schedule": "0 3 * * 0",
+    "enabled": true,
+    "max_consecutive_failures": 5,
+    "consecutive_failures": 0,
+    "last_run": "",
+    "last_result": "",
+    "total_runs": 0,
+    "total_successes": 0,
+    "total_cost_usd": 0.0,
+    "tags": ["eval", "quality"]
+  },
+  "health_check": {
+    "name": "health_check",
+    "description": "Check system health: disk, memory, CPU, gateway",
+    "schedule": "*/30 * * * *",
+    "enabled": true,
+    "max_consecutive_failures": 5,
+    "consecutive_failures": 0,
+    "last_run": "2026-03-04T23:01:35.579944+00:00",
+    "last_result": "success",
+    "total_runs": 1,
+    "total_successes": 1,
+    "total_cost_usd": 0.0,
+    "tags": ["monitoring", "health"]
+  },
+  "stale_job_cleanup": {
+    "name": "stale_job_cleanup",
+    "description": "Find jobs stuck in analyzing for >1 hour",
+    "schedule": "0 * * * *",
+    "enabled": true,
+    "max_consecutive_failures": 5,
+    "consecutive_failures": 0,
+    "last_run": "",
+    "last_result": "",
+    "total_runs": 0,
+    "total_successes": 0,
+    "total_cost_usd": 0.0,
+    "tags": ["maintenance", "cleanup"]
+  },
+  "memory_flush": {
+    "name": "memory_flush",
+    "description": "Flush pending memory items to long-term storage",
+    "schedule": "0 6 * * *",
+    "enabled": true,
+    "max_consecutive_failures": 5,
+    "consecutive_failures": 0,
+    "last_run": "",
+    "last_result": "",
+    "total_runs": 0,
+    "total_successes": 0,
+    "total_cost_usd": 0.0,
+    "tags": ["memory", "maintenance"]
+  }
+}

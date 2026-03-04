@@ -49,8 +49,19 @@ except ImportError:
     HAS_REPO_MAP = False
 
 
-def _execute_tool_routed(tool_name: str, tool_input: dict, phase: str = "", job_id: str = "") -> str:
-    """Execute tool through ToolRegistry (phase-gated + audited) with fallback."""
+def _execute_tool_routed(tool_name: str, tool_input: dict, phase: str = "", job_id: str = "", agent_key: str = "") -> str:
+    """Execute tool through ToolRegistry (phase-gated + audited) with capability whitelist enforcement."""
+    # --- Capability-based tool whitelist enforcement ---
+    if agent_key:
+        from agent_tool_profiles import get_tools_for_agent
+        allowlist = get_tools_for_agent(agent_key)
+        if allowlist is not None and tool_name not in allowlist:
+            logger.warning(
+                f"BLOCKED tool '{tool_name}' for agent '{agent_key}' (not in allowlist) "
+                f"[job={job_id}, phase={phase}]"
+            )
+            return f"[BLOCKED] Tool '{tool_name}' is not authorized for agent '{agent_key}'. Available tools: {', '.join(sorted(allowlist))}"
+
     if _get_tool_registry is not None:
         registry = _get_tool_registry()
         return registry.execute_tool(tool_name, tool_input, phase=phase, job_id=job_id)
@@ -1374,7 +1385,7 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                     _log_phase(job_id, phase, {"event": "tool_call", "tool": tool_name, "input": tool_input})
 
                     result_str = await loop.run_in_executor(
-                        None, _execute_tool_routed, tool_name, tool_input, phase, job_id
+                        None, _execute_tool_routed, tool_name, tool_input, phase, job_id, agent_key
                     )
 
                     all_tool_calls.append({"tool": tool_name, "input": tool_input, "result": result_str[:2000]})
@@ -1489,7 +1500,7 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
 
                     # Run tool in executor (some tools do subprocess/IO)
                     result_str = await loop.run_in_executor(
-                        None, _execute_tool_routed, tool_name, tool_input, phase, job_id
+                        None, _execute_tool_routed, tool_name, tool_input, phase, job_id, agent_key
                     )
 
                     all_tool_calls.append({
@@ -2848,7 +2859,7 @@ async def _deliver_phase(job: dict, agent_key: str, verify_result: dict,
                 None, _execute_tool_routed, "vercel_deploy", {
                     "action": "deploy",
                     "project_path": str(ws_path),
-                }
+                }, "deliver", progress.job_id, agent_key
             )
             deploy_url = str(raw_deploy)[:500]
             delivery["vercel_deploy"] = deploy_url
@@ -3480,6 +3491,14 @@ class AutonomousRunner:
         """
         job_id = job["id"]
         started_at = _now_iso()
+
+        # Input validation at system boundary: ensure job is well-formed before execution
+        try:
+            validate_job(job["project"], job["task"], job.get("priority", "P1"))
+        except JobValidationError as e:
+            logger.error(f"Job {job_id} failed validation: {e}")
+            update_job_status(job_id, "failed", error=f"Validation failed: {str(e)[:500]}")
+            return {"error": f"Validation failed: {str(e)}"}
 
         # Validate job before any phase runs
         try:
