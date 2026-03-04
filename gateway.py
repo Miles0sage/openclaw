@@ -5225,8 +5225,11 @@ async def api_get_policy():
 
 @app.get("/api/version")
 async def api_get_version():
-    """Get API version and codename"""
-    return {"version": "4.0", "codename": "mission-control"}
+    """Get API version and uptime information."""
+    import psutil
+    process = psutil.Process()
+    uptime_seconds = time.time() - process.create_time()
+    return {"version": "4.2.0", "name": "openclaw", "uptime_seconds": int(uptime_seconds)}
 
 
 @app.get("/api/ping")
