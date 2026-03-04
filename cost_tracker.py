@@ -32,6 +32,9 @@ COST_PRICING = {
     "gemini-2.5-flash":           {"input": 0.30, "output": 2.50},
     "gemini-3-flash-preview":     {"input": 0.00, "output": 0.00},
     "opencode":                    {"input": 0.05, "output": 0.08},
+    "grok-3":                      {"input": 3.00, "output": 15.00},
+    "grok-3-mini":                 {"input": 0.30, "output": 0.50},
+    "grok-code-fast-1":            {"input": 0.30, "output": 0.50},
 }
 
 # Default fallback when a model is not in the table

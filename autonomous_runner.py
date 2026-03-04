@@ -947,6 +947,28 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
             except Exception as oc_err:
                 logger.warning(f"OpenCode path failed for {job_id}/{phase}: {oc_err} — trying SDK")
 
+        # --- Grok path: xAI Grok as cheap fallback (~$0.001 for grok-3-mini) ---
+        if USE_SDK:
+            try:
+                from grok_executor import execute_with_grok
+
+                result = await execute_with_grok(
+                    prompt=prompt,
+                    job_id=job_id,
+                    phase=phase,
+                    priority=priority,
+                    conversation=conversation,
+                    system_prompt=oc_system if oc_system else "",
+                )
+                if result and result.get("text"):
+                    logger.info(f"Grok completed {job_id}/{phase} for ${result.get('cost_usd', 0):.4f}")
+                    return result
+                logger.warning(f"Grok returned empty response for {job_id}/{phase} — trying GitHub Actions")
+            except ImportError:
+                logger.warning("grok_executor not available — trying GitHub Actions")
+            except Exception as grok_err:
+                logger.warning(f"Grok path failed for {job_id}/{phase}: {grok_err} — trying GitHub Actions")
+
         # --- GitHub Actions path: use Max Plan via claude-code-action ($0 cost) ---
         # Instead of calling Anthropic API directly (sdk_haiku/sdk_sonnet), route
         # through GitHub Issues → claude-code-action workflow → Max Plan OAuth token.
