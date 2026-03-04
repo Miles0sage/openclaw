@@ -947,25 +947,15 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
             except Exception as oc_err:
                 logger.warning(f"OpenCode path failed for {job_id}/{phase}: {oc_err} — trying SDK")
 
-        # --- SDK path: use Claude Agent SDK for tool execution when enabled ---
+        # --- GitHub Actions path: use Max Plan via claude-code-action ($0 cost) ---
+        # Instead of calling Anthropic API directly (sdk_haiku/sdk_sonnet), route
+        # through GitHub Issues → claude-code-action workflow → Max Plan OAuth token.
         if USE_SDK:
             try:
-                # Build system prompt with department context
-                base_system = (
-                    "You are an autonomous AI agent executing a task step-by-step using tools. "
-                    "When you need to perform an action (read/write files, run shell commands, "
-                    "git operations, etc.), you MUST use the provided tools — do NOT describe "
-                    "actions in text. Call tools directly. After all actions are complete, "
-                    "summarize what was done and the outcome."
-                )
-                if department and department in DEPARTMENTS:
-                    dept = DEPARTMENTS[department]
-                    sdk_system = f"{dept.system_prompt}\n\n{base_system}"
-                else:
-                    sdk_system = base_system
+                from github_job_bridge import execute_via_github
 
                 # Prepend conversation context into the prompt if available
-                sdk_prompt = prompt
+                gh_prompt = prompt
                 if conversation:
                     context_parts = []
                     for msg in conversation[-6:]:  # Last 3 exchanges max
@@ -974,50 +964,35 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
                         if isinstance(content, str) and content.strip():
                             context_parts.append(f"[Previous {role}]: {content[:1000]}")
                     if context_parts:
-                        sdk_prompt = "CONTEXT FROM PREVIOUS STEPS:\n" + "\n".join(context_parts) + "\n\n---\n\n" + prompt
+                        gh_prompt = "CONTEXT FROM PREVIOUS STEPS:\n" + "\n".join(context_parts) + "\n\n---\n\n" + prompt
 
-                # Determine workspace: extract from prompt (most accurate, contains
-                # project root or worktree path), fall back to job workspace dir
-                sdk_workspace = ""
-                ws_match = re.search(r"WORKSPACE DIRECTORY[^:]*:\s*(\S+)", prompt)
-                if ws_match and os.path.isdir(ws_match.group(1)):
-                    sdk_workspace = ws_match.group(1)
-                elif job_id:
-                    job_run_dir = JOB_RUNS_DIR / job_id / "workspace"
-                    if job_run_dir.exists():
-                        sdk_workspace = str(job_run_dir)
-
-                result = await _call_agent_sdk(
-                    prompt=sdk_prompt,
-                    system_prompt=sdk_system,
+                result = await execute_via_github(
+                    prompt=gh_prompt,
                     job_id=job_id,
                     phase=phase,
                     priority=priority,
-                    guardrails=guardrails,
-                    workspace=sdk_workspace,
                 )
                 return result
 
             except ImportError:
-                logger.warning("Agent SDK not available — falling back to legacy tool-use loop")
-            except Exception as sdk_err:
-                logger.error(f"Agent SDK failed for {job_id}/{phase}: {sdk_err} — falling back to legacy")
+                logger.warning("github_job_bridge not available — falling back to legacy")
+            except Exception as gh_err:
+                logger.error(f"GitHub Actions path failed for {job_id}/{phase}: {gh_err} — falling back to legacy")
 
-        # --- Legacy path: manual Anthropic/Gemini tool-use loop ---
-        # For tool-executing phases (execute, verify, deliver), use a provider with
-        # native tool_use support. Anthropic and Gemini both support it.
+        # --- Legacy path: manual tool-use loop ---
+        # API fallback is disabled — route to GitHub Actions instead of paying Anthropic API.
+        # If the GitHub Actions path above already ran and failed, we defer the job rather
+        # than spending API money on the legacy Anthropic/Gemini tool-use loop.
         if effective_provider not in ("anthropic", "gemini"):
-            # P3 (low priority) jobs use Haiku (cheap), everything else uses Sonnet (better quality)
-            if priority == "P3":
-                tool_model = "claude-haiku-4-5-20251001"
-            else:
-                tool_model = "claude-sonnet-4-5-20250929"
-            logger.info(
-                f"Tool execution required but provider='{effective_provider}' doesn't support tool_use. "
-                f"Switching to {tool_model} (priority={priority}) for phase={phase}, assigned_agent={agent_key}"
+            logger.warning(
+                f"Would have used Anthropic API for {job_id}/{phase} but API fallback is disabled. "
+                f"Job will be retried on next cycle via OpenCode/GitHub."
             )
-            effective_model = tool_model
-            effective_provider = "anthropic"
+            return {
+                "text": f"Execution deferred — OpenCode and GitHub Actions paths both unavailable for {phase}",
+                "tokens": 0,
+                "cost_usd": 0.0,
+            }
 
         # Minimal system prompt for job execution context.
         # Department system prompt is prepended when available for domain expertise.
