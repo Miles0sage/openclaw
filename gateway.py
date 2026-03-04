@@ -1687,6 +1687,11 @@ async def api_health():
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
+@app.get("/api/version")
+async def api_get_version():
+    """Get API version and system information"""
+    return {"version": "4.2.0", "name": "openclaw", "engine": "autonomous_runner"}
+
 @app.get("/metrics")
 async def metrics_endpoint():
     """Prometheus metrics endpoint (no auth required for K8s scraping)"""
@@ -5223,10 +5228,6 @@ async def api_get_policy():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.get("/api/version")
-async def api_get_version():
-    """Get API version and codename"""
-    return {"version": "4.0", "codename": "mission-control"}
 
 
 @app.get("/api/ping")
@@ -7399,6 +7400,112 @@ async def runner_status():
     active = runner.get_active_jobs()
     return {"running": runner._running, "active_jobs": active, "stats": stats}
 
+
+
+@app.get("/api/runner/stats")
+async def runner_stats():
+    """Get comprehensive job statistics from jobs.jsonl"""
+    import json
+    import os
+    from datetime import datetime, timedelta
+    from collections import Counter, defaultdict
+    
+    jobs_file = "data/jobs/jobs.jsonl"
+    
+    if not os.path.exists(jobs_file):
+        return {
+            "total_jobs_processed": 0,
+            "success_rate": 0.0,
+            "average_job_duration_seconds": 0.0,
+            "jobs_by_status": {},
+            "jobs_last_24h": 0,
+            "top_3_failure_reasons": []
+        }
+    
+    jobs = []
+    try:
+        with open(jobs_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    jobs.append(json.loads(line))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading jobs file: {str(e)}")
+    
+    if not jobs:
+        return {
+            "total_jobs_processed": 0,
+            "success_rate": 0.0,
+            "average_job_duration_seconds": 0.0,
+            "jobs_by_status": {},
+            "jobs_last_24h": 0,
+            "top_3_failure_reasons": []
+        }
+    
+    # Calculate total jobs processed
+    total_jobs = len(jobs)
+    
+    # Count jobs by status
+    status_counts = Counter(job.get('status', 'unknown') for job in jobs)
+    
+    # Calculate success rate (done jobs / total jobs)
+    done_jobs = status_counts.get('done', 0)
+    success_rate = (done_jobs / total_jobs * 100) if total_jobs > 0 else 0.0
+    
+    # Calculate average job duration
+    durations = []
+    for job in jobs:
+        created_at = job.get('created_at')
+        completed_at = job.get('completed_at')
+        if created_at and completed_at:
+            try:
+                created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                completed = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
+                duration = (completed - created).total_seconds()
+                if duration > 0:  # Only include positive durations
+                    durations.append(duration)
+            except (ValueError, TypeError):
+                continue
+    
+    avg_duration = sum(durations) / len(durations) if durations else 0.0
+    
+    # Count jobs in last 24 hours
+    now = datetime.now()
+    twenty_four_hours_ago = now - timedelta(hours=24)
+    jobs_last_24h = 0
+    
+    for job in jobs:
+        created_at = job.get('created_at')
+        if created_at:
+            try:
+                created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                # Convert to naive datetime for comparison
+                if created.tzinfo:
+                    created = created.replace(tzinfo=None)
+                if created >= twenty_four_hours_ago:
+                    jobs_last_24h += 1
+            except (ValueError, TypeError):
+                continue
+    
+    # Get top 3 failure reasons
+    failure_reasons = []
+    for job in jobs:
+        if job.get('status') in ['failed', 'killed_manual', 'killed_cost_limit', 'killed_iteration_limit', 'killed_phase_iteration_limit']:
+            error = job.get('error', '')
+            if error:
+                failure_reasons.append(error)
+    
+    failure_counter = Counter(failure_reasons)
+    top_3_failures = [{"reason": reason, "count": count} for reason, count in failure_counter.most_common(3)]
+    
+    return {
+        "total_jobs_processed": total_jobs,
+        "success_rate": round(success_rate, 2),
+        "average_job_duration_seconds": round(avg_duration, 2),
+        "jobs_by_status": dict(status_counts),
+        "jobs_last_24h": jobs_last_24h,
+        "top_3_failure_reasons": top_3_failures
+    }
 
 @app.post("/api/runner/execute/{job_id}")
 async def runner_execute_job(job_id: str):
