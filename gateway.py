@@ -832,7 +832,7 @@ async def auth_middleware(request: Request, call_next):
 
     # Debug logging (for troubleshooting only)
     is_exempt = (path in exempt_paths or
-                 path.startswith(("/telegram/", "/slack/", "/api/audit", "/static/", "/control/", "/prestress/")) or
+                 path.startswith(("/telegram/", "/slack/", "/api/audit", "/static/", "/control/", "/prestress/", "/ws/")) or
                  any(path.startswith(prefix) for prefix in dashboard_exempt_prefixes))
     logger.debug(f"AUTH_CHECK: path={path}, is_exempt={is_exempt}")
 
