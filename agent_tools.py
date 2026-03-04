@@ -1248,6 +1248,93 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
+    # ═══════════════════════════════════════════════════════════════════════
+    # PinchTab — Browser Automation for AI Agents
+    # ═══════════════════════════════════════════════════════════════════════
+    {
+        "name": "browser_navigate",
+        "description": "Navigate the browser to a URL. Opens the page and returns the accessibility tree snapshot for agent interaction.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The URL to navigate to"},
+            },
+            "required": ["url"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "browser_snapshot",
+        "description": "Get the accessibility tree of the current browser page. Returns structured refs (e0, e1...) for clicking/typing. Primary way to 'see' the page.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "browser_action",
+        "description": "Perform a browser action: click, type, fill, press, hover, select, scroll. Use refs from snapshot (e.g. 'e5') or CSS selectors.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["click", "type", "fill", "press", "hover", "select", "scroll"], "description": "Action to perform"},
+                "ref": {"type": "string", "description": "Element ref from snapshot (e.g. 'e5') or CSS selector"},
+                "value": {"type": "string", "description": "Value for type/fill/press/select actions"},
+            },
+            "required": ["action", "ref"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "browser_text",
+        "description": "Extract readable text from the current page. Strips nav/ads in readability mode, or returns raw full text.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "mode": {"type": "string", "enum": ["readability", "raw"], "description": "Extraction mode (default: readability)"},
+            },
+            "required": [],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "browser_screenshot",
+        "description": "Take a JPEG screenshot of the current browser page. Returns base64-encoded image.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "browser_tabs",
+        "description": "List open browser tabs, or open/close a tab.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["list", "open", "close"], "description": "Tab action (default: list)"},
+                "url": {"type": "string", "description": "URL to open (for 'open' action)"},
+                "tab_id": {"type": "string", "description": "Tab ID to close (for 'close' action)"},
+            },
+            "required": [],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "browser_evaluate",
+        "description": "Execute JavaScript in the current browser tab. Escape hatch for any workflow gap.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "script": {"type": "string", "description": "JavaScript code to execute"},
+            },
+            "required": ["script"],
+            "additionalProperties": False
+        }
+    },
 ]
 
 
@@ -1542,6 +1629,21 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             for l in leads:
                 lines.append(f"• {l['business_name']} — {l.get('phone', 'no phone')} — {l.get('address', 'no address')}")
             return "\n".join(lines)
+        # ═ PinchTab browser automation
+        elif tool_name == "browser_navigate":
+            return _pinchtab_navigate(tool_input["url"])
+        elif tool_name == "browser_snapshot":
+            return _pinchtab_snapshot()
+        elif tool_name == "browser_action":
+            return _pinchtab_action(tool_input["action"], tool_input["ref"], tool_input.get("value", ""))
+        elif tool_name == "browser_text":
+            return _pinchtab_text(tool_input.get("mode", "readability"))
+        elif tool_name == "browser_screenshot":
+            return _pinchtab_screenshot()
+        elif tool_name == "browser_tabs":
+            return _pinchtab_tabs(tool_input.get("action", "list"), tool_input.get("url", ""), tool_input.get("tab_id", ""))
+        elif tool_name == "browser_evaluate":
+            return _pinchtab_evaluate(tool_input["script"])
         else:
             return f"Unknown tool: {tool_name}"
     except Exception as e:
@@ -4190,4 +4292,87 @@ def _read_tweets(account: str = None, limit: int = 5) -> str:
         "count": len(all_tweets),
         "source": source
     }, indent=2)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PINCHTAB — Browser Automation for AI Agents
+# ═══════════════════════════════════════════════════════════════════════════
+
+PINCHTAB_BASE = os.getenv("PINCHTAB_URL", "http://localhost:9867")
+
+
+def _pinchtab_request(method: str, path: str, body: dict = None, timeout: int = 30) -> str:
+    """Make a request to PinchTab HTTP API."""
+    import urllib.request
+    url = f"{PINCHTAB_BASE}{path}"
+    data = json.dumps(body).encode() if body else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            result = resp.read().decode()
+            # Truncate very large responses
+            if len(result) > 50000:
+                result = result[:50000] + "\n... (truncated)"
+            return result
+    except urllib.error.URLError as e:
+        return json.dumps({"error": f"PinchTab unreachable: {e}. Is pinchtab running? Start with: pinchtab"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def _pinchtab_navigate(url: str) -> str:
+    """Navigate to a URL and return the snapshot."""
+    result = _pinchtab_request("POST", "/navigate", {"url": url})
+    # Also grab the snapshot so the agent can see the page
+    snapshot = _pinchtab_request("GET", "/snapshot")
+    try:
+        snap_data = json.loads(snapshot)
+        return json.dumps({
+            "navigated": url,
+            "snapshot_count": snap_data.get("count", 0),
+            "snapshot": snap_data.get("tree", snapshot)[:30000],
+        }, indent=2)
+    except Exception:
+        return f"Navigated to {url}. Snapshot: {snapshot[:5000]}"
+
+
+def _pinchtab_snapshot() -> str:
+    """Get accessibility tree snapshot."""
+    return _pinchtab_request("GET", "/snapshot")
+
+
+def _pinchtab_action(action: str, ref: str, value: str = "") -> str:
+    """Perform a browser action."""
+    body = {"action": action, "ref": ref}
+    if value:
+        body["value"] = value
+    return _pinchtab_request("POST", "/action", body)
+
+
+def _pinchtab_text(mode: str = "readability") -> str:
+    """Extract text from current page."""
+    return _pinchtab_request("GET", f"/text?mode={mode}")
+
+
+def _pinchtab_screenshot() -> str:
+    """Take a screenshot (returns base64 JPEG)."""
+    result = _pinchtab_request("GET", "/screenshot")
+    return result[:100000]  # Cap at 100KB base64
+
+
+def _pinchtab_tabs(action: str = "list", url: str = "", tab_id: str = "") -> str:
+    """Manage browser tabs."""
+    if action == "list":
+        return _pinchtab_request("GET", "/tabs")
+    elif action == "open":
+        return _pinchtab_request("POST", "/tab", {"action": "open", "url": url})
+    elif action == "close":
+        return _pinchtab_request("POST", "/tab", {"action": "close", "id": tab_id})
+    return json.dumps({"error": f"Unknown tab action: {action}"})
+
+
+def _pinchtab_evaluate(script: str) -> str:
+    """Execute JavaScript in browser."""
+    return _pinchtab_request("POST", "/evaluate", {"script": script})
 

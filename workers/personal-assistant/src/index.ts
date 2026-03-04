@@ -1320,6 +1320,96 @@ const OPENCLAW_TOOLS = [
           },
         },
       },
+      // --- PinchTab Browser Automation ---
+      {
+        name: "browser_navigate",
+        description:
+          "Navigate the browser to a URL. Opens the page and returns the accessibility tree snapshot for agent interaction.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            url: { type: "STRING", description: "The URL to navigate to" },
+          },
+          required: ["url"],
+        },
+      },
+      {
+        name: "browser_snapshot",
+        description:
+          "Get the accessibility tree of the current browser page. Returns structured refs (e0, e1...) for clicking/typing.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+        },
+      },
+      {
+        name: "browser_action",
+        description:
+          "Perform a browser action: click, type, fill, press, hover, select, scroll. Use refs from snapshot (e.g. 'e5').",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: click, type, fill, press, hover, select, scroll",
+            },
+            ref: {
+              type: "STRING",
+              description: "Element ref from snapshot (e.g. 'e5') or CSS selector",
+            },
+            value: { type: "STRING", description: "Value for type/fill/press/select actions" },
+          },
+          required: ["action", "ref"],
+        },
+      },
+      {
+        name: "browser_text",
+        description:
+          "Extract readable text from the current page. Strips nav/ads in readability mode.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            mode: {
+              type: "STRING",
+              description: "Extraction mode: readability or raw (default: readability)",
+            },
+          },
+        },
+      },
+      {
+        name: "browser_screenshot",
+        description: "Take a JPEG screenshot of the current browser page.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+        },
+      },
+      {
+        name: "browser_tabs",
+        description: "List open browser tabs, or open/close a tab.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Tab action: list, open, close (default: list)",
+            },
+            url: { type: "STRING", description: "URL to open (for 'open' action)" },
+            tab_id: { type: "STRING", description: "Tab ID to close (for 'close' action)" },
+          },
+        },
+      },
+      {
+        name: "browser_evaluate",
+        description: "Execute JavaScript in the current browser tab.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            script: { type: "STRING", description: "JavaScript code to execute" },
+          },
+          required: ["script"],
+        },
+      },
       // --- Proposal Generator ---
       {
         name: "generate_proposal",
@@ -2263,6 +2353,49 @@ async function executeTool(
             business_type: args.business_type || "restaurant",
             owner_name: args.owner_name || "",
           }),
+        })
+      ).json();
+    // --- PinchTab Browser Automation ---
+    case "browser_navigate":
+      return (
+        await gatewayFetch(env, "/api/pinch/navigate", {
+          method: "POST",
+          body: JSON.stringify({ url: args.url }),
+        })
+      ).json();
+    case "browser_snapshot":
+      return (await gatewayFetch(env, "/api/pinch/snapshot")).json();
+    case "browser_action":
+      return (
+        await gatewayFetch(env, "/api/pinch/action", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action,
+            ref: args.ref,
+            value: args.value || "",
+          }),
+        })
+      ).json();
+    case "browser_text":
+      return (await gatewayFetch(env, `/api/pinch/text?mode=${args.mode || "readability"}`)).json();
+    case "browser_screenshot":
+      return (await gatewayFetch(env, "/api/pinch/screenshot")).json();
+    case "browser_tabs":
+      return (
+        await gatewayFetch(env, "/api/pinch/tabs", {
+          method: "POST",
+          body: JSON.stringify({
+            action: args.action || "list",
+            url: args.url || "",
+            tab_id: args.tab_id || "",
+          }),
+        })
+      ).json();
+    case "browser_evaluate":
+      return (
+        await gatewayFetch(env, "/api/pinch/evaluate", {
+          method: "POST",
+          body: JSON.stringify({ script: args.script }),
         })
       ).json();
     // --- PA Integration ---

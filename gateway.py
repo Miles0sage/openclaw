@@ -7424,6 +7424,49 @@ async def find_all_leads_endpoint(
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# PINCHTAB — Browser Automation API routes (for PA worker)
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/pinch/navigate")
+async def pinch_navigate(request: Request):
+    data = await request.json()
+    from agent_tools import _pinchtab_navigate
+    return JSONResponse({"result": _pinchtab_navigate(data["url"])})
+
+@app.get("/api/pinch/snapshot")
+async def pinch_snapshot():
+    from agent_tools import _pinchtab_snapshot
+    return JSONResponse({"result": _pinchtab_snapshot()})
+
+@app.post("/api/pinch/action")
+async def pinch_action(request: Request):
+    data = await request.json()
+    from agent_tools import _pinchtab_action
+    return JSONResponse({"result": _pinchtab_action(data["action"], data["ref"], data.get("value", ""))})
+
+@app.get("/api/pinch/text")
+async def pinch_text(mode: str = "readability"):
+    from agent_tools import _pinchtab_text
+    return JSONResponse({"result": _pinchtab_text(mode)})
+
+@app.get("/api/pinch/screenshot")
+async def pinch_screenshot():
+    from agent_tools import _pinchtab_screenshot
+    return JSONResponse({"result": _pinchtab_screenshot()})
+
+@app.post("/api/pinch/tabs")
+async def pinch_tabs(request: Request):
+    data = await request.json()
+    from agent_tools import _pinchtab_tabs
+    return JSONResponse({"result": _pinchtab_tabs(data.get("action", "list"), data.get("url", ""), data.get("tab_id", ""))})
+
+@app.post("/api/pinch/evaluate")
+async def pinch_evaluate(request: Request):
+    data = await request.json()
+    from agent_tools import _pinchtab_evaluate
+    return JSONResponse({"result": _pinchtab_evaluate(data["script"])})
+
+# ═══════════════════════════════════════════════════════════════════════
 # SALES CALLER — AI outbound calls via Vapi + ElevenLabs
 # ═══════════════════════════════════════════════════════════════════════
 
