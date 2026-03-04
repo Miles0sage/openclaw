@@ -218,6 +218,18 @@ class CEOEngine:
         except Exception:
             pass
 
+    def _notify_slack(self, message: str):
+        """Send a Slack notification via gateway's send_slack_message."""
+        try:
+            from gateway import send_slack_message, SLACK_REPORT_CHANNEL
+            asyncio.ensure_future(send_slack_message(SLACK_REPORT_CHANNEL, f"[CEO] {message}"))
+        except Exception as e:
+            logger.warning(f"[CEO] Slack notify failed: {e}")
+
+    def _update_goal_progress(self, goal_id: str, progress_pct: int):
+        """Update a goal's progress percentage."""
+        self.update_goal(goal_id, progress_pct=min(progress_pct, 100))
+
     # -- Lifecycle --
 
     async def start(self):
@@ -436,43 +448,71 @@ class CEOEngine:
             return None
 
     async def _run_business_pipeline(self):
-        """Daily: Check business pipeline — leads, proposals, opportunities."""
+        """Daily: Run structured lead pipeline — discovery, outreach, proposals."""
         try:
             self._mark_run("business_pipeline")
 
-            goals = self.get_active_goals()
-            business_goals = [g for g in goals if any(
-                m in g.get("metrics", []) for m in ("revenue", "signups", "clients", "leads")
-            )]
+            from pipeline_orchestrator import PipelineOrchestrator
+            orch = PipelineOrchestrator()
 
-            if not business_goals:
-                self._log_decision("business_pipeline_skip",
-                    "No active business goals — skipping pipeline check")
-                return {"status": "skipped", "reason": "no business goals"}
+            jobs_created = []
 
-            # Create a business development research job
-            goal_summaries = "; ".join(g["title"] for g in business_goals)
-            task_desc = (
-                "Business Pipeline Check (CEO auto-generated): "
-                f"Active business goals: [{goal_summaries}]. "
-                "Research: 1) Check for any new inquiries or leads, "
-                "2) Identify potential OpenClaw customers (AI agencies, dev shops, startups), "
-                "3) Draft outreach template for top 3 prospects, "
-                "4) Review competitor pricing and positioning."
-            )
+            # Phase 1: Discovery (if any business type is due for search)
+            if orch.should_run_discovery():
+                task = orch.build_discovery_job()
+                job = self._create_agency_job(
+                    project="openclaw", task=task,
+                    priority="P2", source="ceo_pipeline_discovery",
+                )
+                if job:
+                    jobs_created.append(("discovery", job))
 
-            job = self._create_agency_job(
-                project="openclaw",
-                task=task_desc,
-                priority="P3",
-                source="ceo_business_pipeline",
-            )
+            # Phase 2: Outreach (qualified uncalled leads)
+            qualified = orch.qualify_leads()
+            if qualified:
+                task = orch.build_outreach_job(qualified[:5])
+                job = self._create_agency_job(
+                    project="openclaw", task=task,
+                    priority="P1", source="ceo_pipeline_outreach",
+                )
+                if job:
+                    jobs_created.append(("outreach", job))
+
+            # Phase 3: Proposals (leads marked "interested")
+            interested = orch.get_interested_leads()
+            if interested:
+                task = orch.build_proposal_job(interested)
+                job = self._create_agency_job(
+                    project="openclaw", task=task,
+                    priority="P2", source="ceo_pipeline_proposals",
+                )
+                if job:
+                    jobs_created.append(("proposals", job))
+
+            # Record metrics + update g5 progress
+            orch.record_run({"phases": [p[0] for p in jobs_created]})
+            progress = orch.get_g5_progress()
+            self._update_goal_progress("g5", progress)
+
+            # Slack notification
+            if jobs_created:
+                phases = ", ".join(p[0] for p in jobs_created)
+                self._notify_slack(
+                    f"Business pipeline: {len(jobs_created)} jobs — {phases} "
+                    f"(g5 progress: {progress}%)"
+                )
 
             self._log_decision("business_pipeline_dispatched",
-                f"Created business pipeline job ({len(business_goals)} active goals)",
-                {"job": job, "goals": business_goals})
+                f"Pipeline ran: {len(jobs_created)} jobs, g5 at {progress}%",
+                {"jobs": [p[0] for p in jobs_created], "qualified_leads": len(qualified),
+                 "interested_leads": len(interested), "g5_progress": progress})
 
-            return {"status": "dispatched", "job": job}
+            return {
+                "status": "dispatched",
+                "jobs_created": len(jobs_created),
+                "phases": [p[0] for p in jobs_created],
+                "g5_progress": progress,
+            }
 
         except Exception as e:
             logger.error(f"[CEO] Business pipeline failed: {e}", exc_info=True)

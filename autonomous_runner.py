@@ -61,6 +61,11 @@ from checkpoint import save_checkpoint, get_latest_checkpoint, clear_checkpoints
 from job_manager import get_job, update_job_status, list_jobs, get_pending_jobs, validate_job, JobValidationError
 from reflexion import save_reflection, search_reflections, format_reflections_for_prompt
 from departments import DEPARTMENTS, AGENT_TO_DEPARTMENT, load_department_knowledge
+from memory_policies import inject_context, auto_extract_learnings, save_learnings
+from agent_templates import get_template, get_failure_recovery, get_model_preference
+from agent_sessions import get_session, record_job, build_agent_context
+from phase_scoring import score_all_phases, validate_phase_output
+from supervisor import maybe_decompose_and_execute
 # Cost tracking — import from cost_tracker (single source of truth)
 from cost_tracker import (
     calculate_cost,
@@ -129,6 +134,78 @@ def _classify_error(error_str: str) -> str:
         if pattern in err_lower:
             return "transient"
     return "unknown"  # Default: retry once, then give up
+
+
+async def _diagnose_failure(
+    error_text: str,
+    original_prompt: str,
+    phase: str,
+    error_history: list[dict] | None = None,
+) -> dict:
+    """Diagnose a failure and suggest a modified prompt for retry.
+
+    Calls Grok grok-3-mini (~$0.0004) to analyze the error and rewrite the prompt.
+
+    Returns:
+        {"diagnosis": str, "modified_prompt": str, "strategy": "retry|skip|escalate"}
+    """
+    try:
+        from grok_executor import call_grok
+
+        history_context = ""
+        if error_history:
+            history_lines = []
+            for entry in error_history[-3:]:
+                history_lines.append(
+                    f"  Attempt {entry.get('attempt')}: {entry.get('error', '')[:200]}"
+                )
+            history_context = f"\nPrevious failures:\n" + "\n".join(history_lines)
+
+        diag_prompt = (
+            f"An AI agent step failed during the '{phase}' phase.\n\n"
+            f"Error: {error_text[:500]}\n"
+            f"{history_context}\n\n"
+            f"Original prompt (first 800 chars):\n{original_prompt[:800]}\n\n"
+            f"Respond with EXACTLY this JSON format (no markdown, no extra text):\n"
+            f'{{"diagnosis": "brief explanation of what went wrong",'
+            f' "modified_prompt": "the rewritten prompt that avoids the error",'
+            f' "strategy": "retry"}}\n\n'
+            f'strategy must be one of: "retry" (try again with modified prompt), '
+            f'"skip" (this step cannot succeed, move on), '
+            f'"escalate" (needs human/PM review).\n'
+            f'If the error is a transient API/network issue, set strategy to "retry" '
+            f'and keep the modified_prompt close to the original.\n'
+            f'If the error indicates a fundamental problem (wrong file path, missing '
+            f'dependency), rewrite the prompt to work around it.'
+        )
+
+        result = await call_grok(
+            prompt=diag_prompt,
+            system_prompt="You are a failure diagnosis agent. Analyze errors and suggest fixes. Respond only with valid JSON.",
+            model="grok-3-mini",
+            max_tokens=1024,
+            temperature=0.1,
+            timeout=30,
+        )
+
+        text = result.get("text", "").strip()
+        # Try to parse JSON from the response
+        import re
+        json_match = re.search(r'\{.*\}', text, re.DOTALL)
+        if json_match:
+            parsed = json.loads(json_match.group())
+            return {
+                "diagnosis": parsed.get("diagnosis", ""),
+                "modified_prompt": parsed.get("modified_prompt", ""),
+                "strategy": parsed.get("strategy", "retry"),
+                "cost_usd": result.get("cost_usd", 0),
+            }
+        else:
+            return {"diagnosis": text[:200], "modified_prompt": "", "strategy": "retry", "cost_usd": result.get("cost_usd", 0)}
+
+    except Exception as e:
+        logger.debug(f"Failure diagnosis failed (non-fatal): {e}")
+        return {"diagnosis": f"Diagnosis unavailable: {e}", "modified_prompt": "", "strategy": "retry", "cost_usd": 0}
 
 
 def _make_call_signature(tool_name: str, tool_input) -> str:
@@ -633,18 +710,56 @@ def _classify_department(job: dict) -> str:
 
 
 def _select_agent_for_job(job: dict) -> tuple[str, str]:
-    """Pick the best agent for a job using department-based routing.
+    """Pick the best agent for a job using department-based routing + agent templates.
 
     Returns (agent_key, department_name).
 
-    Within a department, complexity heuristics determine whether to use
-    the primary agent (cheap) or fallback agent (powerful).
+    Uses agent_templates.get_template_for_task() for task-type routing when
+    a clear task signal is detected. Falls back to department-based routing
+    with complexity heuristics.
     """
     dept_name = _classify_department(job)
     dept = DEPARTMENTS[dept_name]
-
-    # Within department: use complexity heuristics for agent selection
     task_lower = job.get("task", "").lower()
+
+    # Try template-based routing first (more granular than department routing)
+    try:
+        from agent_templates import get_template_for_task, _AGENT_KEY_TO_TEMPLATE
+
+        # Map task keywords to template task types
+        task_type_signals = {
+            "security_audit": ["security audit", "pentest", "vulnerability scan"],
+            "pentest": ["penetration test", "pen test"],
+            "debug": ["debug", "race condition", "memory leak", "heisenbug"],
+            "code_review": ["code review", "pr review", "review pr", "audit code"],
+            "testing": ["write test", "add test", "test coverage", "unit test", "e2e test"],
+            "complex_refactor": ["refactor", "overhaul", "redesign", "rewrite"],
+            "architecture": ["architecture", "system design", "api design"],
+            "database": ["database", "sql", "migration", "schema", "supabase query"],
+            "bug_fix": ["fix bug", "bug fix", "broken", "not working"],
+            "feature": ["add feature", "implement", "build", "create"],
+        }
+
+        matched_type = None
+        for task_type, keywords in task_type_signals.items():
+            if any(kw in task_lower for kw in keywords):
+                matched_type = task_type
+                break
+
+        if matched_type:
+            template = get_template_for_task(matched_type)
+            # Reverse-map: template_name -> agent_key
+            template_to_agent = {v: k for k, v in _AGENT_KEY_TO_TEMPLATE.items()}
+            from agent_templates import TEMPLATES
+            for tmpl_name, tmpl_obj in TEMPLATES.items():
+                if tmpl_obj is template and tmpl_name in template_to_agent:
+                    agent_key = template_to_agent[tmpl_name]
+                    logger.info(f"Template routing: task_type={matched_type} -> agent={agent_key}")
+                    return agent_key, template.department or dept_name
+    except Exception as tmpl_err:
+        logger.debug(f"Template routing failed, using department routing: {tmpl_err}")
+
+    # Fallback: department-based routing with complexity heuristics
     complex_kw = ["refactor", "architecture", "multi-file", "rewrite", "overhaul", "redesign"]
     is_complex = any(kw in task_lower for kw in complex_kw)
 
@@ -1727,7 +1842,8 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
             f"When done, summarize what you did and the outcome."
         )
 
-        # Retry logic per step
+        # Retry logic per step (Adaptive Retry — diagnose failures before retrying)
+        error_history: list[dict] = []  # track each attempt's error + diagnosis
         step_result = None
         for attempt in range(DEFAULT_MAX_RETRIES):
             try:
@@ -1801,11 +1917,53 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                 step.attempts = attempt + 1
                 backoff = (2 ** attempt) * 2  # 2s, 4s, 8s
 
+                # --- Adaptive Retry: diagnose failure and modify prompt ---
+                error_entry = {"attempt": attempt + 1, "error": str(e)[:500], "error_class": error_class}
+                diagnosis = await _diagnose_failure(
+                    error_text=str(e),
+                    original_prompt=prompt,
+                    phase="execute",
+                    error_history=error_history,
+                )
+                error_entry["diagnosis"] = diagnosis.get("diagnosis", "")[:300]
+                error_entry["strategy"] = diagnosis.get("strategy", "retry")
+                error_history.append(error_entry)
+
+                # Use diagnosis strategy
+                diag_strategy = diagnosis.get("strategy", "retry")
+                if diag_strategy == "skip":
+                    logger.info(f"Step {step.index}: diagnosis recommends SKIP — moving on")
+                    break
+                elif diag_strategy == "escalate":
+                    logger.info(f"Step {step.index}: diagnosis recommends ESCALATE")
+                    # Will be handled by template failure_recovery below
+
+                # Use modified prompt from diagnosis if available
+                modified_prompt = diagnosis.get("modified_prompt", "")
+                if modified_prompt and len(modified_prompt) > 50:
+                    prompt = modified_prompt
+                    logger.info(f"Step {step.index}: using diagnosed modified prompt ({len(prompt)} chars)")
+
+                # Check agent template failure recovery strategy
+                agent_recovery = get_failure_recovery(step_agent)
+                if agent_recovery == "skip" and attempt >= 1:
+                    logger.info(f"Step {step.index}: agent template says SKIP after {attempt+1} attempts")
+                    break
+                elif agent_recovery == "escalate" and attempt >= 1:
+                    logger.warning(f"Step {step.index}: agent template says ESCALATE — flagging for PM review")
+                    _log_phase(job["id"], "execute", {
+                        "event": "step_escalated",
+                        "step": step.index,
+                        "error_history": error_history,
+                    })
+                    break
+
                 # Unknown errors: only retry once (not full 3 attempts)
                 max_retries_for_error = DEFAULT_MAX_RETRIES if error_class == "transient" else 2
                 logger.warning(
                     f"Step {step.index} attempt {attempt+1} failed for {job['id']} "
-                    f"[{error_class}]: {e}. Retrying in {backoff}s..."
+                    f"[{error_class}]: {e}. Diagnosis: {diagnosis.get('diagnosis', 'n/a')[:80]}. "
+                    f"Retrying in {backoff}s..."
                 )
                 _log_phase(job["id"], "execute", {
                     "event": "step_retry",
@@ -1813,6 +1971,7 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
                     "attempt": attempt + 1,
                     "error": str(e),
                     "error_class": error_class,
+                    "diagnosis": diagnosis.get("diagnosis", "")[:200],
                     "backoff_seconds": backoff,
                 })
                 if attempt < max_retries_for_error - 1:
@@ -3321,6 +3480,31 @@ class AutonomousRunner:
                 return False
 
         try:
+            # ---- Supervisor: check if task should be decomposed ----
+            if not existing_checkpoint:  # don't decompose resumed jobs
+                try:
+                    supervisor_result = await maybe_decompose_and_execute(
+                        job, project_root=project_root or "/root/openclaw"
+                    )
+                    if supervisor_result:
+                        logger.info(
+                            f"Job {job_id}: Supervisor handled — "
+                            f"{supervisor_result.get('sub_tasks_completed', 0)}/"
+                            f"{supervisor_result.get('sub_tasks_total', 0)} sub-tasks done"
+                        )
+                        result["success"] = supervisor_result.get("success", False)
+                        result["supervisor"] = supervisor_result
+                        result["phases"]["supervisor"] = {
+                            "status": "completed",
+                            "decomposition": supervisor_result.get("decomposition", {}),
+                            "sub_tasks": supervisor_result.get("sub_tasks", []),
+                            "summary": supervisor_result.get("summary", ""),
+                        }
+                        result["cost_usd"] = progress.cost_usd
+                        return result
+                except Exception as sup_err:
+                    logger.warning(f"Job {job_id}: Supervisor check failed (falling through): {sup_err}")
+
             # ---- Phase 1: RESEARCH ----
             if _should_skip("research"):
                 logger.info(f"Job {job_id}: Skipping research (resuming from {resume_from_phase})")
@@ -3333,6 +3517,12 @@ class AutonomousRunner:
                     progress,
                 )
                 result["phases"]["research"] = {"status": "done", "length": len(research)}
+                # Schema validation
+                _rv = validate_phase_output("research", research)
+                if _rv["errors"]:
+                    logger.warning(f"Job {job_id}: Research schema errors: {_rv['errors']}")
+                if isinstance(result["phases"].get("research"), dict):
+                    result["phases"]["research"]["validation"] = _rv
                 if ide_session:
                     ide_session.set_phase("research")
                     ide_session.add_context("research", research[:3000], source="research_phase", relevance=0.8, phase="research")
@@ -3368,6 +3558,12 @@ class AutonomousRunner:
                     "status": "done",
                     "steps": len(plan.steps),
                 }
+                # Schema validation
+                _pv = validate_phase_output("plan", plan)
+                if _pv["errors"]:
+                    logger.warning(f"Job {job_id}: Plan schema errors: {_pv['errors']}")
+                if isinstance(result["phases"].get("plan"), dict):
+                    result["phases"]["plan"]["validation"] = _pv
                 if ide_session:
                     ide_session.set_phase("plan")
                     plan_text = "\n".join(f"Step {s.index}: {s.description}" for s in plan.steps)
@@ -3408,6 +3604,31 @@ class AutonomousRunner:
                 ide_session.set_phase("execute")
                 ide_session.compact(target_tokens=4000)
                 save_session(ide_session)
+
+            # Inject relevant memories + past reflections into execute context
+            try:
+                job_metadata = {
+                    "task": job.get("task", ""),
+                    "project": job.get("project", ""),
+                    "department": department,
+                }
+                # Enhance the task prompt with memory context
+                original_task = job.get("task", "")
+                enriched_task = inject_context(original_task, job_metadata)
+                # Inject persistent agent context (cross-job memory)
+                try:
+                    agent_ctx = build_agent_context(agent_key, original_task, job.get("project", ""))
+                    if agent_ctx:
+                        enriched_task = f"{agent_ctx}\n\n---\n\n{enriched_task}"
+                        logger.info(f"Job {job_id}: Agent session context injected ({len(agent_ctx)} chars)")
+                except Exception as agent_ctx_err:
+                    logger.debug(f"Job {job_id}: Agent context injection skipped: {agent_ctx_err}")
+                if enriched_task != original_task:
+                    job["_enriched_task"] = enriched_task
+                    logger.info(f"Job {job_id}: Memory context injected ({len(enriched_task) - len(original_task)} chars added)")
+            except Exception as mem_err:
+                logger.debug(f"Job {job_id}: Memory injection skipped: {mem_err}")
+
             research_for_execute = _trim_context(research, max_tokens=1500)
             if not _should_skip("execute"):
                 exec_results = await self._run_phase_with_retry(
@@ -3425,6 +3646,12 @@ class AutonomousRunner:
                 "steps_done": len(exec_results) - len(failed_steps),
                 "steps_failed": len(failed_steps),
             }
+            # Schema validation
+            _ev = validate_phase_output("execute", exec_results)
+            if _ev["errors"]:
+                logger.warning(f"Job {job_id}: Execute schema errors: {_ev['errors']}")
+            if isinstance(result["phases"].get("execute"), dict):
+                result["phases"]["execute"]["validation"] = _ev
 
             if progress.cancelled:
                 raise CancelledError(job_id)
@@ -3475,6 +3702,12 @@ class AutonomousRunner:
                 logger.info(f"Job {job_id}: Skipping verify (resuming from {resume_from_phase})")
                 verify_result = {"status": "skipped"}
             result["phases"]["verify"] = verify_result
+            # Schema validation
+            _vv = validate_phase_output("verify", verify_result)
+            if _vv["errors"]:
+                logger.warning(f"Job {job_id}: Verify schema errors: {_vv['errors']}")
+            if isinstance(result["phases"].get("verify"), dict):
+                result["phases"]["verify"]["validation"] = _vv
             if ide_session:
                 ide_session.set_phase("verify")
                 save_session(ide_session)
@@ -3492,6 +3725,12 @@ class AutonomousRunner:
                 progress,
             )
             result["phases"]["deliver"] = delivery
+            # Schema validation
+            _dv = validate_phase_output("deliver", delivery)
+            if _dv["errors"]:
+                logger.warning(f"Job {job_id}: Deliver schema errors: {_dv['errors']}")
+            if isinstance(result["phases"].get("deliver"), dict):
+                result["phases"]["deliver"]["validation"] = _dv
 
             # Merge worktree changes back and clean up
             if use_worktree and project_root:
@@ -3501,6 +3740,24 @@ class AutonomousRunner:
                     logger.info(f"Job {job_id}: worktree merged and cleaned up")
                 except Exception as wt_err:
                     logger.warning(f"Job {job_id}: worktree cleanup failed: {wt_err}")
+
+            # Phase-level quality scoring (Process Reward Model lite)
+            try:
+                phase_scores = score_all_phases(
+                    result,
+                    plan=plan,
+                    research_text=research,
+                    exec_results=exec_results,
+                )
+                result["phase_scores"] = phase_scores
+                phase_summary = ", ".join(
+                    f"{k}={v['score']:.2f}" for k, v in phase_scores["phases"].items()
+                )
+                logger.info(
+                    f"Job {job_id}: Phase scores — aggregate={phase_scores['aggregate']:.2f}, {phase_summary}"
+                )
+            except Exception as ps_err:
+                logger.warning(f"Job {job_id}: Phase scoring failed (non-fatal): {ps_err}")
 
             # Mark success
             result["success"] = delivery.get("delivered", True)
@@ -3747,6 +4004,20 @@ class AutonomousRunner:
         except Exception as ref_err:
             logger.warning(f"Failed to save reflexion: {ref_err}")
 
+        # Auto-extract learnings from completed jobs and save to memory
+        try:
+            job_metadata = {
+                "task": job.get("task", ""),
+                "project": job.get("project", "openclaw"),
+                "department": department,
+            }
+            learnings = auto_extract_learnings(result, job_metadata)
+            if learnings:
+                save_learnings(learnings, project=job.get("project", "openclaw"))
+                logger.info(f"Job {job_id}: {len(learnings)} learnings auto-extracted")
+        except Exception as learn_err:
+            logger.debug(f"Job {job_id}: Learning extraction failed: {learn_err}")
+
         # Auto-skill extraction from successful jobs
         try:
             if result.get("success"):
@@ -3756,6 +4027,19 @@ class AutonomousRunner:
                     logger.info(f"Job {job_id}: Auto-skill extracted: {skill_name}")
         except Exception as skill_err:
             logger.warning(f"Failed to extract auto-skill: {skill_err}")
+
+        # Record job in agent's persistent session (cross-job memory)
+        try:
+            agent_session = get_session(agent_key)
+            record_job(agent_session, result, {
+                "job_id": job_id,
+                "task": job.get("task", ""),
+                "project": job.get("project", "openclaw"),
+                "department": department,
+            })
+            logger.info(f"Job {job_id}: Recorded in agent session '{agent_key}'")
+        except Exception as sess_err:
+            logger.debug(f"Job {job_id}: Agent session recording failed: {sess_err}")
 
         return result
 

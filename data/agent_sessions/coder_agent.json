@@ -1,0 +1,71 @@
+{
+  "agent_key": "coder_agent",
+  "created_at": "2026-03-04T19:27:10.231681+00:00",
+  "last_active": "2026-03-04T21:27:59.502262+00:00",
+  "total_jobs": 4,
+  "total_successes": 4,
+  "total_failures": 0,
+  "total_cost_usd": 0.00797,
+  "working_memory": [
+    {
+      "job_id": "test-001",
+      "task": "Fix login authentication bug in barber-crm",
+      "outcome": "success",
+      "key_actions": [],
+      "duration_seconds": 45,
+      "cost_usd": 0.002,
+      "timestamp": "2026-03-04T19:27:10.232246+00:00",
+      "project": "barber-crm"
+    },
+    {
+      "job_id": "test-001",
+      "task": "Fix login authentication bug in barber-crm",
+      "outcome": "success",
+      "key_actions": [],
+      "duration_seconds": 45,
+      "cost_usd": 0.002,
+      "timestamp": "2026-03-04T19:27:23.910784+00:00",
+      "project": "barber-crm"
+    },
+    {
+      "job_id": "job-20260304-212235-f4dc2f5e",
+      "task": "Read the file /root/openclaw/phase_scoring.py and write a brief summary of what it does. List the main functions and their purpose.",
+      "outcome": "success",
+      "key_actions": ["execute: 1 steps completed"],
+      "duration_seconds": 0.0,
+      "cost_usd": 0.001878,
+      "timestamp": "2026-03-04T21:25:26.970961+00:00",
+      "project": "openclaw"
+    },
+    {
+      "job_id": "job-20260304-212545-5ed6d9b0",
+      "task": "Read the file /root/openclaw/phase_scoring.py and list all the function names defined in it",
+      "outcome": "success",
+      "key_actions": ["execute: 1 steps completed"],
+      "duration_seconds": 0.0,
+      "cost_usd": 0.002092,
+      "timestamp": "2026-03-04T21:27:59.501973+00:00",
+      "project": "openclaw"
+    }
+  ],
+  "skills": [],
+  "project_contexts": {
+    "barber-crm": {
+      "project": "barber-crm",
+      "file_patterns": [],
+      "conventions": [],
+      "known_issues": [],
+      "last_worked": "2026-03-04T19:27:23.910852+00:00",
+      "task_count": 2
+    },
+    "openclaw": {
+      "project": "openclaw",
+      "file_patterns": [],
+      "conventions": [],
+      "known_issues": [],
+      "last_worked": "2026-03-04T21:27:59.502037+00:00",
+      "task_count": 2
+    }
+  },
+  "personality_notes": []
+}

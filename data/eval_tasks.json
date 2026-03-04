@@ -1,0 +1,182 @@
+[
+  {
+    "id": "simple-01",
+    "category": "simple",
+    "task": "Read the file /root/openclaw/gateway.py and report the first 3 import statements",
+    "project": "openclaw",
+    "priority": "P3",
+    "expected_keywords": ["import", "gateway"],
+    "max_cost_usd": 0.05
+  },
+  {
+    "id": "simple-02",
+    "category": "simple",
+    "task": "List all Python files in /root/openclaw/ (top-level only) and count them",
+    "project": "openclaw",
+    "priority": "P3",
+    "expected_keywords": ["py", "gateway", "autonomous_runner"],
+    "max_cost_usd": 0.05
+  },
+  {
+    "id": "simple-03",
+    "category": "simple",
+    "task": "Check the git status of /root/openclaw/ and report any uncommitted changes",
+    "project": "openclaw",
+    "priority": "P3",
+    "expected_keywords": ["git", "status"],
+    "max_cost_usd": 0.05
+  },
+  {
+    "id": "simple-04",
+    "category": "simple",
+    "task": "Read /root/openclaw/cost_tracker.py and list all exported function names",
+    "project": "openclaw",
+    "priority": "P3",
+    "expected_keywords": ["def", "cost"],
+    "max_cost_usd": 0.05
+  },
+  {
+    "id": "simple-05",
+    "category": "simple",
+    "task": "Search for all TODO comments in /root/openclaw/*.py files and list them",
+    "project": "openclaw",
+    "priority": "P3",
+    "expected_keywords": ["TODO"],
+    "max_cost_usd": 0.05
+  },
+  {
+    "id": "medium-01",
+    "category": "medium",
+    "task": "Add a docstring to the _classify_department function in /root/openclaw/autonomous_runner.py if it doesn't have one, explaining what it does",
+    "project": "openclaw",
+    "priority": "P2",
+    "expected_keywords": ["docstring", "department", "classify"],
+    "max_cost_usd": 0.08
+  },
+  {
+    "id": "medium-02",
+    "category": "medium",
+    "task": "Write a Python script at /root/openclaw/data/test_cost_calc.py that tests the calculate_cost function from cost_tracker.py with 3 test cases",
+    "project": "openclaw",
+    "priority": "P2",
+    "expected_keywords": ["test", "calculate_cost", "assert"],
+    "max_cost_usd": 0.08
+  },
+  {
+    "id": "medium-03",
+    "category": "medium",
+    "task": "Find all hardcoded API URLs in /root/openclaw/ Python files and list them with their file locations",
+    "project": "openclaw",
+    "priority": "P2",
+    "expected_keywords": ["http", "api", "url"],
+    "max_cost_usd": 0.08
+  },
+  {
+    "id": "medium-04",
+    "category": "medium",
+    "task": "Add input validation to the create_job function in /root/openclaw/job_manager.py: ensure task is non-empty and priority is one of P0-P3",
+    "project": "openclaw",
+    "priority": "P2",
+    "expected_keywords": ["validation", "priority", "task"],
+    "max_cost_usd": 0.08
+  },
+  {
+    "id": "medium-05",
+    "category": "medium",
+    "task": "Create a health check endpoint test: verify /health returns 200 and contains 'status' key by reading gateway.py and writing a test",
+    "project": "openclaw",
+    "priority": "P2",
+    "expected_keywords": ["health", "status", "200"],
+    "max_cost_usd": 0.08
+  },
+  {
+    "id": "analysis-01",
+    "category": "analysis",
+    "task": "Review the error handling in /root/openclaw/grok_executor.py and identify any missing error cases or potential improvements",
+    "project": "openclaw",
+    "priority": "P2",
+    "expected_keywords": ["error", "handling", "exception"],
+    "max_cost_usd": 0.1
+  },
+  {
+    "id": "analysis-02",
+    "category": "analysis",
+    "task": "Analyze the cost tracking system across cost_tracker.py and autonomous_runner.py. Are there any places where costs could be missed or double-counted?",
+    "project": "openclaw",
+    "priority": "P2",
+    "expected_keywords": ["cost", "tracking", "calculate"],
+    "max_cost_usd": 0.1
+  },
+  {
+    "id": "analysis-03",
+    "category": "analysis",
+    "task": "Review the retry logic in autonomous_runner.py and identify potential infinite loop risks or missing timeout protections",
+    "project": "openclaw",
+    "priority": "P2",
+    "expected_keywords": ["retry", "timeout", "loop"],
+    "max_cost_usd": 0.1
+  },
+  {
+    "id": "analysis-04",
+    "category": "analysis",
+    "task": "Audit the memory/reflexion system: check semantic_memory.py and reflexion.py for data consistency issues or potential data loss scenarios",
+    "project": "openclaw",
+    "priority": "P2",
+    "expected_keywords": ["memory", "reflexion", "data"],
+    "max_cost_usd": 0.1
+  },
+  {
+    "id": "analysis-05",
+    "category": "analysis",
+    "task": "Analyze the agent routing in autonomous_runner.py and departments.py. Are there task types that could be misrouted? Suggest improvements.",
+    "project": "openclaw",
+    "priority": "P2",
+    "expected_keywords": ["routing", "agent", "department"],
+    "max_cost_usd": 0.1
+  },
+  {
+    "id": "edge-01",
+    "category": "edge_case",
+    "task": "Handle this gracefully: create a job with an empty task description and priority X99",
+    "project": "openclaw",
+    "priority": "P3",
+    "expected_keywords": ["error", "invalid", "validation"],
+    "max_cost_usd": 0.05
+  },
+  {
+    "id": "edge-02",
+    "category": "edge_case",
+    "task": "What happens if you try to read a file that doesn't exist at /root/openclaw/nonexistent_file_abc123.py? Handle it properly.",
+    "project": "openclaw",
+    "priority": "P3",
+    "expected_keywords": ["not found", "error", "exist"],
+    "max_cost_usd": 0.05
+  },
+  {
+    "id": "edge-03",
+    "category": "edge_case",
+    "task": "Improve the system",
+    "project": "openclaw",
+    "priority": "P3",
+    "expected_keywords": ["improve", "system"],
+    "max_cost_usd": 0.05
+  },
+  {
+    "id": "edge-04",
+    "category": "edge_case",
+    "task": "Fix the bug in the authentication module of the barber-crm project. Note: there may not be an authentication bug — verify before fixing.",
+    "project": "barber-crm",
+    "priority": "P3",
+    "expected_keywords": ["auth", "review", "check"],
+    "max_cost_usd": 0.08
+  },
+  {
+    "id": "edge-05",
+    "category": "edge_case",
+    "task": "Deploy the latest changes to production AND roll back to the previous version simultaneously",
+    "project": "openclaw",
+    "priority": "P3",
+    "expected_keywords": ["deploy", "conflict", "cannot"],
+    "max_cost_usd": 0.05
+  }
+]

@@ -130,5 +130,151 @@
       "bet_size": 4.15,
       "expected_profit": 0.1
     }
-  ]
+  ],
+  "results": {
+    "graded_at": "2026-03-04T17:45:44.340516+00:00Z",
+    "predictions": [
+      {
+        "home": "Charlotte Hornets",
+        "away": "Dallas Mavericks",
+        "predicted_winner": "Charlotte Hornets",
+        "actual_winner": "Charlotte Hornets",
+        "home_score": 117,
+        "away_score": 90,
+        "correct": true
+      },
+      {
+        "home": "Cleveland Cavaliers",
+        "away": "Detroit Pistons",
+        "predicted_winner": "Detroit Pistons",
+        "actual_winner": "Cleveland Cavaliers",
+        "home_score": 113,
+        "away_score": 109,
+        "correct": false
+      },
+      {
+        "home": "Orlando Magic",
+        "away": "Washington Wizards",
+        "predicted_winner": "Orlando Magic",
+        "actual_winner": "Orlando Magic",
+        "home_score": 126,
+        "away_score": 109,
+        "correct": true
+      },
+      {
+        "home": "Miami Heat",
+        "away": "Brooklyn Nets",
+        "predicted_winner": "Miami Heat",
+        "actual_winner": "Miami Heat",
+        "home_score": 124,
+        "away_score": 98,
+        "correct": true
+      },
+      {
+        "home": "Toronto Raptors",
+        "away": "New York Knicks",
+        "predicted_winner": "New York Knicks",
+        "actual_winner": "New York Knicks",
+        "home_score": 95,
+        "away_score": 111,
+        "correct": true
+      },
+      {
+        "home": "Philadelphia 76ers",
+        "away": "San Antonio Spurs",
+        "predicted_winner": "San Antonio Spurs",
+        "actual_winner": "San Antonio Spurs",
+        "home_score": 91,
+        "away_score": 131,
+        "correct": true
+      },
+      {
+        "home": "Chicago Bulls",
+        "away": "Oklahoma City Thunder",
+        "predicted_winner": "Oklahoma City Thunder",
+        "actual_winner": "Oklahoma City Thunder",
+        "home_score": 108,
+        "away_score": 116,
+        "correct": true
+      },
+      {
+        "home": "Minnesota Timberwolves",
+        "away": "Memphis Grizzlies",
+        "predicted_winner": "Minnesota Timberwolves",
+        "actual_winner": "Minnesota Timberwolves",
+        "home_score": 117,
+        "away_score": 110,
+        "correct": true
+      },
+      {
+        "home": "Los Angeles Lakers",
+        "away": "New Orleans Pelicans",
+        "predicted_winner": "Los Angeles Lakers",
+        "actual_winner": "Los Angeles Lakers",
+        "home_score": 110,
+        "away_score": 101,
+        "correct": true
+      }
+    ],
+    "bets": [
+      {
+        "game": "New Orleans Pelicans @ Los Angeles Lakers",
+        "bet_on": "New Orleans Pelicans",
+        "odds": 4.2,
+        "bet_size": 7.73,
+        "won": false,
+        "profit": -7.73
+      },
+      {
+        "game": "San Antonio Spurs @ Philadelphia 76ers",
+        "bet_on": "Philadelphia 76ers",
+        "odds": 3.9,
+        "bet_size": 6.92,
+        "won": false,
+        "profit": -6.92
+      },
+      {
+        "game": "Detroit Pistons @ Cleveland Cavaliers",
+        "bet_on": "Detroit Pistons",
+        "odds": 1.75,
+        "bet_size": 16.33,
+        "won": false,
+        "profit": -16.33
+      },
+      {
+        "game": "Oklahoma City Thunder @ Chicago Bulls",
+        "bet_on": "Oklahoma City Thunder",
+        "odds": 1.3,
+        "bet_size": 16.08,
+        "won": true,
+        "profit": 4.82
+      },
+      {
+        "game": "New York Knicks @ Toronto Raptors",
+        "bet_on": "Toronto Raptors",
+        "odds": 2.36,
+        "bet_size": 1.4,
+        "won": false,
+        "profit": -1.4
+      },
+      {
+        "game": "Memphis Grizzlies @ Minnesota Timberwolves",
+        "bet_on": "Minnesota Timberwolves",
+        "odds": 1.15,
+        "bet_size": 4.15,
+        "won": true,
+        "profit": 0.62
+      }
+    ],
+    "summary": {
+      "picks_correct": 8,
+      "picks_total": 9,
+      "picks_pct": 88.9,
+      "bets_won": 2,
+      "bets_total": 6,
+      "total_wagered": 52.61,
+      "total_profit": -26.93,
+      "roi_pct": -51.2
+    }
+  }
 }

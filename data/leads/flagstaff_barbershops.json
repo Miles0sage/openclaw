@@ -1,0 +1,79 @@
+[
+  {
+    "name": "Kuttz Barbershop",
+    "address": "1905 E 6th Ave, Flagstaff, AZ 86004",
+    "phone": "(928) 779-6011",
+    "type": "barbershop",
+    "notes": "Also barber school, established presence"
+  },
+  {
+    "name": "Greenlaw Barber Shop",
+    "address": "2134 N 4th St, Flagstaff, AZ 86004",
+    "phone": "(928) 526-3010",
+    "type": "barbershop",
+    "notes": "Has website, traditional shop"
+  },
+  {
+    "name": "Mercede's Barber & Beauty",
+    "address": "2300 N 4th St, Flagstaff, AZ 86004",
+    "phone": "(928) 522-5997",
+    "type": "barbershop",
+    "notes": "Barber + beauty combo"
+  },
+  {
+    "name": "Ray's Barber Shop",
+    "address": "122 S Beaver St, Flagstaff, AZ 86001",
+    "phone": "(928) 774-6104",
+    "type": "barbershop",
+    "notes": "Downtown location, traditional"
+  },
+  {
+    "name": "Alley Cats Hair Cuts For Men",
+    "address": "19 N San Francisco St, Flagstaff, AZ 86001",
+    "phone": "(928) 774-4426",
+    "type": "barbershop",
+    "notes": "Downtown, men-focused"
+  },
+  {
+    "name": "Metro Barbershop",
+    "address": "4650 N Hwy 89, Flagstaff, AZ 86004",
+    "phone": "(928) 526-3881",
+    "type": "barbershop",
+    "notes": "North Flagstaff location"
+  },
+  {
+    "name": "Phoenixx Barbershop LLC",
+    "address": "2500 S Woodland Village Blvd #5, Flagstaff, AZ",
+    "phone": "(928) 440-5224",
+    "type": "barbershop",
+    "notes": "Newer business, LLC"
+  },
+  {
+    "name": "Total Eclipse",
+    "address": "200 S Leroux St, Flagstaff, AZ",
+    "phone": "(928) 556-1565",
+    "type": "barbershop",
+    "notes": "Downtown"
+  },
+  {
+    "name": "Ulibarri's Barber Shop",
+    "address": "12 N Leroux St, Flagstaff, AZ 86001",
+    "phone": "(928) 774-8838",
+    "type": "barbershop",
+    "notes": "Has website, downtown"
+  },
+  {
+    "name": "Clip Joint",
+    "address": "1926 N 4th St #4, Flagstaff, AZ 86004",
+    "phone": "(928) 526-2576",
+    "type": "barbershop",
+    "notes": "4th St corridor"
+  },
+  {
+    "name": "Tony's Barber Shop",
+    "address": "3000 N 4th St #1, Flagstaff, AZ 86004",
+    "phone": "(928) 526-6597",
+    "type": "barbershop",
+    "notes": "North 4th St"
+  }
+]

@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -28,11 +29,30 @@ OPENCODE_BIN = os.environ.get("OPENCODE_BIN", "/root/go/bin/opencode")
 # Default timeout for OpenCode execution (seconds)
 DEFAULT_TIMEOUT = 120
 
+# Path to the canonical OpenCode config (uses Gemini, not Anthropic)
+OPENCODE_CONFIG_SRC = Path("/root/openclaw/.opencode.json")
+
 # Cost per 1M tokens for OpenCode (Gemini 2.5 Flash via opencode.json)
 OPENCODE_COST_PRICING = {
     "input": 0.15,
     "output": 0.60,
 }
+
+
+def _ensure_opencode_config(workspace: str):
+    """Copy .opencode.json into workspace if missing.
+
+    Without this config, OpenCode defaults to Anthropic (which has no credits).
+    The config directs it to use Gemini 2.5 Flash instead.
+    """
+    dest = Path(workspace) / ".opencode.json"
+    if not dest.exists() and OPENCODE_CONFIG_SRC.exists():
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(OPENCODE_CONFIG_SRC), str(dest))
+            logger.info(f"Copied .opencode.json to {workspace}")
+        except Exception as e:
+            logger.warning(f"Failed to copy .opencode.json to {workspace}: {e}")
 
 
 async def run_opencode(
@@ -62,6 +82,9 @@ async def run_opencode(
     if not os.path.isfile(OPENCODE_BIN):
         raise OpenCodeError(f"OpenCode binary not found at {OPENCODE_BIN}")
 
+    # Ensure .opencode.json exists in workspace (OpenCode defaults to Anthropic without it)
+    _ensure_opencode_config(workspace)
+
     # Build command
     cmd = [
         OPENCODE_BIN,
@@ -85,7 +108,8 @@ async def run_opencode(
             stderr=asyncio.subprocess.PIPE,
             cwd=workspace,
             env={
-                **os.environ,
+                **{k: v for k, v in os.environ.items()
+                   if k not in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")},
                 "NO_COLOR": "1",  # Disable ANSI colors in output
             },
         )
@@ -229,53 +253,37 @@ async def execute_with_fallback(
     system_prompt: str = "",
 ) -> dict:
     """
-    Execute via OpenCode first, fall back to Agent SDK on failure.
+    Execute via cheap LLM backends, falling back to expensive SDK only as last resort.
 
-    This is the primary entry point for the autonomous runner when
-    USE_OPENCODE=1. It tries the cheap path first and only escalates
-    to the expensive SDK path when OpenCode fails.
+    Fallback chain: OpenCode (Gemini 2.5 Flash, ~$0.001) → Grok (xAI, ~$0.0004)
+                    → MiniMax (M2.5, ~$0.003) → Agent SDK (Anthropic, ~$0.02-0.50/job)
 
     Returns: Standard result dict with "text", "tokens", "tool_calls", "cost_usd"
     """
-    # Try OpenCode first
+    # Primary: OpenCode (Gemini 2.5 Flash via rebuilt binary, ~$0.001/job)
     try:
-        full_prompt = prompt
-        if system_prompt:
-            full_prompt = f"{system_prompt}\n\n---\n\n{prompt}"
-
-        result = await run_opencode(
-            prompt=full_prompt,
+        logger.info(f"Executing via OpenCode for {job_id}/{phase}")
+        oc_result = await run_opencode(
+            prompt=prompt,
             workspace=workspace,
             timeout=timeout,
             job_id=job_id,
             phase=phase,
         )
+        if oc_result and oc_result.get("text"):
+            logger.info(f"OpenCode completed {job_id}/{phase} for ${oc_result.get('cost_usd', 0):.6f}")
+            return oc_result
+        logger.warning(f"OpenCode returned empty response for {job_id}/{phase} — trying Grok")
+    except OpenCodeError as oc_err:
+        logger.warning(f"OpenCode failed for {job_id}/{phase}: {oc_err} — trying Grok")
+    except Exception as oc_err:
+        logger.warning(f"OpenCode unexpected error for {job_id}/{phase}: {oc_err} — trying Grok")
 
-        # Validate result has meaningful content
-        if result["text"] and len(result["text"].strip()) > 20:
-            logger.info(f"OpenCode succeeded for {job_id}/{phase}")
-            return result
-
-        logger.warning(
-            f"OpenCode returned empty/short result for {job_id}/{phase}, "
-            f"falling back to SDK"
-        )
-
-    except OpenCodeError as e:
-        logger.warning(
-            f"OpenCode failed for {job_id}/{phase}: {e} — falling back to SDK"
-        )
-
-    except Exception as e:
-        logger.error(
-            f"Unexpected OpenCode error for {job_id}/{phase}: {e} — falling back to SDK"
-        )
-
-    # Fall back to Grok (cheap xAI API, ~$0.00005/call)
+    # Secondary: Grok (xAI API, ~$0.0004/job via grok-3-mini)
     try:
         from grok_executor import execute_with_grok
 
-        logger.info(f"Falling back to Grok for {job_id}/{phase}")
+        logger.info(f"Executing via Grok for {job_id}/{phase}")
         grok_result = await execute_with_grok(
             prompt=prompt,
             job_id=job_id,
@@ -290,9 +298,30 @@ async def execute_with_fallback(
     except ImportError:
         logger.warning("grok_executor not available — falling back to SDK")
     except Exception as grok_err:
-        logger.warning(f"Grok failed for {job_id}/{phase}: {grok_err} — falling back to SDK")
+        logger.warning(f"Grok failed for {job_id}/{phase}: {grok_err} — trying MiniMax")
 
-    # Fall back to Agent SDK (last resort, costs real API money)
+    # Tertiary: MiniMax (M2.5 API, ~$0.003/job, 80.2% SWE-Bench)
+    try:
+        from minimax_executor import execute_with_minimax
+
+        logger.info(f"Executing via MiniMax for {job_id}/{phase}")
+        mm_result = await execute_with_minimax(
+            prompt=prompt,
+            job_id=job_id,
+            phase=phase,
+            priority=priority,
+            system_prompt=system_prompt or "",
+        )
+        if mm_result and mm_result.get("text"):
+            logger.info(f"MiniMax completed {job_id}/{phase} for ${mm_result.get('cost_usd', 0):.4f}")
+            return mm_result
+        logger.warning(f"MiniMax returned empty response for {job_id}/{phase} — falling back to SDK")
+    except ImportError:
+        logger.warning("minimax_executor not available — falling back to SDK")
+    except Exception as mm_err:
+        logger.warning(f"MiniMax failed for {job_id}/{phase}: {mm_err} — falling back to SDK")
+
+    # Last resort: Agent SDK (costs real API money)
     from autonomous_runner import _call_agent_sdk
 
     logger.info(f"Falling back to Agent SDK for {job_id}/{phase}")

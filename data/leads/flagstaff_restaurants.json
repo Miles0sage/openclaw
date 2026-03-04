@@ -1,0 +1,72 @@
+[
+  {
+    "name": "1899 Bar & Grill",
+    "address": "307 W DuPont Ave, Flagstaff, AZ",
+    "phone": "(928) 523-1899",
+    "type": "restaurant",
+    "notes": "Dinner only, Tue-Sat, full bar, near NAU"
+  },
+  {
+    "name": "ATL Wings Flagstaff",
+    "address": "1300 S Milton Rd STE 107, Flagstaff, AZ",
+    "phone": "(928) 482-5590",
+    "type": "restaurant",
+    "notes": "Takeout-focused, online ordering"
+  },
+  {
+    "name": "Agave Mexican Restaurant",
+    "address": "1580 E Route 66, Flagstaff, AZ",
+    "phone": "(928) 774-1429",
+    "type": "restaurant",
+    "notes": "Mexican, Route 66 location"
+  },
+  {
+    "name": "Altitudes Bar & Grill",
+    "address": "2 Beaver St #200, Flagstaff, AZ",
+    "phone": "(928) 214-8218",
+    "type": "restaurant",
+    "notes": "Downtown, live music, est. 2003"
+  },
+  {
+    "name": "Bigfoot Bar-B-Que",
+    "address": "120 N Leroux St, Flagstaff, AZ",
+    "phone": "(928) 226-1677",
+    "type": "restaurant",
+    "notes": "Downtown, family-friendly BBQ"
+  },
+  {
+    "name": "Black Barts Steakhouse",
+    "address": "2760 E Butler Ave, Flagstaff, AZ",
+    "phone": "(928) 774-1912",
+    "type": "restaurant",
+    "notes": "Steakhouse + entertainment, well-known"
+  },
+  {
+    "name": "Bun Huggers",
+    "address": "901 S Milton Rd #A, Flagstaff, AZ",
+    "phone": "(928) 779-3743",
+    "type": "restaurant",
+    "notes": "Burgers, Milton Rd"
+  },
+  {
+    "name": "Burritos Fiesta",
+    "address": "1530 S Riordan Ranch St, Flagstaff, AZ",
+    "phone": "(928) 774-3600",
+    "type": "restaurant",
+    "notes": "Mexican grill"
+  },
+  {
+    "name": "Aspen Deli",
+    "address": "20 N Beaver St, Flagstaff, AZ",
+    "phone": "(928) 212-8502",
+    "type": "restaurant",
+    "notes": "Catering + deli, downtown"
+  },
+  {
+    "name": "Air Cafe",
+    "address": "6200 S Pulliam Dr, Flagstaff, AZ",
+    "phone": "(928) 774-5523",
+    "type": "restaurant",
+    "notes": "Airport area"
+  }
+]

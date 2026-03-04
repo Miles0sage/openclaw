@@ -1,0 +1,20 @@
+{
+  "search_intervals": {
+    "restaurants": 3,
+    "barbershops": 5,
+    "dental": 5,
+    "auto": 7
+  },
+  "default_location": "Flagstaff AZ",
+  "last_searches": {
+    "restaurants": "2026-03-04T15:59:05.374377+00:00",
+    "barbershops": "2026-03-04T16:00:03.897018+00:00",
+    "dental": "2026-03-04T16:00:20.963292+00:00",
+    "auto": "2026-03-04T16:01:03.422860+00:00"
+  },
+  "g5_targets": {
+    "leads": 10,
+    "demos": 3,
+    "customers": 1
+  }
+}

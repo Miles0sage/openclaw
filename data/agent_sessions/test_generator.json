@@ -1,0 +1,33 @@
+{
+  "agent_key": "test_generator",
+  "created_at": "2026-03-04T21:23:32.582642+00:00",
+  "last_active": "2026-03-04T21:25:03.127087+00:00",
+  "total_jobs": 1,
+  "total_successes": 1,
+  "total_failures": 0,
+  "total_cost_usd": 0.0013679999999999999,
+  "working_memory": [
+    {
+      "job_id": "job-20260304-212240-9a154bec",
+      "task": "Simple test: What is 2+2? Respond with just the answer.",
+      "outcome": "success",
+      "key_actions": ["execute: 1 steps completed"],
+      "duration_seconds": 0.0,
+      "cost_usd": 0.001368,
+      "timestamp": "2026-03-04T21:25:03.126953+00:00",
+      "project": "openclaw"
+    }
+  ],
+  "skills": [],
+  "project_contexts": {
+    "openclaw": {
+      "project": "openclaw",
+      "file_patterns": [],
+      "conventions": [],
+      "known_issues": [],
+      "last_worked": "2026-03-04T21:25:03.127018+00:00",
+      "task_count": 1
+    }
+  },
+  "personality_notes": []
+}
