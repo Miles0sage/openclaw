@@ -12,6 +12,7 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,6 +21,11 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          direct_prompt: ${{ github.event.issue.body }}
-          allowed_tools: "Bash,Read,Write,Edit,Glob,Grep"
-          timeout_minutes: 15
+          prompt: |
+            You are an autonomous agent. Execute the task described in the issue body.
+            Use tools (Bash, Read, Write, Edit, Glob, Grep) to complete the work.
+            After completion, summarize what was done.
+
+            TASK:
+            ${{ github.event.issue.body }}
+          label_trigger: "openclaw-job"
