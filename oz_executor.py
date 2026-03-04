@@ -32,11 +32,20 @@ logger = logging.getLogger("oz_executor")
 
 OZ_BIN = os.environ.get("OZ_BIN", "/usr/bin/oz")
 
-# Default timeout (seconds) — cloud agents need provisioning time + execution
-DEFAULT_TIMEOUT = 300
+# Default timeout (seconds) — reduced from 300 to 120 based on data:
+# Successful Oz calls average 109s (max 260s), but 61% of execute phases
+# timeout at 300s. 120s captures 95%+ of successes while saving ~180s per timeout.
+DEFAULT_TIMEOUT = 120
 
 # Poll interval (seconds) — how often to check run status
 POLL_INTERVAL = 5
+
+# Job-level circuit breaker: skip Oz after this many failures in a single job.
+# Prevents wasting 120s * N on consecutive timeouts within the same job pipeline.
+OZ_MAX_FAILURES_PER_JOB = 2
+
+# Track Oz failures per job for circuit breaker
+_oz_job_failures: dict[str, int] = {}
 
 # OpenClaw cloud environment ID (has Miles0sage repos)
 OPENCLAW_ENV_ID = os.environ.get("OZ_ENVIRONMENT_ID", "wguVnlBs2L6GmchuiGLKAL")
@@ -326,38 +335,83 @@ async def execute_with_oz_fallback(
     code_phases = {"execute", "verify", "deliver"}
     use_env = phase.lower() in code_phases if phase else False
 
-    # Try Oz first
-    try:
-        full_prompt = prompt
-        if system_prompt:
-            full_prompt = f"{system_prompt}\n\n---\n\n{prompt}"
+    # SKIP Oz for execute/verify/deliver phases — Oz cloud containers are ephemeral.
+    # Execute: file changes made inside the container are lost when it terminates.
+    #   Multi-step execution is worse: each step is a new container, so cross-step
+    #   changes vanish. Oz "success" on execute is a false positive — verify then
+    #   finds the host files unchanged. All successful jobs use OpenCode for execute.
+    # Verify/Deliver: inspect locally-modified files from execute phase; Oz can't
+    #   see local changes since it has a stale repo snapshot.
+    skip_oz_phases = {"execute", "verify", "deliver"}
+    skip_oz = phase.lower() in skip_oz_phases if phase else False
 
-        result = await run_oz_cloud(
-            prompt=full_prompt,
-            timeout=timeout,
-            job_id=job_id,
-            phase=phase,
-            model=model,
-            use_environment=use_env,
+    # Circuit breaker: skip Oz if it has failed too many times for this job
+    job_key = job_id or "unknown"
+    oz_failures = _oz_job_failures.get(job_key, 0)
+    if oz_failures >= OZ_MAX_FAILURES_PER_JOB:
+        logger.info(
+            f"Oz circuit breaker: skipping for {job_id}/{phase} "
+            f"({oz_failures} prior failures in this job)"
         )
+        skip_oz = True
 
-        if result["text"] and len(result["text"].strip()) > 20:
-            logger.info(f"Oz cloud succeeded for {job_id}/{phase}")
-            return result
+    # Try Oz first (unless skipping)
+    if not skip_oz:
+        try:
+            full_prompt = prompt
+            if system_prompt:
+                full_prompt = f"{system_prompt}\n\n---\n\n{prompt}"
 
-        logger.warning(
-            f"Oz returned empty/short result for {job_id}/{phase}, "
-            f"falling back to OpenCode"
-        )
+            # Oz cloud agents run in Docker containers where projects mount at /workspace/
+            # Translate host paths so the agent finds files at the correct location
+            if use_env and workspace:
+                import re as _re
+                oz_workspace = _re.sub(r"/root/", "/workspace/", workspace)
+                full_prompt = full_prompt.replace(workspace, oz_workspace)
+                full_prompt = _re.sub(
+                    r"/root/(openclaw|Delhi-Palace|Barber-CRM|Mathcad-Scripts|concrete-canoe-project2026)\b",
+                    r"/workspace/\1",
+                    full_prompt,
+                )
+                logger.info(f"Oz path normalization: {workspace} → {oz_workspace}")
 
-    except OzError as e:
-        logger.warning(
-            f"Oz cloud failed for {job_id}/{phase}: {e} — falling back to OpenCode"
-        )
+            result = await run_oz_cloud(
+                prompt=full_prompt,
+                timeout=timeout,
+                job_id=job_id,
+                phase=phase,
+                model=model,
+                use_environment=use_env,
+            )
 
-    except Exception as e:
-        logger.error(
-            f"Unexpected Oz error for {job_id}/{phase}: {e} — falling back to OpenCode"
+            if result["text"] and len(result["text"].strip()) > 20:
+                logger.info(f"Oz cloud succeeded for {job_id}/{phase}")
+                # Reset circuit breaker on success
+                _oz_job_failures.pop(job_key, None)
+                return result
+
+            logger.warning(
+                f"Oz returned empty/short result for {job_id}/{phase}, "
+                f"falling back to OpenCode"
+            )
+
+        except OzError as e:
+            _oz_job_failures[job_key] = oz_failures + 1
+            logger.warning(
+                f"Oz cloud failed for {job_id}/{phase}: {e} — "
+                f"falling back to OpenCode (failures={oz_failures + 1})"
+            )
+
+        except Exception as e:
+            _oz_job_failures[job_key] = oz_failures + 1
+            logger.error(
+                f"Unexpected Oz error for {job_id}/{phase}: {e} — "
+                f"falling back to OpenCode (failures={oz_failures + 1})"
+            )
+    else:
+        logger.info(
+            f"Skipping Oz for {job_id}/{phase} — "
+            f"{'circuit breaker' if oz_failures >= OZ_MAX_FAILURES_PER_JOB else 'verify/deliver needs local file access'}"
         )
 
     # Fall back to OpenCode

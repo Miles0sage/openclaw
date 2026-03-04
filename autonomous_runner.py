@@ -2101,6 +2101,7 @@ async def _code_review_phase(
     # ---- Aggregate Results ----
     progress.cost_usd += total_cost
     has_critical = False
+    has_major = False
     all_issues = []
 
     for review in reviews:
@@ -2120,18 +2121,27 @@ async def _code_review_phase(
                 parsed = None
 
         if parsed and isinstance(parsed, dict):
-            if parsed.get("severity") == "critical":
+            sev = parsed.get("severity", "").lower()
+            if sev == "critical":
                 has_critical = True
+            elif sev == "major":
+                has_major = True
             all_issues.extend(parsed.get("issues", []))
         elif text:
             # Truly free-text response — only flag if explicit "CRITICAL" (uppercase) appears
             if "CRITICAL" in text and "severity" not in text.lower():
                 has_critical = True
 
-    summary = (
-        f"{len(reviews)} reviews, {len(all_issues)} issues"
-        f"{', CRITICAL — BLOCKED' if has_critical else ', PASSED'}"
-    )
+    # Block on critical or major — both indicate real problems
+    passed = not has_critical and not has_major
+    if has_critical:
+        verdict = "CRITICAL — BLOCKED"
+    elif has_major:
+        verdict = "MAJOR ISSUES — BLOCKED"
+    else:
+        verdict = "PASSED"
+
+    summary = f"{len(reviews)} reviews, {len(all_issues)} issues, {verdict}"
     logger.info(f"Job {job_id}: code review complete — {summary}, cost ${total_cost:.4f}")
 
     return {
@@ -2139,7 +2149,8 @@ async def _code_review_phase(
         "review_count": len(reviews),
         "issues_found": len(all_issues),
         "has_critical": has_critical,
-        "passed": not has_critical,
+        "has_major": has_major,
+        "passed": passed,
         "cost_usd": total_cost,
         "summary": summary,
         "changed_files": changed_files,
@@ -3436,10 +3447,12 @@ class AutonomousRunner:
                     )
                     save_session(ide_session)
 
-                if code_review_result.get("has_critical"):
+                if not code_review_result.get("passed", True):
+                    severity = "CRITICAL" if code_review_result.get("has_critical") else "MAJOR"
                     logger.warning(
-                        f"Job {job_id}: code review BLOCKED — critical issues found. "
-                        f"Passing findings to verify phase for remediation check."
+                        f"Job {job_id}: code review BLOCKED ({severity}) — "
+                        f"{code_review_result.get('issues_found', 0)} issues found. "
+                        f"Passing findings to verify phase for confirmation."
                     )
             except Exception as cr_err:
                 logger.warning(f"Job {job_id}: code review phase error (non-fatal): {cr_err}")
