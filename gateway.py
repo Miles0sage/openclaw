@@ -1687,6 +1687,14 @@ async def api_health():
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
+@app.get("/api/ping")
+async def api_ping():
+    """Lightweight ping endpoint for liveness checks."""
+    return {
+        "pong": True,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
 @app.get("/metrics")
 async def metrics_endpoint():
     """Prometheus metrics endpoint (no auth required for K8s scraping)"""
@@ -5229,10 +5237,6 @@ async def api_get_version():
     return {"version": "4.0", "codename": "mission-control"}
 
 
-@app.get("/api/ping")
-async def api_ping():
-    """Simple health check endpoint"""
-    return {"status": "pong", "timestamp": time.time()}
 @app.get("/control/avatar/{name}")
 async def api_control_avatar(name: str, meta: Optional[str] = None):
     """Return a placeholder for dashboard avatar requests."""
