@@ -5,6 +5,7 @@
 The automated daily scanning system runs three betting scanners every day at 4:30 PM ET and sends results via Slack and SMS.
 
 **Components:**
+
 - `/root/openclaw/daily_scan.py` — Standalone script that runs all scans
 - `money_engine.py` — Added `scan_schedule` action to show next scan and history
 - Cron job that invokes daily_scan.py
@@ -136,12 +137,12 @@ Each scan failure is logged to `data/betting/scan.log` for debugging.
 
 ## File Locations Summary
 
-| File | Purpose |
-|------|---------|
-| `/root/openclaw/daily_scan.py` | Main scan script |
-| `/root/openclaw/money_engine.py` | Updated with `scan_schedule` action |
-| `/root/openclaw/data/betting/daily_reports/` | Daily JSON reports (one per day) |
-| `/root/openclaw/data/betting/scan.log` | Execution logs and errors |
+| File                                         | Purpose                             |
+| -------------------------------------------- | ----------------------------------- |
+| `/root/openclaw/daily_scan.py`               | Main scan script                    |
+| `/root/openclaw/money_engine.py`             | Updated with `scan_schedule` action |
+| `/root/openclaw/data/betting/daily_reports/` | Daily JSON reports (one per day)    |
+| `/root/openclaw/data/betting/scan.log`       | Execution logs and errors           |
 
 ## Testing
 

@@ -14,24 +14,24 @@ Each bet stores:
 
 ```json
 {
-    "bet_id": "auto-uuid (8 chars)",
-    "timestamp": "ISO datetime",
-    "sport": "nba",
-    "game": "Team A @ Team B",
-    "side": "Team A",
-    "market": "h2h|spread|total|prop",
-    "entry_odds": 4.2,
-    "entry_implied_prob": 0.2381,
-    "model_prob": 0.763,
-    "edge_pct": 52.5,
-    "book": "DraftKings|FanDuel|Matchbook|etc",
-    "stake_usd": 25.00,
-    "quarter_kelly_pct": 17.22,
-    "status": "pending|won|lost|void|push",
-    "result_payout": 105.00,
-    "pnl": 80.00,
-    "clv": null,
-    "notes": ""
+  "bet_id": "auto-uuid (8 chars)",
+  "timestamp": "ISO datetime",
+  "sport": "nba",
+  "game": "Team A @ Team B",
+  "side": "Team A",
+  "market": "h2h|spread|total|prop",
+  "entry_odds": 4.2,
+  "entry_implied_prob": 0.2381,
+  "model_prob": 0.763,
+  "edge_pct": 52.5,
+  "book": "DraftKings|FanDuel|Matchbook|etc",
+  "stake_usd": 25.0,
+  "quarter_kelly_pct": 17.22,
+  "status": "pending|won|lost|void|push",
+  "result_payout": 105.0,
+  "pnl": 80.0,
+  "clv": null,
+  "notes": ""
 }
 ```
 
@@ -63,6 +63,7 @@ bet_tracker("log", {
 ```
 
 Returns:
+
 - Bet object with auto-generated `bet_id`
 - Calculated `implied_prob` from odds
 - Calculated `quarter_kelly_pct` (Kelly / 4)
@@ -77,6 +78,7 @@ bet_tracker("settle", {
 ```
 
 Returns:
+
 - Updated bet with `status`, `result_payout`, `pnl` filled
 - Payout = stake × odds (for won), 0 (for lost), stake (for void/push)
 - P&L = payout - stake
@@ -104,20 +106,21 @@ bet_tracker("pnl")
 ```
 
 Returns:
+
 ```json
 {
-    "total_bets": 5,
-    "wins": 3,
-    "losses": 2,
-    "voids": 0,
-    "pushes": 0,
-    "win_rate_pct": 60.0,
-    "total_staked": 200.00,
-    "total_profit": 107.50,
-    "roi_pct": 53.75,
-    "current_bankroll": 607.50,
-    "best_bet": "bet_id",
-    "worst_bet": "bet_id"
+  "total_bets": 5,
+  "wins": 3,
+  "losses": 2,
+  "voids": 0,
+  "pushes": 0,
+  "win_rate_pct": 60.0,
+  "total_staked": 200.0,
+  "total_profit": 107.5,
+  "roi_pct": 53.75,
+  "current_bankroll": 607.5,
+  "best_bet": "bet_id",
+  "worst_bet": "bet_id"
 }
 ```
 
@@ -140,12 +143,13 @@ bet_tracker("streak")
 ```
 
 Returns:
+
 ```json
 {
-    "current_streak_type": "won|lost",
-    "current_streak_count": 3,
-    "best_win_streak": 5,
-    "best_loss_streak": 2
+  "current_streak_type": "won|lost",
+  "current_streak_count": 3,
+  "best_win_streak": 5,
+  "best_loss_streak": 2
 }
 ```
 
@@ -267,6 +271,7 @@ python3 -c "from bet_tracker import bet_tracker; import json; print(json.dumps(j
 ```
 
 All tests pass:
+
 - ✓ Logging new bets
 - ✓ Settling with multiple outcomes
 - ✓ P&L calculations (ROI, profit, bankroll)
@@ -290,6 +295,7 @@ All tests pass:
 ## Next Steps
 
 Integrate with:
+
 - `sportsbook_odds` — Live odds from 200+ bookmakers
 - `sports_predict` — XGBoost NBA predictions
 - `sports_betting` — Full betting pipeline

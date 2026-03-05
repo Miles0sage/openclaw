@@ -5,12 +5,14 @@
 This module provides FastAPI router endpoints for intelligent query classification and model routing across Claude models (Haiku, Sonnet, Opus).
 
 ### Import
+
 ```python
 from routers.intelligent_routing import router
 app.include_router(router)
 ```
 
 ### Endpoints
+
 - `POST /api/route` - Classify single query
 - `POST /api/route/test` - Batch classify queries
 - `GET /api/route/models` - List available models
@@ -23,6 +25,7 @@ app.include_router(router)
 ### 1. POST /api/route - Single Query Classification
 
 **Request**:
+
 ```bash
 curl -X POST http://localhost:8000/api/route \
   -H "Content-Type: application/json" \
@@ -43,6 +46,7 @@ curl -X POST http://localhost:8000/api/route \
 | force_model | str | No | Force specific model: "haiku", "sonnet", or "opus" |
 
 **Response (Success - 200)**:
+
 ```json
 {
   "success": true,
@@ -69,6 +73,7 @@ curl -X POST http://localhost:8000/api/route \
 ```
 
 **Response (Budget Exceeded - 402)**:
+
 ```json
 {
   "success": false,
@@ -81,6 +86,7 @@ curl -X POST http://localhost:8000/api/route \
 ```
 
 **Response (Invalid Request - 400)**:
+
 ```json
 {
   "success": false,
@@ -93,6 +99,7 @@ curl -X POST http://localhost:8000/api/route \
 ### 2. POST /api/route/test - Batch Query Classification
 
 **Request**:
+
 ```bash
 curl -X POST http://localhost:8000/api/route/test \
   -H "Content-Type: application/json" \
@@ -106,6 +113,7 @@ curl -X POST http://localhost:8000/api/route/test \
 ```
 
 **Response (Success - 200)**:
+
 ```json
 {
   "success": true,
@@ -156,11 +164,13 @@ curl -X POST http://localhost:8000/api/route/test \
 ### 3. GET /api/route/models - Model Catalog
 
 **Request**:
+
 ```bash
 curl http://localhost:8000/api/route/models
 ```
 
 **Response**:
+
 ```json
 {
   "success": true,
@@ -232,22 +242,20 @@ curl http://localhost:8000/api/route/models
 ### 4. GET /api/route/health - Health Check
 
 **Request**:
+
 ```bash
 curl http://localhost:8000/api/route/health
 ```
 
 **Response**:
+
 ```json
 {
   "success": true,
   "timestamp": "2026-03-05T00:37:08Z",
   "status": "healthy",
   "models_available": 3,
-  "models": [
-    "haiku",
-    "sonnet",
-    "opus"
-  ],
+  "models": ["haiku", "sonnet", "opus"],
   "router_version": "1.0.0"
 }
 ```
@@ -301,6 +309,7 @@ elif budget_check.status == BudgetStatus.WARNING:
 ## Usage Patterns
 
 ### Pattern 1: Auto-Classify & Route
+
 ```python
 response = requests.post("http://localhost:8000/api/route", json={
     "query": user_input,
@@ -311,6 +320,7 @@ model = response.json()["model"]  # "haiku", "sonnet", or "opus"
 ```
 
 ### Pattern 2: Force Model for Testing
+
 ```python
 response = requests.post("http://localhost:8000/api/route", json={
     "query": user_input,
@@ -319,6 +329,7 @@ response = requests.post("http://localhost:8000/api/route", json={
 ```
 
 ### Pattern 3: Batch Classification
+
 ```python
 response = requests.post("http://localhost:8000/api/route/test", json={
     "queries": [query1, query2, query3]
@@ -328,6 +339,7 @@ stats = response.json()["stats"]
 ```
 
 ### Pattern 4: Check Available Models
+
 ```python
 response = requests.get("http://localhost:8000/api/route/models")
 models = response.json()["models"]
@@ -338,12 +350,12 @@ models = response.json()["models"]
 
 ## Error Codes
 
-| Code | Meaning | Example |
-|------|---------|---------|
-| 200 | Success | Classification completed |
-| 400 | Bad Request | Missing required field |
-| 402 | Budget Exceeded | Cost gate rejection |
-| 500 | Server Error | Internal exception |
+| Code | Meaning         | Example                  |
+| ---- | --------------- | ------------------------ |
+| 200  | Success         | Classification completed |
+| 400  | Bad Request     | Missing required field   |
+| 402  | Budget Exceeded | Cost gate rejection      |
+| 500  | Server Error    | Internal exception       |
 
 ---
 
@@ -376,17 +388,20 @@ The router uses shared configuration from:
 ## Next Steps
 
 1. **Add to gateway.py**:
+
    ```python
    from routers.intelligent_routing import router as intelligent_routing_router
    app.include_router(intelligent_routing_router)
    ```
 
 2. **Test endpoints**:
+
    ```bash
    curl http://localhost:8000/api/route/health
    ```
 
 3. **Monitor logs**:
+
    ```bash
    journalctl -u openclaw-gateway -f | grep "router"
    ```
@@ -410,8 +425,8 @@ The router uses shared configuration from:
 ## Support
 
 For issues or questions:
+
 1. Check logs: `journalctl -u openclaw-gateway -f`
 2. Test endpoint: `curl http://localhost:8000/api/route/health`
 3. Verify imports: `python3 -c "from routers.intelligent_routing import router"`
 4. Check shared deps: Ensure `routers/shared.py` is available
-
