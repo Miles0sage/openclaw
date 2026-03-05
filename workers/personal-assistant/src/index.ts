@@ -33,6 +33,7 @@
 
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import * as Memory from "./memory";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,6 +47,7 @@ interface Env {
   RATE_LIMIT_PER_MINUTE: string;
   GEMINI_API_KEY: string;
   GEMINI_MODEL: string;
+  DEEPSEEK_API_KEY: string;
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_OWNER_ID: string;
   TELEGRAM_WEBHOOK_SECRET?: string;
@@ -115,10 +117,265 @@ function checkRateLimit(ip: string, maxPerMinute: number): boolean {
 const PUBLIC_PATHS = new Set(["/", "/health", "/ws", "/webhook/telegram"]);
 
 // ---------------------------------------------------------------------------
-// Gemini Function Declarations — OpenClaw tools
+// Gemini → OpenAI tool format converter
+// ---------------------------------------------------------------------------
+
+interface OpenAITool {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+/** Convert Gemini `type: "STRING"` schema to JSON Schema `type: "string"` */
+function convertGeminiSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const typeMap: Record<string, string> = {
+    STRING: "string",
+    NUMBER: "number",
+    INTEGER: "integer",
+    BOOLEAN: "boolean",
+    ARRAY: "array",
+    OBJECT: "object",
+  };
+  const result: Record<string, unknown> = {};
+  if (schema.type)
+    result.type = typeMap[schema.type as string] || (schema.type as string).toLowerCase();
+  if (schema.description) result.description = schema.description;
+  if (schema.required) result.required = schema.required;
+  if (schema.items) result.items = convertGeminiSchema(schema.items as Record<string, unknown>);
+  if (schema.properties) {
+    const props: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(schema.properties as Record<string, unknown>)) {
+      props[k] = convertGeminiSchema(v as Record<string, unknown>);
+    }
+    result.properties = props;
+  }
+  return result;
+}
+
+/** Convert OPENCLAW_TOOLS (Gemini format) to OpenAI tools format at runtime */
+function convertToolsToOpenAI(geminiTools: Array<Record<string, unknown>>): OpenAITool[] {
+  const tools: OpenAITool[] = [];
+  for (const group of geminiTools) {
+    const decls = group.functionDeclarations as Array<Record<string, unknown>> | undefined;
+    if (!decls) continue;
+    for (const decl of decls) {
+      tools.push({
+        type: "function",
+        function: {
+          name: decl.name as string,
+          description: (decl.description as string) || "",
+          parameters: decl.parameters
+            ? convertGeminiSchema(decl.parameters as Record<string, unknown>)
+            : { type: "object", properties: {} },
+        },
+      });
+    }
+  }
+  return tools;
+}
+
+// Lazy-cached OpenAI-format tools
+let _openaiTools: OpenAITool[] | null = null;
+function getOpenAITools(): OpenAITool[] {
+  if (!_openaiTools) _openaiTools = convertToolsToOpenAI(OPENCLAW_TOOLS);
+  return _openaiTools;
+}
+
+// ---------------------------------------------------------------------------
+// DeepSeek / OpenAI-compatible LLM caller
+// ---------------------------------------------------------------------------
+
+interface LLMMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content?: string;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
+  tool_call_id?: string;
+}
+
+interface LLMCallResult {
+  reply: string;
+  toolUsed: string | null;
+  toolResult: Record<string, unknown> | null;
+}
+
+async function callDeepSeek(
+  env: Env,
+  systemPrompt: string,
+  messages: LLMMessage[],
+  maxIterations: number,
+  maxTokens: number,
+  executeFn: (name: string, args: Record<string, unknown>) => Promise<unknown>,
+): Promise<LLMCallResult> {
+  const apiUrl = "https://api.deepseek.com/v1/chat/completions";
+  const tools = getOpenAITools();
+  const allMessages: LLMMessage[] = [{ role: "system", content: systemPrompt }, ...messages];
+
+  let reply = "";
+  let toolUsed: string | null = null;
+  let toolResult: Record<string, unknown> | null = null;
+
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    const resp = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        messages: allMessages,
+        tools,
+        tool_choice: "auto",
+        max_tokens: maxTokens,
+        temperature: 0.7,
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`DeepSeek API error ${resp.status}: ${errText}`);
+    }
+
+    const data = (await resp.json()) as Record<string, unknown>;
+    const choices = data.choices as Array<Record<string, unknown>> | undefined;
+    if (!choices || choices.length === 0) {
+      reply = "No response from LLM.";
+      break;
+    }
+
+    const msg = choices[0].message as Record<string, unknown>;
+    const toolCalls = msg.tool_calls as
+      | Array<{ id: string; type: string; function: { name: string; arguments: string } }>
+      | undefined;
+
+    if (toolCalls && toolCalls.length > 0) {
+      const tc = toolCalls[0];
+      const fnName = tc.function.name;
+      let fnArgs: Record<string, unknown> = {};
+      try {
+        fnArgs = JSON.parse(tc.function.arguments || "{}");
+      } catch {
+        fnArgs = {};
+      }
+
+      toolUsed = fnName;
+      let result: unknown;
+      try {
+        result = await executeFn(fnName, fnArgs);
+      } catch (err: unknown) {
+        result = { error: err instanceof Error ? err.message : String(err) };
+      }
+
+      toolResult =
+        typeof result === "object" && result !== null
+          ? (result as Record<string, unknown>)
+          : { result };
+
+      // Add assistant message with tool_calls
+      allMessages.push({
+        role: "assistant",
+        tool_calls: [
+          {
+            id: tc.id,
+            type: "function",
+            function: { name: fnName, arguments: tc.function.arguments || "{}" },
+          },
+        ],
+      });
+
+      // Add tool response
+      allMessages.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: JSON.stringify(toolResult),
+      });
+
+      continue;
+    }
+
+    // Text reply
+    reply = (msg.content as string) || "";
+    break;
+  }
+
+  if (!reply && toolUsed && toolResult) {
+    try {
+      reply = JSON.stringify(toolResult, null, 2).slice(0, 3000);
+    } catch {
+      reply = `Tool ${toolUsed} executed.`;
+    }
+  } else if (!reply) {
+    reply = "No response generated.";
+  }
+
+  return { reply, toolUsed, toolResult };
+}
+
+// ---------------------------------------------------------------------------
+// Gemini Function Declarations — OpenClaw tools (kept in Gemini format, converted at runtime)
 // ---------------------------------------------------------------------------
 
 const OPENCLAW_TOOLS = [
+  // --- Real-Time Data: Weather, Crypto, Nutrition (FIRST so model sees them before perplexity) ---
+  {
+    functionDeclarations: [
+      {
+        name: "get_weather",
+        description:
+          "Get current weather and forecast for a location. Defaults to Flagstaff AZ (Miles' location). Use for wardrobe suggestions, day planning, outdoor activity advice, morning briefings. ALWAYS prefer this over web_search or perplexity for weather.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            latitude: { type: "NUMBER", description: "Latitude (default: 35.20 for Flagstaff AZ)" },
+            longitude: {
+              type: "NUMBER",
+              description: "Longitude (default: -111.65 for Flagstaff AZ)",
+            },
+            days: { type: "NUMBER", description: "Forecast days 1-7 (default: 3)" },
+          },
+        },
+      },
+      {
+        name: "get_crypto_prices",
+        description:
+          "Get real-time cryptocurrency prices, 24h change %, market cap, and volume. ALWAYS use this instead of web_search or perplexity_research for any crypto/bitcoin/ethereum/solana price question.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            coins: {
+              type: "STRING",
+              description:
+                "Comma-separated CoinGecko IDs (e.g. 'bitcoin,ethereum,solana'). Default: 'bitcoin,ethereum'",
+            },
+            currency: { type: "STRING", description: "Fiat currency code (default: 'usd')" },
+          },
+        },
+      },
+      {
+        name: "nutrition_lookup",
+        description:
+          "Look up nutritional info (calories, protein, fat, carbs) for any food using USDA database. ALWAYS use this instead of web_search or perplexity for nutrition/calorie questions.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: {
+              type: "STRING",
+              description: "Food to search (e.g. 'chicken breast', 'brown rice', 'banana')",
+            },
+            limit: { type: "NUMBER", description: "Max results (default: 3)" },
+          },
+          required: ["query"],
+        },
+      },
+    ],
+  },
   {
     functionDeclarations: [
       {
@@ -1265,7 +1522,7 @@ const OPENCLAW_TOOLS = [
       {
         name: "perplexity_research",
         description:
-          "Deep research using Perplexity Sonar — returns AI-synthesized answers with web citations. Better than web_search for complex questions requiring synthesis.",
+          "Deep research using Perplexity Sonar — returns AI-synthesized answers with web citations. Better than web_search for complex questions requiring synthesis. DO NOT use for weather (use get_weather), crypto prices (use get_crypto_prices), or nutrition (use nutrition_lookup).",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -1318,96 +1575,6 @@ const OPENCLAW_TOOLS = [
             },
             limit: { type: "NUMBER", description: "Max posts per source (default: 5)" },
           },
-        },
-      },
-      // --- PinchTab Browser Automation ---
-      {
-        name: "browser_navigate",
-        description:
-          "Navigate the browser to a URL. Opens the page and returns the accessibility tree snapshot for agent interaction.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            url: { type: "STRING", description: "The URL to navigate to" },
-          },
-          required: ["url"],
-        },
-      },
-      {
-        name: "browser_snapshot",
-        description:
-          "Get the accessibility tree of the current browser page. Returns structured refs (e0, e1...) for clicking/typing.",
-        parameters: {
-          type: "OBJECT",
-          properties: {},
-        },
-      },
-      {
-        name: "browser_action",
-        description:
-          "Perform a browser action: click, type, fill, press, hover, select, scroll. Use refs from snapshot (e.g. 'e5').",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            action: {
-              type: "STRING",
-              description: "Action: click, type, fill, press, hover, select, scroll",
-            },
-            ref: {
-              type: "STRING",
-              description: "Element ref from snapshot (e.g. 'e5') or CSS selector",
-            },
-            value: { type: "STRING", description: "Value for type/fill/press/select actions" },
-          },
-          required: ["action", "ref"],
-        },
-      },
-      {
-        name: "browser_text",
-        description:
-          "Extract readable text from the current page. Strips nav/ads in readability mode.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            mode: {
-              type: "STRING",
-              description: "Extraction mode: readability or raw (default: readability)",
-            },
-          },
-        },
-      },
-      {
-        name: "browser_screenshot",
-        description: "Take a JPEG screenshot of the current browser page.",
-        parameters: {
-          type: "OBJECT",
-          properties: {},
-        },
-      },
-      {
-        name: "browser_tabs",
-        description: "List open browser tabs, or open/close a tab.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            action: {
-              type: "STRING",
-              description: "Tab action: list, open, close (default: list)",
-            },
-            url: { type: "STRING", description: "URL to open (for 'open' action)" },
-            tab_id: { type: "STRING", description: "Tab ID to close (for 'close' action)" },
-          },
-        },
-      },
-      {
-        name: "browser_evaluate",
-        description: "Execute JavaScript in the current browser tab.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            script: { type: "STRING", description: "JavaScript code to execute" },
-          },
-          required: ["script"],
         },
       },
       // --- Proposal Generator ---
@@ -1764,6 +1931,185 @@ const OPENCLAW_TOOLS = [
             request_id: { type: "STRING", description: "The PA request ID" },
           },
           required: ["request_id"],
+        },
+      },
+    ],
+  },
+  // --- Life OS: Personal Life Management ---
+  {
+    functionDeclarations: [
+      {
+        name: "kitchen_inventory",
+        description:
+          "Manage Miles' kitchen inventory. Actions: list (show all items), add (add items), remove (use/remove items), check (check if specific items are available), clear (reset inventory). Tracks quantities, expiry, and categories (fridge, pantry, freezer).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: list, add, remove, check, clear",
+            },
+            items: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  name: {
+                    type: "STRING",
+                    description: "Item name (e.g. chicken breast, rice, eggs)",
+                  },
+                  quantity: { type: "STRING", description: "Amount (e.g. 2 lbs, 1 dozen, 3 cans)" },
+                  category: {
+                    type: "STRING",
+                    description: "Storage: fridge, freezer, pantry, spices, drinks",
+                  },
+                  expires: { type: "STRING", description: "Expiry date YYYY-MM-DD (optional)" },
+                },
+              },
+              description: "Items to add/remove/check",
+            },
+            category: { type: "STRING", description: "Filter by category when listing" },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "meal_planner",
+        description:
+          "Plan meals and generate grocery lists. Actions: suggest (suggest meals from current kitchen inventory), plan (create a meal plan for N days), grocery (generate a grocery list for missing ingredients), log (log what Miles ate today for nutrition tracking).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: suggest, plan, grocery, log",
+            },
+            days: { type: "NUMBER", description: "Number of days to plan (default: 3)" },
+            preferences: {
+              type: "STRING",
+              description:
+                "Dietary preferences or constraints (e.g. high protein, no dairy, bulking, cutting)",
+            },
+            meal: {
+              type: "STRING",
+              description:
+                "For log action: what Miles ate (e.g. 'grilled chicken with rice and broccoli')",
+            },
+            meal_type: {
+              type: "STRING",
+              description: "Meal type: breakfast, lunch, dinner, snack",
+            },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "wardrobe_tracker",
+        description:
+          "Track Miles' clothes and suggest outfits. Actions: list (show wardrobe), add (add clothing items), remove (remove items), outfit (suggest an outfit based on weather/occasion), categories (list by type: tops, bottoms, shoes, etc.).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: list, add, remove, outfit, categories",
+            },
+            items: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  name: {
+                    type: "STRING",
+                    description: "Item description (e.g. black Nike hoodie)",
+                  },
+                  type: {
+                    type: "STRING",
+                    description: "Category: tops, bottoms, shoes, outerwear, accessories, athletic",
+                  },
+                  color: { type: "STRING", description: "Primary color" },
+                  style: {
+                    type: "STRING",
+                    description: "Style: casual, formal, athletic, streetwear",
+                  },
+                },
+              },
+              description: "Clothing items to add/remove",
+            },
+            occasion: {
+              type: "STRING",
+              description: "For outfit: casual, class, work, date, gym, soccer",
+            },
+            weather: {
+              type: "STRING",
+              description: "Weather context: hot, warm, mild, cold, rainy",
+            },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "habit_tracker",
+        description:
+          "Track daily habits and streaks. Actions: log (mark a habit done today), status (show today's habits and streaks), add (create a new habit to track), remove (stop tracking a habit), history (show habit completion for last N days), weekly (weekly summary).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: log, status, add, remove, history, weekly",
+            },
+            habit: {
+              type: "STRING",
+              description:
+                "Habit name (e.g. water_8cups, sleep_8hrs, workout, stretch, meditate, read)",
+            },
+            value: {
+              type: "STRING",
+              description:
+                "Optional value for the habit (e.g. '7.5' for sleep hours, '3L' for water)",
+            },
+            days: {
+              type: "NUMBER",
+              description: "For history: number of days to show (default: 7)",
+            },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "science_day_planner",
+        description:
+          "Create a science-based daily schedule optimized for Miles' circadian rhythm, energy levels, and productivity. Uses ultradian cycles (90-min focus blocks), sleep science, and time-blocking. Actions: plan (generate today's schedule), energy (show predicted energy curve for today), sleep (analyze sleep timing and suggest optimal bedtime/wake time), review (end-of-day review of what got done).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              description: "Action: plan, energy, sleep, review",
+            },
+            wake_time: {
+              type: "STRING",
+              description:
+                "When Miles woke up today (e.g. '8:30am'). Used to calculate energy windows.",
+            },
+            priorities: {
+              type: "ARRAY",
+              items: { type: "STRING" },
+              description:
+                "Top priorities for today (e.g. ['finish homework', 'work on VisionClaw', 'gym'])",
+            },
+            target_bedtime: {
+              type: "STRING",
+              description: "Target bedtime (e.g. '11pm'). For sleep analysis.",
+            },
+            completed: {
+              type: "ARRAY",
+              items: { type: "STRING" },
+              description: "For review: list of tasks completed today",
+            },
+          },
+          required: ["action"],
         },
       },
     ],
@@ -2414,6 +2760,32 @@ async function executeTool(
       ).json();
     // --- Perplexity Deep Research ---
     case "perplexity_research": {
+      // Smart redirect: if the query matches a dedicated tool, use that instead
+      const q = String(args.query || "").toLowerCase();
+      if (
+        /\b(bitcoin|btc|ethereum|eth|crypto|solana|sol|dogecoin|doge|coin\s*price|token\s*price)\b/.test(
+          q,
+        )
+      ) {
+        const coinMap: Record<string, string> = {
+          btc: "bitcoin",
+          eth: "ethereum",
+          sol: "solana",
+          doge: "dogecoin",
+        };
+        const coins = Object.entries(coinMap)
+          .filter(([k]) => q.includes(k))
+          .map(([, v]) => v);
+        if (coins.length === 0) coins.push("bitcoin", "ethereum");
+        return executeTool(env, "get_crypto_prices", { coins: coins.join(",") });
+      }
+      if (/\b(weather|temperature|rain|forecast|snow|wind|humid)\b/.test(q)) {
+        return executeTool(env, "get_weather", {});
+      }
+      if (/\b(calorie|nutrition|protein|macro|carb|fat\s+content|food\s+data)\b/.test(q)) {
+        const foodMatch = q.match(/(?:in|of|for)\s+(?:a\s+)?(.+?)(?:\?|$)/);
+        return executeTool(env, "nutrition_lookup", { query: foodMatch?.[1] || q });
+      }
       const pParams = new URLSearchParams();
       pParams.set("query", String(args.query || ""));
       if (args.model) pParams.set("model", String(args.model));
@@ -2637,6 +3009,581 @@ async function executeTool(
       return (await gatewayFetch(env, `/api/pa/requests?limit=${args.limit || 20}`)).json();
     case "pa_request_status":
       return (await gatewayFetch(env, `/api/pa/status/${args.request_id}`)).json();
+
+    // ---- Life OS: Local KV-backed life management tools ----
+
+    case "kitchen_inventory": {
+      const KV = env.KV_CACHE;
+      const key = "lifeos:kitchen_inventory";
+      const raw = await KV.get(key);
+      const inventory: Array<{
+        name: string;
+        quantity: string;
+        category: string;
+        expires?: string;
+        added: string;
+      }> = raw ? JSON.parse(raw) : [];
+
+      switch (args.action) {
+        case "list": {
+          const cat = args.category as string | undefined;
+          const filtered = cat ? inventory.filter((i) => i.category === cat) : inventory;
+          const grouped: Record<string, typeof filtered> = {};
+          for (const item of filtered) {
+            const c = item.category || "other";
+            if (!grouped[c]) grouped[c] = [];
+            grouped[c].push(item);
+          }
+          return { inventory: grouped, total_items: filtered.length };
+        }
+        case "add": {
+          const items = (args.items as Array<Record<string, string>>) || [];
+          const added: string[] = [];
+          for (const item of items) {
+            const existing = inventory.find(
+              (i) => i.name.toLowerCase() === (item.name || "").toLowerCase(),
+            );
+            if (existing) {
+              existing.quantity = item.quantity || existing.quantity;
+              if (item.expires) existing.expires = item.expires;
+              added.push(`Updated: ${existing.name} (${existing.quantity})`);
+            } else {
+              inventory.push({
+                name: item.name || "unknown",
+                quantity: item.quantity || "1",
+                category: item.category || "pantry",
+                expires: item.expires,
+                added: new Date().toISOString(),
+              });
+              added.push(`Added: ${item.name} (${item.quantity || "1"})`);
+            }
+          }
+          await KV.put(key, JSON.stringify(inventory), { expirationTtl: 86400 * 90 });
+          return { success: true, changes: added, total_items: inventory.length };
+        }
+        case "remove": {
+          const items = (args.items as Array<Record<string, string>>) || [];
+          const removed: string[] = [];
+          for (const item of items) {
+            const idx = inventory.findIndex(
+              (i) => i.name.toLowerCase() === (item.name || "").toLowerCase(),
+            );
+            if (idx !== -1) {
+              removed.push(`Removed: ${inventory[idx].name}`);
+              inventory.splice(idx, 1);
+            }
+          }
+          await KV.put(key, JSON.stringify(inventory), { expirationTtl: 86400 * 90 });
+          return { success: true, changes: removed, total_items: inventory.length };
+        }
+        case "check": {
+          const items = (args.items as Array<Record<string, string>>) || [];
+          const results: Array<{ name: string; available: boolean; quantity?: string }> = [];
+          for (const item of items) {
+            const found = inventory.find(
+              (i) => i.name.toLowerCase() === (item.name || "").toLowerCase(),
+            );
+            results.push({
+              name: item.name || "unknown",
+              available: !!found,
+              quantity: found?.quantity,
+            });
+          }
+          return { results };
+        }
+        case "clear":
+          await KV.put(key, "[]", { expirationTtl: 86400 * 90 });
+          return { success: true, message: "Kitchen inventory cleared" };
+        default:
+          return { error: "Invalid action. Use: list, add, remove, check, clear" };
+      }
+    }
+
+    case "meal_planner": {
+      const KV = env.KV_CACHE;
+      const kitchenRaw = await KV.get("lifeos:kitchen_inventory");
+      const kitchen = kitchenRaw ? JSON.parse(kitchenRaw) : [];
+      const today = new Date().toISOString().split("T")[0];
+
+      switch (args.action) {
+        case "suggest":
+          return {
+            kitchen_inventory: kitchen,
+            preferences: args.preferences || "balanced",
+            instruction:
+              "Based on the kitchen inventory above, suggest 2-3 meals Miles can make RIGHT NOW with what he has. Be specific about portions and prep. If inventory is empty, suggest easy college meals and remind him to stock up.",
+          };
+        case "plan": {
+          const days = (args.days as number) || 3;
+          return {
+            kitchen_inventory: kitchen,
+            days,
+            preferences: args.preferences || "balanced, high protein",
+            instruction: `Create a ${days}-day meal plan (breakfast, lunch, dinner, snack) using what's available. Flag any missing ingredients. Keep it realistic for a college student — quick prep, budget-friendly.`,
+          };
+        }
+        case "grocery": {
+          const mealPlanRaw = await KV.get("lifeos:meal_plan");
+          return {
+            kitchen_inventory: kitchen,
+            meal_plan: mealPlanRaw ? JSON.parse(mealPlanRaw) : null,
+            preferences: args.preferences || "balanced",
+            instruction:
+              "Generate a grocery list of items Miles needs to buy. Compare meal plan needs against current inventory. Group by store section (produce, protein, dairy, grains, snacks). Include estimated cost.",
+          };
+        }
+        case "log": {
+          const logKey = `lifeos:meals:${today}`;
+          const logRaw = await KV.get(logKey);
+          const meals: Array<{ meal_type: string; food: string; time: string }> = logRaw
+            ? JSON.parse(logRaw)
+            : [];
+          meals.push({
+            meal_type: (args.meal_type as string) || "meal",
+            food: (args.meal as string) || "not specified",
+            time: new Date().toISOString(),
+          });
+          await KV.put(logKey, JSON.stringify(meals), { expirationTtl: 86400 * 30 });
+          return { success: true, logged: meals[meals.length - 1], meals_today: meals.length };
+        }
+        default:
+          return { error: "Invalid action. Use: suggest, plan, grocery, log" };
+      }
+    }
+
+    case "wardrobe_tracker": {
+      const KV = env.KV_CACHE;
+      const key = "lifeos:wardrobe";
+      const raw = await KV.get(key);
+      const wardrobe: Array<{
+        name: string;
+        type: string;
+        color: string;
+        style: string;
+        added: string;
+      }> = raw ? JSON.parse(raw) : [];
+
+      switch (args.action) {
+        case "list":
+        case "categories": {
+          const grouped: Record<string, typeof wardrobe> = {};
+          for (const item of wardrobe) {
+            const t = item.type || "other";
+            if (!grouped[t]) grouped[t] = [];
+            grouped[t].push(item);
+          }
+          return { wardrobe: grouped, total_items: wardrobe.length };
+        }
+        case "add": {
+          const items = (args.items as Array<Record<string, string>>) || [];
+          const added: string[] = [];
+          for (const item of items) {
+            wardrobe.push({
+              name: item.name || "unknown",
+              type: item.type || "tops",
+              color: item.color || "unknown",
+              style: item.style || "casual",
+              added: new Date().toISOString(),
+            });
+            added.push(`Added: ${item.name} (${item.type || "tops"}, ${item.color || ""})`);
+          }
+          await KV.put(key, JSON.stringify(wardrobe), { expirationTtl: 86400 * 365 });
+          return { success: true, changes: added, total_items: wardrobe.length };
+        }
+        case "remove": {
+          const items = (args.items as Array<Record<string, string>>) || [];
+          const removed: string[] = [];
+          for (const item of items) {
+            const idx = wardrobe.findIndex(
+              (w) => w.name.toLowerCase() === (item.name || "").toLowerCase(),
+            );
+            if (idx !== -1) {
+              removed.push(`Removed: ${wardrobe[idx].name}`);
+              wardrobe.splice(idx, 1);
+            }
+          }
+          await KV.put(key, JSON.stringify(wardrobe), { expirationTtl: 86400 * 365 });
+          return { success: true, changes: removed, total_items: wardrobe.length };
+        }
+        case "outfit": {
+          return {
+            wardrobe,
+            occasion: args.occasion || "casual",
+            weather: args.weather || "mild",
+            instruction:
+              "Pick a complete outfit from Miles' wardrobe for the given occasion and weather. Include top, bottom, shoes, and optionally outerwear/accessories. If wardrobe is empty, tell him to add his clothes first.",
+          };
+        }
+        default:
+          return { error: "Invalid action. Use: list, add, remove, outfit, categories" };
+      }
+    }
+
+    case "habit_tracker": {
+      const KV = env.KV_CACHE;
+      const habitsKey = "lifeos:habits";
+      const today = new Date().toISOString().split("T")[0];
+
+      // Load habit definitions
+      const habitsRaw = await KV.get(habitsKey);
+      const habits: Record<string, { created: string; description?: string }> = habitsRaw
+        ? JSON.parse(habitsRaw)
+        : {
+            water_8cups: { created: "2026-03-05", description: "Drink 8 cups of water" },
+            sleep_8hrs: { created: "2026-03-05", description: "Get 8 hours of sleep" },
+            workout: { created: "2026-03-05", description: "Exercise / gym session" },
+            stretch: { created: "2026-03-05", description: "Morning stretch routine" },
+            healthy_meal: { created: "2026-03-05", description: "Eat at least one healthy meal" },
+          };
+
+      switch (args.action) {
+        case "add": {
+          const habit = args.habit as string;
+          if (!habit) return { error: "Habit name required" };
+          habits[habit] = { created: today, description: args.value as string };
+          await KV.put(habitsKey, JSON.stringify(habits), { expirationTtl: 86400 * 365 });
+          return {
+            success: true,
+            message: `Now tracking: ${habit}`,
+            total_habits: Object.keys(habits).length,
+          };
+        }
+        case "remove": {
+          const habit = args.habit as string;
+          if (!habit) return { error: "Habit name required" };
+          delete habits[habit];
+          await KV.put(habitsKey, JSON.stringify(habits), { expirationTtl: 86400 * 365 });
+          return { success: true, message: `Stopped tracking: ${habit}` };
+        }
+        case "log": {
+          const habit = args.habit as string;
+          if (!habit) return { error: "Habit name required" };
+          const logKey = `lifeos:habit_log:${today}`;
+          const logRaw = await KV.get(logKey);
+          const log: Record<string, { done: boolean; value?: string; time: string }> = logRaw
+            ? JSON.parse(logRaw)
+            : {};
+          log[habit] = { done: true, value: args.value as string, time: new Date().toISOString() };
+          await KV.put(logKey, JSON.stringify(log), { expirationTtl: 86400 * 90 });
+
+          // Calculate streak
+          let streak = 1;
+          for (let d = 1; d <= 365; d++) {
+            const dt = new Date(Date.now() - d * 86400000).toISOString().split("T")[0];
+            const prev = await KV.get(`lifeos:habit_log:${dt}`);
+            if (prev) {
+              const prevLog = JSON.parse(prev);
+              if (prevLog[habit]?.done) streak++;
+              else break;
+            } else break;
+          }
+          return { success: true, habit, streak, message: `${habit} logged! ${streak}-day streak` };
+        }
+        case "status": {
+          const logKey = `lifeos:habit_log:${today}`;
+          const logRaw = await KV.get(logKey);
+          const log = logRaw ? JSON.parse(logRaw) : {};
+          const status: Array<{ habit: string; done: boolean; value?: string }> = [];
+          for (const [h] of Object.entries(habits)) {
+            status.push({ habit: h, done: !!log[h]?.done, value: log[h]?.value });
+          }
+          const done = status.filter((s) => s.done).length;
+          return {
+            date: today,
+            habits: status,
+            completed: done,
+            total: status.length,
+            completion_pct: Math.round((done / Math.max(status.length, 1)) * 100),
+          };
+        }
+        case "history": {
+          const days = (args.days as number) || 7;
+          const history: Array<{ date: string; completed: number; total: number }> = [];
+          for (let d = 0; d < days; d++) {
+            const dt = new Date(Date.now() - d * 86400000).toISOString().split("T")[0];
+            const logRaw = await KV.get(`lifeos:habit_log:${dt}`);
+            const log = logRaw ? JSON.parse(logRaw) : {};
+            const done = Object.values(log).filter((v: any) => v.done).length;
+            history.push({ date: dt, completed: done, total: Object.keys(habits).length });
+          }
+          return { history, tracked_habits: Object.keys(habits) };
+        }
+        case "weekly": {
+          const history: Record<string, number> = {};
+          let totalDone = 0;
+          let totalPossible = 0;
+          for (let d = 0; d < 7; d++) {
+            const dt = new Date(Date.now() - d * 86400000).toISOString().split("T")[0];
+            const logRaw = await KV.get(`lifeos:habit_log:${dt}`);
+            const log = logRaw ? JSON.parse(logRaw) : {};
+            for (const [h] of Object.entries(habits)) {
+              if (!history[h]) history[h] = 0;
+              if (log[h]?.done) {
+                history[h]++;
+                totalDone++;
+              }
+              totalPossible++;
+            }
+          }
+          return {
+            weekly_summary: history,
+            total_completed: totalDone,
+            total_possible: totalPossible,
+            consistency_pct: Math.round((totalDone / Math.max(totalPossible, 1)) * 100),
+          };
+        }
+        default:
+          return { error: "Invalid action. Use: log, status, add, remove, history, weekly" };
+      }
+    }
+
+    case "science_day_planner": {
+      const KV = env.KV_CACHE;
+      const today = new Date().toISOString().split("T")[0];
+
+      switch (args.action) {
+        case "plan": {
+          // Gather context for the AI to build a science-based plan
+          const [calRes, habitsRaw, kitchenRaw] = await Promise.all([
+            gatewayFetch(env, "/api/calendar/today")
+              .then((r) => r.json())
+              .catch(() => ({ events: [] })),
+            KV.get("lifeos:habits"),
+            KV.get("lifeos:kitchen_inventory"),
+          ]);
+
+          const wakeTime = (args.wake_time as string) || "8:00am";
+          const priorities = (args.priorities as string[]) || [];
+
+          return {
+            date: today,
+            wake_time: wakeTime,
+            priorities,
+            calendar: calRes,
+            habits: habitsRaw ? JSON.parse(habitsRaw) : {},
+            kitchen: kitchenRaw ? JSON.parse(kitchenRaw) : [],
+            miles_schedule: {
+              work_hours: "5pm-10pm (Tue-Sun)",
+              monday: "OFF — best for big projects",
+              thursday_soccer: "9:20pm",
+              university: true,
+            },
+            science_framework: {
+              ultradian_cycles:
+                "90-minute focus blocks with 20-minute breaks. Peak focus 2-4 hours after waking.",
+              circadian_peaks:
+                "Cortisol peaks ~30min after waking (don't waste on easy tasks). Afternoon dip 1-3pm (do admin/easy tasks). Second wind 4-6pm.",
+              meal_timing:
+                "Eat within 1hr of waking. Protein at every meal for sustained energy. No heavy meals before focus blocks.",
+              exercise:
+                "Best performance: late afternoon (4-6pm body temp peak). Morning exercise boosts focus for 4-6 hours.",
+              sleep_prep:
+                "No caffeine after 2pm. Blue light filter 2hrs before bed. Cool room (65-68F). Consistent sleep/wake times.",
+            },
+            instruction:
+              "Create a time-blocked schedule for today. Use ultradian 90-min focus blocks. Place hardest tasks in peak cortisol window (2-4hrs after wake). Put easy admin in the afternoon dip. Include meal times, exercise, habits, and prep for work shift. Be specific with times. Add motivational note.",
+          };
+        }
+        case "energy": {
+          const wakeTime = (args.wake_time as string) || "8:00am";
+          return {
+            wake_time: wakeTime,
+            energy_curve: [
+              { time: "wake +0:30", level: "HIGH", note: "Cortisol spike — tackle hardest task" },
+              { time: "wake +1:30", level: "PEAK", note: "Deep focus block #1 — complex work" },
+              { time: "wake +3:00", level: "HIGH", note: "Deep focus block #2 — creative work" },
+              { time: "wake +4:30", level: "MODERATE", note: "Break + light meal" },
+              {
+                time: "wake +5:00",
+                level: "DIP",
+                note: "Afternoon slump — admin, emails, easy tasks",
+              },
+              {
+                time: "wake +7:00",
+                level: "RISING",
+                note: "Second wind — exercise or focused work",
+              },
+              { time: "wake +9:00", level: "MODERATE", note: "Wrap up, plan tomorrow" },
+              {
+                time: "wake +14:00",
+                level: "LOW",
+                note: "Wind-down window — no screens, sleep prep",
+              },
+            ],
+            instruction:
+              "Show this energy curve with actual clock times based on wake time. Suggest what Miles should do at each energy level.",
+          };
+        }
+        case "sleep": {
+          const targetBedtime = (args.target_bedtime as string) || "11:00pm";
+          return {
+            target_bedtime: targetBedtime,
+            sleep_science: {
+              cycles: "Sleep cycles are ~90 minutes. Aim for 5 cycles (7.5hrs) or 6 cycles (9hrs).",
+              ideal_wake_times: "Count back from bedtime in 90-min blocks + 15min to fall asleep.",
+              pre_sleep_routine:
+                "2hrs before: dim lights, no caffeine. 1hr before: no screens or blue light filter. 30min before: light stretch, reading, cool room to 65-68F.",
+              consistency:
+                "Same wake time every day (even weekends) is the #1 sleep quality factor.",
+            },
+            instruction:
+              "Calculate optimal wake time for the target bedtime. Suggest a pre-sleep routine timeline. Remind Miles of what to avoid.",
+          };
+        }
+        case "review": {
+          const completed = (args.completed as string[]) || [];
+          const habitsLogRaw = await KV.get(`lifeos:habit_log:${today}`);
+          const habitsLog = habitsLogRaw ? JSON.parse(habitsLogRaw) : {};
+          const mealsRaw = await KV.get(`lifeos:meals:${today}`);
+          const meals = mealsRaw ? JSON.parse(mealsRaw) : [];
+
+          return {
+            date: today,
+            completed_tasks: completed,
+            habits_done: habitsLog,
+            meals_logged: meals,
+            instruction:
+              "Give Miles an end-of-day review. Celebrate wins, note what was missed, and suggest one thing to improve tomorrow. Keep it motivating — dad energy, not drill sergeant.",
+          };
+        }
+        default:
+          return { error: "Invalid action. Use: plan, energy, sleep, review" };
+      }
+    }
+
+    // --- Real-Time Data (direct fetch, no gateway needed) ---
+    case "get_weather": {
+      const lat = (args.latitude as number) || 35.2;
+      const lon = (args.longitude as number) || -111.65;
+      const days = Math.min((args.days as number) || 3, 7);
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,weather_code,sunrise,sunset,uv_index_max&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&forecast_days=${days}&timezone=America%2FPhoenix`;
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) return { error: `Weather API error: ${resp.status}` };
+        const data = (await resp.json()) as Record<string, unknown>;
+        const current = data.current as Record<string, unknown>;
+        const daily = data.daily as Record<string, unknown[]>;
+        const weatherCodes: Record<number, string> = {
+          0: "Clear sky",
+          1: "Mainly clear",
+          2: "Partly cloudy",
+          3: "Overcast",
+          45: "Foggy",
+          48: "Rime fog",
+          51: "Light drizzle",
+          53: "Drizzle",
+          55: "Heavy drizzle",
+          61: "Light rain",
+          63: "Rain",
+          65: "Heavy rain",
+          71: "Light snow",
+          73: "Snow",
+          75: "Heavy snow",
+          77: "Snow grains",
+          80: "Light showers",
+          81: "Showers",
+          82: "Heavy showers",
+          85: "Light snow showers",
+          86: "Heavy snow showers",
+          95: "Thunderstorm",
+        };
+        return {
+          location: { latitude: lat, longitude: lon },
+          current: {
+            temperature_f: current.temperature_2m,
+            feels_like_f: current.apparent_temperature,
+            humidity_pct: current.relative_humidity_2m,
+            precipitation_in: current.precipitation,
+            wind_mph: current.wind_speed_10m,
+            condition:
+              weatherCodes[current.weather_code as number] || `Code ${current.weather_code}`,
+          },
+          forecast: (daily.time as string[]).map((date: string, i: number) => ({
+            date,
+            high_f: (daily.temperature_2m_max as number[])[i],
+            low_f: (daily.temperature_2m_min as number[])[i],
+            precipitation_in: (daily.precipitation_sum as number[])[i],
+            rain_chance_pct: (daily.precipitation_probability_max as number[])[i],
+            condition:
+              weatherCodes[(daily.weather_code as number[])[i]] ||
+              `Code ${(daily.weather_code as number[])[i]}`,
+            uv_index: (daily.uv_index_max as number[])[i],
+            sunrise: (daily.sunrise as string[])[i],
+            sunset: (daily.sunset as string[])[i],
+          })),
+        };
+      } catch (e) {
+        return { error: `Weather fetch failed: ${(e as Error).message}` };
+      }
+    }
+
+    case "get_crypto_prices": {
+      const coins = (args.coins as string) || "bitcoin,ethereum";
+      const currency = (args.currency as string) || "usd";
+      const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(coins)}&vs_currencies=${currency}&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`;
+      try {
+        const resp = await fetch(url, {
+          headers: { "User-Agent": "OpenClaw/1.0", Accept: "application/json" },
+        });
+        if (!resp.ok) return { error: `CoinGecko API error: ${resp.status}` };
+        const data = (await resp.json()) as Record<string, Record<string, number>>;
+        const result: Record<string, unknown> = {};
+        for (const [coin, info] of Object.entries(data)) {
+          result[coin] = {
+            price: info[currency],
+            change_24h_pct: Math.round((info[`${currency}_24h_change`] || 0) * 100) / 100,
+            market_cap: info[`${currency}_market_cap`],
+            volume_24h: info[`${currency}_24h_vol`],
+          };
+        }
+        return { currency, prices: result };
+      } catch (e) {
+        return { error: `Crypto fetch failed: ${(e as Error).message}` };
+      }
+    }
+
+    case "nutrition_lookup": {
+      const query = args.query as string;
+      if (!query) return { error: "query is required" };
+      const limit = Math.min((args.limit as number) || 3, 10);
+      const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&pageSize=${limit}&dataType=Foundation,SR%20Legacy&api_key=DEMO_KEY`;
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) return { error: `USDA API error: ${resp.status}` };
+        const data = (await resp.json()) as {
+          foods: Array<{
+            description: string;
+            foodNutrients: Array<{ nutrientName: string; value: number; unitName: string }>;
+          }>;
+        };
+        return {
+          query,
+          results: data.foods.map((f) => {
+            const get = (name: string) => {
+              const n = f.foodNutrients.find((fn) =>
+                fn.nutrientName.toLowerCase().includes(name.toLowerCase()),
+              );
+              return n ? `${n.value} ${n.unitName}` : "N/A";
+            };
+            return {
+              food: f.description,
+              per_100g: {
+                calories: get("Energy"),
+                protein: get("Protein"),
+                total_fat: get("Total lipid"),
+                carbs: get("Carbohydrate"),
+                fiber: get("Fiber"),
+                sugar: get("Sugars, total"),
+                sodium: get("Sodium"),
+              },
+            };
+          }),
+        };
+      } catch (e) {
+        return { error: `Nutrition fetch failed: ${(e as Error).message}` };
+      }
+    }
+
     default:
       return { error: `Unknown tool: ${name}` };
   }
@@ -2729,7 +3676,7 @@ function getTodayMST(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Phoenix" });
 }
 
-const SYSTEM_PROMPT = `You are Overseer — Miles's personal AI agency assistant, running on Gemini 2.5 Flash at the Cloudflare edge.
+const SYSTEM_PROMPT = `You are Overseer — Miles's personal AI agency assistant, running on DeepSeek V3 at the Cloudflare edge.
 
 CAPABILITIES: You have live access to the OpenClaw agency via 73 function calls. You can:
 - **Jobs & Proposals**: Create, list, kill, approve, and monitor autonomous jobs and proposals
@@ -2765,8 +3712,14 @@ CAPABILITIES: You have live access to the OpenClaw agency via 73 function calls.
 - **Costs & Budget**: Real-time spending and budget status
 - **Delegation**: Route complex tasks to specialist agents (coder, hacker, database)
 
-PERSONALITY: Direct, concise, action-first. Miles is busy — get to the point.
-No fluff, no celebrations, no unnecessary markdown. If a tool call is needed, call it immediately without narrating the intention.
+PERSONALITY: You're Miles' right-hand — part mentor, part dad, part coach. Warm but direct. You genuinely care about his success, health, and growth.
+- Motivate without being corny. Real talk, not generic positivity.
+- When he knocks something out, acknowledge it briefly: "That's handled." Not "Great job!!!"
+- When he's slacking or forgetting habits, call it out gently but firmly: "You haven't logged water today. Fix that."
+- Plan his days like you're looking out for him — sleep, food, hydration, exercise, THEN work.
+- Think ahead. If it's Thursday, remind him about soccer. If he hasn't eaten, suggest food.
+- Keep messages concise but warm. You're not a robot — you're his personal operations manager who happens to also run an AI agency.
+- If a tool call is needed, call it immediately without narrating the intention.
 
 MILES' SCHEDULE:
 - Monday: OFF work — best day for big tasks, Claude sessions, weekly planning
@@ -2797,6 +3750,9 @@ ROUTING:
 - When Miles asks to run a command, use shell_execute.
 - When Miles asks about git status/commits/push, use git_operations.
 - When Miles asks to deploy, use vercel_deploy.
+- When Miles asks about WEATHER, temperature, rain, "should I bring a jacket", outdoor plans, or wardrobe advice, ALWAYS use get_weather. Never use web_search or perplexity for weather.
+- When Miles asks about CRYPTO PRICES (bitcoin, ethereum, solana, etc), ALWAYS use get_crypto_prices. Never use web_search or perplexity for crypto prices.
+- When Miles asks about CALORIES, nutrition, macros, "how much protein in X", use nutrition_lookup. Never use web_search or perplexity for nutrition data.
 - When Miles asks to calculate something, use compute_math or compute_stats.
 - When Miles asks about predictions/markets, use prediction_market to search/list. For REAL-TIME PRICES, use polymarket_prices with action=snapshot. For arbitrage/mispricing checks, use polymarket_monitor with action=mispricing. For viewing a trader's portfolio, use polymarket_portfolio.
 - When Miles asks "what's the price on [market]?", use polymarket_prices(action=snapshot, market_id=slug).
@@ -2830,7 +3786,25 @@ ROUTING:
 - REMINDERS: When Miles says "remind me to X" or "don't let me forget Y", ALWAYS call save_memory with the 'reminder' tag AND a remind_at timestamp. Convert relative times to ISO 8601 in MST (UTC-7). Examples: "remind me tomorrow" → next day 9am MST, "remind me at 5pm" → today 5pm MST, "remind me in 2 hours" → current time + 2h. The cron system checks every 15 minutes and sends via Telegram automatically.
 - When Miles asks "what did I tell you?" or "do I have any reminders?", call search_memory with tag='reminder' to find all saved reminders.
 - If PENDING REMINDERS are injected in context, proactively mention them to Miles at the START of your response before addressing his question.
-- For complex coding/security/database questions, use send_chat_to_gateway to delegate to a specialist.`;
+- For complex coding/security/database questions, use send_chat_to_gateway to delegate to a specialist.
+
+LIFE OS (Personal Life Management — SEPARATE from agency tools):
+- When Miles talks about food, cooking, groceries, or "what do I have?", use kitchen_inventory.
+- When Miles says "add [food items] to my kitchen" or "I just bought...", use kitchen_inventory(action=add).
+- When Miles asks "what can I cook?" or "what should I eat?", use meal_planner(action=suggest) — it checks his kitchen inventory.
+- When Miles wants a meal plan or grocery list, use meal_planner(action=plan) or meal_planner(action=grocery).
+- When Miles says "I ate [food]" or logs a meal, use meal_planner(action=log).
+- When Miles talks about clothes, outfits, or "what should I wear?", use wardrobe_tracker.
+- When Miles says "add my [clothing items]", use wardrobe_tracker(action=add).
+- When Miles asks for an outfit suggestion, use wardrobe_tracker(action=outfit) with occasion and weather.
+- When Miles says "log [habit]", "I drank water", "I worked out", use habit_tracker(action=log).
+- When Miles asks "how am I doing?" on habits, use habit_tracker(action=status) or habit_tracker(action=weekly).
+- When Miles says "plan my day" with a focus on personal life, use science_day_planner(action=plan). Ask for wake time if not given.
+- When Miles asks about energy, productivity, or "when should I do X?", use science_day_planner(action=energy).
+- When Miles asks about sleep timing, use science_day_planner(action=sleep).
+- At end of day, proactively offer science_day_planner(action=review) to review the day.
+- IMPORTANT: Life OS tools store data in KV — they work independently from the agency. These are for Miles' PERSONAL life, not coding tasks.
+- When giving meal/outfit/schedule suggestions, be specific and actionable. Don't just list options — pick the best one and explain why.`;
 
 // ---------------------------------------------------------------------------
 // Telegram table formatter — builds pixel-perfect monospace tables in code
@@ -3152,124 +4126,34 @@ app.post("/webhook/telegram", async (c) => {
     // Don't block the conversation if reminder fetch fails
   }
 
-  // Build Gemini conversation (last 20 messages)
+  // Build conversation messages for DeepSeek (last 20 messages)
   const recentMessages = session.messages.slice(-20);
-  const geminiContents: Array<Record<string, unknown>> = recentMessages.map((m) => ({
-    role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: m.content }],
+  const llmMessages: LLMMessage[] = recentMessages.map((m) => ({
+    role: (m.role === "assistant" ? "assistant" : "user") as "assistant" | "user",
+    content: m.content,
   }));
 
-  const geminiModel = env.GEMINI_MODEL || "gemini-2.5-flash-lite";
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${env.GEMINI_API_KEY}`;
+  const telegramSystemPrompt =
+    SYSTEM_PROMPT +
+    `\n\nTODAY'S DATE: ${getTodayMST()} (Arizona MST, UTC-7). The year is 2026. Use this for all relative dates ("tomorrow", "next Sunday", etc.).\n\nYou are responding via Telegram. Keep responses SHORT (2-3 sentences max). Tables are auto-formatted by the system — just summarize the key insight briefly. Use HTML: <b>bold</b>, <i>italic</i>. Do NOT use Markdown (* _ # []). Do NOT try to format tables yourself.` +
+    reminderContext;
 
   let reply = "";
   let lastToolName = "";
   let lastToolResult: Record<string, unknown> | null = null;
-  const MAX_TOOL_ITERATIONS = 3;
 
   try {
-    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const requestBody: Record<string, unknown> = {
-        contents: geminiContents,
-        systemInstruction: {
-          parts: [
-            {
-              text:
-                SYSTEM_PROMPT +
-                `\n\nTODAY'S DATE: ${getTodayMST()} (Arizona MST, UTC-7). The year is 2026. Use this for all relative dates ("tomorrow", "next Sunday", etc.).\n\nYou are responding via Telegram. Keep responses SHORT (2-3 sentences max). Tables are auto-formatted by the system — just summarize the key insight briefly. Use HTML: <b>bold</b>, <i>italic</i>. Do NOT use Markdown (* _ # []). Do NOT try to format tables yourself.` +
-                reminderContext,
-            },
-          ],
-        },
-        generationConfig: {
-          maxOutputTokens: 2048,
-          temperature: 0.7,
-          thinkingConfig: { thinkingBudget: 0 },
-        },
-        tools: OPENCLAW_TOOLS,
-      };
-
-      const geminiResp = await fetch(geminiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!geminiResp.ok) {
-        reply = "Gemini API error. Try again in a moment.";
-        break;
-      }
-
-      const geminiData = (await geminiResp.json()) as Record<string, unknown>;
-      const candidates = geminiData.candidates as Array<Record<string, unknown>> | undefined;
-
-      if (!candidates || candidates.length === 0) {
-        reply = "No response from Gemini.";
-        break;
-      }
-
-      const content = candidates[0].content as Record<string, unknown> | undefined;
-      const parts = content?.parts as Array<Record<string, unknown>> | undefined;
-
-      if (!parts || parts.length === 0) {
-        reply = "No response from Gemini.";
-        break;
-      }
-
-      // Check for function call
-      const functionCallPart = parts.find((p) => p.functionCall);
-
-      if (functionCallPart) {
-        const functionCall = functionCallPart.functionCall as {
-          name: string;
-          args: Record<string, unknown>;
-        };
-
-        let toolResult: unknown;
-        try {
-          toolResult = await executeTool(env, functionCall.name, functionCall.args || {});
-        } catch (err: unknown) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          toolResult = { error: errMsg };
-        }
-
-        // Track for table formatting
-        lastToolName = functionCall.name;
-        lastToolResult =
-          typeof toolResult === "object" && toolResult !== null
-            ? (toolResult as Record<string, unknown>)
-            : null;
-
-        geminiContents.push({
-          role: "model",
-          parts: [{ functionCall: { name: functionCall.name, args: functionCall.args || {} } }],
-        });
-
-        const responsePayload =
-          typeof toolResult === "object" && toolResult !== null
-            ? toolResult
-            : { result: toolResult };
-        geminiContents.push({
-          role: "function",
-          parts: [{ functionResponse: { name: functionCall.name, response: responsePayload } }],
-        });
-
-        continue;
-      }
-
-      // Extract text reply
-      for (const p of parts) {
-        if (p.text) {
-          reply = p.text as string;
-          break;
-        }
-      }
-      break;
-    }
-
-    if (!reply) {
-      reply = "Tool executed but no summary generated.";
-    }
+    const result = await callDeepSeek(
+      env,
+      telegramSystemPrompt,
+      llmMessages,
+      3, // max tool iterations
+      2048,
+      (name, args) => executeTool(env, name, args),
+    );
+    reply = result.reply;
+    lastToolName = result.toolUsed || "";
+    lastToolResult = result.toolResult;
 
     // Override with code-formatted table for betting tools
     const table = formatBettingTable(lastToolName, lastToolResult);
@@ -3339,7 +4223,7 @@ app.post("/webhook/telegram", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/chat — Gemini-powered chat with tool calling + KV sessions
+// POST /api/chat — DeepSeek-powered chat with tool calling + KV sessions
 // ---------------------------------------------------------------------------
 app.post("/api/chat", async (c) => {
   const body = await c.req.json<ChatRequest>();
@@ -3376,142 +4260,28 @@ app.post("/api/chat", async (c) => {
     timestamp: new Date().toISOString(),
   });
 
-  // Build Gemini conversation history (last 20 messages for context)
+  // Build conversation messages (last 20 for context)
   const recentMessages = session.messages.slice(-20);
-  const geminiContents: Array<Record<string, unknown>> = recentMessages.map((m) => ({
-    role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: m.content }],
+  const llmMessages: LLMMessage[] = recentMessages.map((m) => ({
+    role: (m.role === "assistant" ? "assistant" : "user") as "assistant" | "user",
+    content: m.content,
   }));
 
-  const geminiModel = c.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
-  // Note: Free tier limits are 10 req/min, 20 req/day for flash-lite.
-  // Tool calls consume 2 requests (call + response). Enable billing for production use.
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${c.env.GEMINI_API_KEY}`;
+  const chatSystemPrompt =
+    SYSTEM_PROMPT + `\n\nTODAY'S DATE: ${getTodayMST()} (Arizona MST, UTC-7). The year is 2026.`;
 
   let reply = "";
   let toolUsed: string | null = null;
-  const MAX_TOOL_ITERATIONS = 3;
 
   try {
-    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const requestBody: Record<string, unknown> = {
-        contents: geminiContents,
-        systemInstruction: {
-          parts: [
-            {
-              text:
-                SYSTEM_PROMPT +
-                `\n\nTODAY'S DATE: ${getTodayMST()} (Arizona MST, UTC-7). The year is 2026.`,
-            },
-          ],
-        },
-        generationConfig: {
-          maxOutputTokens: 4096,
-          temperature: 0.7,
-          thinkingConfig: { thinkingBudget: 0 },
-        },
-        tools: OPENCLAW_TOOLS,
-      };
-
-      const geminiResp = await fetch(geminiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!geminiResp.ok) {
-        const errText = await geminiResp.text();
-        return c.json({ error: "gemini_error", status: geminiResp.status, detail: errText }, 502);
-      }
-
-      const geminiData = (await geminiResp.json()) as Record<string, unknown>;
-      const candidates = geminiData.candidates as Array<Record<string, unknown>> | undefined;
-
-      if (!candidates || candidates.length === 0) {
-        reply = "No response from Gemini.";
-        break;
-      }
-
-      const content = candidates[0].content as Record<string, unknown> | undefined;
-      const parts = content?.parts as Array<Record<string, unknown>> | undefined;
-
-      if (!parts || parts.length === 0) {
-        reply = "No response from Gemini.";
-        break;
-      }
-
-      // Check if the model wants to call a function
-      const functionCallPart = parts.find((p) => p.functionCall);
-
-      if (functionCallPart) {
-        const functionCall = functionCallPart.functionCall as {
-          name: string;
-          args: Record<string, unknown>;
-        };
-        toolUsed = functionCall.name;
-
-        // Execute the tool
-        let toolResult: unknown;
-        try {
-          toolResult = await executeTool(c.env, functionCall.name, functionCall.args || {});
-        } catch (err: unknown) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          toolResult = { error: errMsg };
-        }
-
-        // Append model's function call turn
-        geminiContents.push({
-          role: "model",
-          parts: [{ functionCall: { name: functionCall.name, args: functionCall.args || {} } }],
-        });
-
-        // Append function response turn (Gemini expects response as an object with content)
-        const responsePayload =
-          typeof toolResult === "object" && toolResult !== null
-            ? toolResult
-            : { result: toolResult };
-        geminiContents.push({
-          role: "function",
-          parts: [{ functionResponse: { name: functionCall.name, response: responsePayload } }],
-        });
-
-        // Continue the loop — Gemini will process the tool result and respond
-        continue;
-      }
-
-      // No function call — extract text reply (check ALL parts for text)
-      for (const p of parts) {
-        if (p.text) {
-          reply = p.text as string;
-          break;
-        }
-      }
-      break;
-    }
-
-    // If no text reply after tool calls, format the raw tool result as fallback
-    if (!reply && toolUsed) {
-      const lastFnResponse = geminiContents
-        .filter((c) => (c.parts as Array<Record<string, unknown>>)?.[0]?.functionResponse)
-        .pop();
-      if (lastFnResponse) {
-        const fnParts = lastFnResponse.parts as Array<Record<string, unknown>>;
-        const fnResp = fnParts[0].functionResponse as Record<string, unknown>;
-        const data = fnResp.response;
-        try {
-          reply = JSON.stringify(data, null, 2).slice(0, 3000);
-        } catch {
-          reply = `Tool ${toolUsed} executed.`;
-        }
-      } else {
-        reply = `Tool ${toolUsed} executed.`;
-      }
-    } else if (!reply) {
-      reply = "No response generated.";
-    }
+    const result = await callDeepSeek(c.env, chatSystemPrompt, llmMessages, 3, 4096, (name, args) =>
+      executeTool(c.env, name, args),
+    );
+    reply = result.reply;
+    toolUsed = result.toolUsed;
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    return c.json({ error: "gemini_fetch_failed", detail: errMsg }, 502);
+    return c.json({ error: "llm_fetch_failed", detail: errMsg }, 502);
   }
 
   // Append assistant response to local session
@@ -3535,7 +4305,7 @@ app.post("/api/chat", async (c) => {
 
   return c.json({
     response: reply,
-    model: geminiModel,
+    model: "deepseek-chat",
     tool_used: toolUsed,
     sessionKey: key,
     sessionMessageCount: session.messageCount,
@@ -3683,6 +4453,189 @@ app.post("/api/job/:id/approve", async (c) => {
     status: resp.status,
     headers: { "Content-Type": "application/json" },
   });
+});
+
+// ---------------------------------------------------------------------------
+// Memory API Routes — D1-backed personal memory system (Week 1 CRUD)
+// ---------------------------------------------------------------------------
+
+/**
+ * Initialize memory tables on first request.
+ * This is idempotent, so safe to call multiple times.
+ */
+let memoryTablesInitialized = false;
+async function ensureMemoryTablesExist(db: D1Database): Promise<void> {
+  if (!memoryTablesInitialized) {
+    await Memory.initializeMemoryTables(db);
+    memoryTablesInitialized = true;
+  }
+}
+
+/** POST /api/v2/memory/add — Add a new memory */
+app.post("/api/v2/memory/add", async (c) => {
+  const env = c.env as Env;
+  await ensureMemoryTablesExist(env.DB);
+
+  try {
+    const body = (await c.req.json()) as Memory.MemoryAddRequest;
+
+    if (!body.data || !body.user_id) {
+      return c.json({ error: "Missing required fields: data, user_id" }, 400);
+    }
+
+    const result = await Memory.addMemory(env.DB, body);
+    return c.json(result, 201);
+  } catch (err: unknown) {
+    console.error("Error adding memory:", err);
+    return c.json({ error: "Failed to add memory" }, 500);
+  }
+});
+
+/** GET /api/v2/memory/search — Search memories */
+app.get("/api/v2/memory/search", async (c) => {
+  const env = c.env as Env;
+  await ensureMemoryTablesExist(env.DB);
+
+  try {
+    const query = c.req.query("query") || "";
+    const userId = c.req.query("user_id") || "";
+    const agentId = c.req.query("agent_id");
+    const runId = c.req.query("run_id");
+    const category = c.req.query("category");
+    const limit = parseInt(c.req.query("limit") || "10", 10);
+
+    if (!userId) {
+      return c.json({ error: "Missing required query param: user_id" }, 400);
+    }
+
+    const results = await Memory.searchMemories(env.DB, {
+      query,
+      user_id: userId,
+      agent_id: agentId,
+      run_id: runId,
+      category,
+      limit,
+    });
+
+    return c.json({ results });
+  } catch (err: unknown) {
+    console.error("Error searching memories:", err);
+    return c.json({ error: "Failed to search memories" }, 500);
+  }
+});
+
+/** GET /api/v2/memory/:id — Get a specific memory */
+app.get("/api/v2/memory/:id", async (c) => {
+  const env = c.env as Env;
+  await ensureMemoryTablesExist(env.DB);
+
+  try {
+    const id = c.req.param("id");
+    const memory = await Memory.getMemory(env.DB, id);
+
+    if (!memory) {
+      return c.json({ error: "Memory not found" }, 404);
+    }
+
+    return c.json({ memory });
+  } catch (err: unknown) {
+    console.error("Error getting memory:", err);
+    return c.json({ error: "Failed to get memory" }, 500);
+  }
+});
+
+/** PUT /api/v2/memory/:id — Update a memory */
+app.put("/api/v2/memory/:id", async (c) => {
+  const env = c.env as Env;
+  await ensureMemoryTablesExist(env.DB);
+
+  try {
+    const id = c.req.param("id");
+    const body = (await c.req.json()) as { data: string; category?: string };
+
+    if (!body.data) {
+      return c.json({ error: "Missing required field: data" }, 400);
+    }
+
+    const memory = await Memory.updateMemory(env.DB, id, body.data, body.category);
+    return c.json({ memory });
+  } catch (err: unknown) {
+    console.error("Error updating memory:", err);
+    return c.json({ error: "Failed to update memory" }, 500);
+  }
+});
+
+/** DELETE /api/v2/memory/:id — Delete a memory */
+app.delete("/api/v2/memory/:id", async (c) => {
+  const env = c.env as Env;
+  await ensureMemoryTablesExist(env.DB);
+
+  try {
+    const id = c.req.param("id");
+    await Memory.deleteMemory(env.DB, id);
+    return c.json({ success: true });
+  } catch (err: unknown) {
+    console.error("Error deleting memory:", err);
+    return c.json({ error: "Failed to delete memory" }, 500);
+  }
+});
+
+/** GET /api/v2/memory/list/:userId — List all memories for a user */
+app.get("/api/v2/memory/list/:userId", async (c) => {
+  const env = c.env as Env;
+  await ensureMemoryTablesExist(env.DB);
+
+  try {
+    const userId = c.req.param("userId");
+    const agentId = c.req.query("agent_id");
+    const runId = c.req.query("run_id");
+    const category = c.req.query("category");
+    const limit = parseInt(c.req.query("limit") || "100", 10);
+
+    const memories = await Memory.listMemories(env.DB, userId, {
+      agent_id: agentId,
+      run_id: runId,
+      category,
+      limit,
+    });
+
+    return c.json({ memories });
+  } catch (err: unknown) {
+    console.error("Error listing memories:", err);
+    return c.json({ error: "Failed to list memories" }, 500);
+  }
+});
+
+/** GET /api/v2/memory/:id/history — Get audit history for a memory */
+app.get("/api/v2/memory/:id/history", async (c) => {
+  const env = c.env as Env;
+  await ensureMemoryTablesExist(env.DB);
+
+  try {
+    const id = c.req.param("id");
+    const limit = parseInt(c.req.query("limit") || "50", 10);
+
+    const history = await Memory.getMemoryHistory(env.DB, id, limit);
+    return c.json({ history });
+  } catch (err: unknown) {
+    console.error("Error getting memory history:", err);
+    return c.json({ error: "Failed to get memory history" }, 500);
+  }
+});
+
+/** GET /api/v2/memory/stats/:userId — Get memory statistics for a user */
+app.get("/api/v2/memory/stats/:userId", async (c) => {
+  const env = c.env as Env;
+  await ensureMemoryTablesExist(env.DB);
+
+  try {
+    const userId = c.req.param("userId");
+    const stats = await Memory.getMemoryStats(env.DB, userId);
+    return c.json({ stats });
+  } catch (err: unknown) {
+    console.error("Error getting memory stats:", err);
+    return c.json({ error: "Failed to get memory stats" }, 500);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -4175,6 +5128,7 @@ const TOOL_CATEGORIES={
   send_slack_message:'system',security_scan:'system',
   prediction_market:'system',polymarket_prices:'system',polymarket_monitor:'system',polymarket_portfolio:'system',env_manage:'system',
   process_manage:'system',install_package:'system',
+  get_weather:'system',get_crypto_prices:'system',nutrition_lookup:'system',
 };
 const TOOL_ICONS={
   jobs:'&#9654;',costs:'&#36;',agents:'&#9881;',
@@ -4196,6 +5150,7 @@ const TOOL_LABELS={
   send_slack_message:'SLACK',security_scan:'SECURITY',
   prediction_market:'MARKETS',polymarket_prices:'PRICES',polymarket_monitor:'MONITOR',polymarket_portfolio:'PORTFOLIO',env_manage:'ENV',
   process_manage:'PROCESS',install_package:'INSTALL',
+  get_weather:'WEATHER',get_crypto_prices:'CRYPTO',nutrition_lookup:'NUTRITION',
 };
 
 function toolBadgeHtml(toolName){
