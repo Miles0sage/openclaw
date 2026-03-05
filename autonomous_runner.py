@@ -1773,12 +1773,20 @@ async def _plan_phase(job: dict, agent_key: str, research: str,
     repo_map = job.get("_repo_map", "")
     repo_map_section = f"PROJECT STRUCTURE:\n{repo_map}\n\n" if repo_map else ""
 
+    # Past experience from reflexion loop
+    department = job.get("department", "")
+    past_reflections = search_reflections(task, project=project, department=department, limit=2)
+    reflexion_context = format_reflections_for_prompt(past_reflections)
+    if reflexion_context:
+        logger.info(f"Job {job['id']}: Injecting {len(past_reflections)} reflections into plan prompt")
+
     prompt = (
         f"Based on the research below, create a concrete step-by-step plan to complete this task.\n\n"
         f"PROJECT: {project}\n"
         f"TASK: {task}\n\n"
         f"{repo_map_section}"
         f"RESEARCH FINDINGS:\n{research}\n\n"
+        f"{reflexion_context}"
         f"Create a plan with numbered steps. For each step specify:\n"
         f"- A clear description of what to do\n"
         f"- Which tools to use (file_write, file_edit, shell_execute, git_operations, etc.)\n"
@@ -1950,6 +1958,15 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
 
         if project_context:
             prompt += f"{project_context}\n\n"
+
+        # Past experience relevant to this step
+        try:
+            step_reflections = search_reflections(step.description, project=job.get("project", "unknown"), limit=2)
+            step_reflexion_ctx = format_reflections_for_prompt(step_reflections)
+            if step_reflexion_ctx:
+                prompt += f"{step_reflexion_ctx}\n\n"
+        except Exception:
+            pass  # Non-fatal
 
         prompt += (
             f"{context_bundle}\n\n"
@@ -2567,6 +2584,12 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
             f"Pay special attention to these flagged issues during verification.\n"
         )
 
+    # Past experience from reflexion loop
+    past_reflections = search_reflections(job['task'], project=project, limit=2)
+    reflexion_context = format_reflections_for_prompt(past_reflections)
+    if reflexion_context:
+        logger.info(f"Job {job['id']}: Injecting {len(past_reflections)} reflections into verify prompt")
+
     prompt = (
         f"You just completed execution of a task. Now verify the results.\n\n"
         f"PROJECT: {project}\n"
@@ -2578,6 +2601,7 @@ async def _verify_phase(job: dict, agent_key: str, execution_results: list,
         f"Use file_read and grep_search against {repo_path}/ paths to verify changes.\n\n"
         f"EXECUTION RESULTS:\n{steps_summary}\n\n"
         f"{code_review_section}"
+        f"{reflexion_context}"
         f"Verification checklist:\n"
         f"1. Use shell_execute to run any relevant tests (pytest, jest, vitest, etc.) from {repo_path}\n"
         f"2. If files were modified, lint ONLY the changed files — do NOT lint the entire project\n"
@@ -4274,6 +4298,20 @@ class AutonomousRunner:
                     ) from e
                 last_error = e
                 progress.retries += 1
+
+                # Save a micro-reflection on this failure so retries benefit
+                try:
+                    save_reflection({
+                        "job_id": progress.job_id,
+                        "task": f"Phase {phase_name} attempt {attempt}",
+                        "outcome": "failed",
+                        "what_failed": str(e)[:500],
+                        "lesson": f"Phase {phase_name} failed with {type(e).__name__}: {str(e)[:200]}",
+                        "tags": [f"phase:{phase_name}", "retry_context"],
+                    })
+                except Exception:
+                    pass  # Non-fatal
+
                 backoff = (2 ** attempt) * 3  # 3s, 6s, 12s
                 logger.warning(
                     f"Phase {phase_name} attempt {attempt+1}/{DEFAULT_MAX_RETRIES} "
