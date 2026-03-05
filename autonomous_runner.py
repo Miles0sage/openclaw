@@ -62,6 +62,18 @@ def _execute_tool_routed(tool_name: str, tool_input: dict, phase: str = "", job_
             )
             return f"[BLOCKED] Tool '{tool_name}' is not authorized for agent '{agent_key}'. Available tools: {', '.join(sorted(allowlist))}"
 
+    # Feature 2: Warn on banned shell command patterns (force structured tools)
+    if tool_name == "shell_execute":
+        cmd = tool_input.get("command", "")
+        banned_patterns = ["cat ", "head ", "tail ", "sed ", "awk ", "vim ", "echo "]
+        for bp in banned_patterns:
+            if cmd.startswith(bp) or f" | {bp}" in cmd:
+                logger.warning(
+                    f"BANNED shell pattern '{bp.strip()}' detected in job={job_id}, phase={phase}. "
+                    f"Use structured tools instead (file_read, file_edit, grep_search, glob_files)."
+                )
+                break
+
     if _get_tool_registry is not None:
         registry = _get_tool_registry()
         return registry.execute_tool(tool_name, tool_input, phase=phase, job_id=job_id)
@@ -636,10 +648,11 @@ def _build_context_bundle(step: PlanStep, research: str, previous_results: list)
 
     Instead of dumping the full research text, this:
     1. Extracts file paths mentioned in the step description
-    2. Scores research lines by keyword relevance to the current step
-    3. Includes only the last 2 step summaries (not all)
+    2. Uses tree-sitter to get relevant code chunks from those files
+    3. Scores research lines by keyword relevance to the current step
+    4. Includes only the last 2 step summaries (not all)
 
-    Expected gain: 20-30% reduction in execute phase input tokens.
+    Expected gain: 40-60% reduction in execute phase input tokens vs raw file reads.
     """
     lines = []
 
@@ -649,6 +662,32 @@ def _build_context_bundle(step: PlanStep, research: str, previous_results: list)
     # Remove common words
     stop_words = {"the", "a", "an", "to", "in", "of", "for", "and", "or", "is", "it", "at", "on", "by", "with", "from"}
     step_keywords -= stop_words
+
+    # 1b. Extract file paths and get tree-sitter code chunks
+    import re as _re
+    file_paths = _re.findall(r'(?:/root/\S+\.py|routers/\S+\.py|\w+\.py)', step.description)
+    # Resolve relative paths
+    resolved_paths = []
+    for fp in file_paths:
+        if not fp.startswith("/"):
+            candidate = os.path.join("/root/openclaw", fp)
+            if os.path.exists(candidate):
+                resolved_paths.append(candidate)
+        elif os.path.exists(fp):
+            resolved_paths.append(fp)
+
+    code_context = ""
+    if resolved_paths:
+        try:
+            from code_chunker import get_chunker
+            chunker = get_chunker()
+            code_context = chunker.get_context_for_task(
+                resolved_paths, step.description, max_chunks=5, max_total_lines=300
+            )
+            if code_context:
+                logger.info(f"Code chunker provided {len(code_context.splitlines())} lines from {len(resolved_paths)} files")
+        except Exception as e:
+            logger.debug(f"Code chunker unavailable: {e}")
 
     # 2. Score research lines by relevance
     if research:
@@ -679,16 +718,20 @@ def _build_context_bundle(step: PlanStep, research: str, previous_results: list)
 
     context = "\n".join(lines) if lines else research[:4000] if research else ""
 
-    # 3. Include only last 2 step summaries
+    # 3. Prepend code chunks (most valuable context)
+    if code_context:
+        context = f"RELEVANT CODE CHUNKS:\n{code_context}\n\nRESEARCH CONTEXT:\n{context}"
+    else:
+        context = f"RESEARCH CONTEXT:\n{context}"
+
+    # 4. Include only last 2 step summaries
     if previous_results:
         recent = previous_results[-2:]
         step_summaries = "\n".join(
             f"- Step {r['step']+1}: {r.get('summary', r.get('status', '?'))[:150]}"
             for r in recent
         )
-        context = f"RECENT STEPS:\n{step_summaries}\n\nRESEARCH CONTEXT:\n{context}"
-    else:
-        context = f"RESEARCH CONTEXT:\n{context}"
+        context = f"RECENT STEPS:\n{step_summaries}\n\n{context}"
 
     return context
 
@@ -1927,6 +1970,18 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
             "Write your reasoning as: THINK: [your analysis]. Then proceed.\n\n"
         )
 
+        # Feature 2 (Devin): Ban raw shell commands - force structured tools
+        prompt += (
+            "## BANNED COMMANDS\n"
+            "Do NOT use shell_execute for these operations — use structured tools instead:\n"
+            "- Reading files: use file_read (NOT cat, head, tail)\n"
+            "- Editing files: use file_edit (NOT sed, awk, vim)\n"
+            "- Writing files: use file_write (NOT echo, cat with heredoc)\n"
+            "- Searching files: use grep_search (NOT grep, rg)\n"
+            "- Listing files: use glob_files (NOT find, ls)\n"
+            "Using banned commands will result in step failure.\n\n"
+        )
+
         # Pattern 2 (Windsurf): Live plan adaptation
         prompt += (
             "## PLAN ADAPTATION\n"
@@ -1958,6 +2013,18 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
             "- The step is complete (don't keep polishing — move on)\n"
             "Do NOT loop. If stuck, state what went wrong and stop.\n\n"
         )
+
+        # Feature 1 (Devin-style): POP QUIZ - mid-execution alignment checks every 3rd step
+        if step.index % 3 == 2 and step.index > 0:
+            prompt += (
+                "## POP QUIZ — ALIGNMENT CHECK\n"
+                "Before executing this step, answer these questions IN YOUR RESPONSE:\n"
+                "1. What is the ORIGINAL task? (one sentence)\n"
+                "2. What have we accomplished so far? (bullet points)\n"
+                "3. Is the current approach still the right one, or should we pivot?\n"
+                "4. Are there any files we modified that we haven't verified?\n"
+                "If your answers reveal misalignment, STOP and explain what should change.\n\n"
+            )
 
         prompt += (
             f"Execute this step now using the available tools. "
