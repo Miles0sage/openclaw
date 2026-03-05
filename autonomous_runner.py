@@ -2239,6 +2239,182 @@ async def _execute_phase(job: dict, agent_key: str, plan: ExecutionPlan,
 
 
 # ---------------------------------------------------------------------------
+# Phase 3.25: Ralph Loop — Confidence Gate & Self-Repair (Tier 4A)
+# ---------------------------------------------------------------------------
+# Inspired by frankbria/ralph-claude-code's dual-condition exit gate:
+# 1. Task completion check: did all steps pass?
+# 2. Confidence check: does the output look correct?
+# If both pass, proceed. If confidence fails, do ONE repair iteration.
+# This catches "false success" — steps that pass but produce wrong output.
+
+RALPH_CONFIDENCE_THRESHOLD = 0.7  # Below this → self-repair
+
+async def _ralph_confidence_check(
+    job: dict,
+    exec_results: list,
+    plan: "ExecutionPlan",
+    progress: "JobProgress",
+    guardrails: "JobGuardrails | None" = None,
+    department: str = "",
+) -> dict:
+    """
+    Quick confidence assessment of execute phase output.
+    Uses a cheap model (code_reviewer / Kimi 2.5) to evaluate whether
+    the execution actually accomplished the task intent.
+
+    Returns: {
+        "score": float (0-1),
+        "passed": bool,
+        "issues": list[str],
+        "repair_plan": list[dict] | None,  # steps to fix if confidence low
+    }
+    """
+    task = job.get("task", "")
+    project = job.get("project", "unknown")
+
+    # Summarize execution results
+    steps_summary = "\n".join(
+        f"- Step {r.get('step', '?')}: {r.get('status', '?')} — {r.get('summary', r.get('error', 'no details'))[:150]}"
+        for r in exec_results
+    )
+
+    # Quick pass: if all steps succeeded and no errors, high confidence
+    failed = [r for r in exec_results if r.get("status") != "done"]
+    if not failed and len(exec_results) >= len(plan.steps):
+        # All steps passed — still check but expect high confidence
+        pass
+
+    prompt = (
+        f"You are a quality gate evaluating whether a coding task was actually completed correctly.\n\n"
+        f"TASK: {task}\n"
+        f"PROJECT: {project}\n\n"
+        f"EXECUTION RESULTS:\n{steps_summary}\n\n"
+        f"PLAN HAD {len(plan.steps)} STEPS. {len(exec_results)} WERE ATTEMPTED.\n"
+        f"{len(failed)} FAILED.\n\n"
+        f"Evaluate:\n"
+        f"1. Did the execution actually accomplish the task intent (not just run without errors)?\n"
+        f"2. Are there obvious gaps — steps that 'succeeded' but didn't make real changes?\n"
+        f"3. Were there any false successes (step says done but output looks incomplete)?\n\n"
+        f"Respond with ONLY a JSON object (no markdown fences):\n"
+        f'{{"score": 0.0-1.0, "issues": ["issue1", "issue2"], '
+        f'"repair_needed": ["specific fix needed 1", "specific fix needed 2"]}}'
+    )
+
+    r = await _call_agent(
+        "code_reviewer", prompt, tools=None,
+        job_id=job["id"], phase="confidence_check",
+        guardrails=guardrails, priority="P3",  # cheap check
+    )
+    progress.cost_usd += r.get("cost_usd", 0)
+
+    # Parse response
+    text = r.get("text", "")
+    parsed = None
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        try:
+            start = text.index("{")
+            end = text.rindex("}") + 1
+            parsed = json.loads(text[start:end])
+        except (ValueError, json.JSONDecodeError, TypeError):
+            pass
+
+    if not parsed or not isinstance(parsed, dict):
+        # Can't parse — assume passed (don't block on parse failure)
+        return {"score": 0.8, "passed": True, "issues": [], "repair_plan": None}
+
+    score = float(parsed.get("score", 0.8))
+    issues = parsed.get("issues", [])
+    repair_needed = parsed.get("repair_needed", [])
+
+    passed = score >= RALPH_CONFIDENCE_THRESHOLD
+    repair_plan = None
+    if not passed and repair_needed:
+        repair_plan = [
+            {"description": fix, "tools": ["file_read", "file_edit", "shell_execute"]}
+            for fix in repair_needed[:3]  # Max 3 repair steps
+        ]
+
+    return {
+        "score": score,
+        "passed": passed,
+        "issues": issues,
+        "repair_plan": repair_plan,
+        "cost_usd": r.get("cost_usd", 0),
+    }
+
+
+async def _ralph_self_repair(
+    job: dict,
+    agent_key: str,
+    confidence: dict,
+    plan: "ExecutionPlan",
+    research: str,
+    progress: "JobProgress",
+    guardrails: "JobGuardrails | None" = None,
+    department: str = "",
+) -> list:
+    """
+    ONE self-repair iteration based on Ralph confidence check findings.
+    Creates repair steps from confidence issues and executes them.
+    Max 3 repair steps, then done regardless.
+    """
+    repair_plan_data = confidence.get("repair_plan", [])
+    if not repair_plan_data:
+        return []
+
+    workspace = progress.workspace
+    repair_results = []
+
+    for i, repair_step in enumerate(repair_plan_data[:3]):
+        tools = _filter_tools_for_phase(Phase.EXECUTE, agent_key=agent_key)
+
+        prompt = (
+            f"SELF-REPAIR ITERATION — fixing issues found by quality gate.\n\n"
+            f"PROJECT: {job.get('project', 'unknown')}\n"
+            f"ORIGINAL TASK: {job['task']}\n"
+            f"WORKSPACE: {workspace}\n\n"
+            f"CONFIDENCE SCORE: {confidence.get('score', 0):.0%}\n"
+            f"ISSUES FOUND:\n"
+            + "\n".join(f"- {iss}" for iss in confidence.get("issues", []))
+            + f"\n\nREPAIR STEP {i+1}: {repair_step['description']}\n\n"
+            f"Fix this specific issue. Read the relevant file first, then make targeted changes.\n"
+            f"Do NOT rewrite everything — make the minimum change needed to fix the issue.\n"
+        )
+
+        try:
+            result = await _call_agent(
+                agent_key, prompt, tools=tools,
+                job_id=job["id"], phase="execute",
+                guardrails=guardrails, department=department,
+                priority=job.get("priority", "P2"),
+            )
+            progress.cost_usd += result["cost_usd"]
+
+            repair_results.append({
+                "step": f"repair_{i}",
+                "status": "done",
+                "summary": f"[REPAIR] {result['text'][:300]}",
+                "cost_usd": result["cost_usd"],
+            })
+
+        except Exception as e:
+            logger.warning(f"Job {job['id']}: repair step {i} failed: {e}")
+            repair_results.append({
+                "step": f"repair_{i}",
+                "status": "failed",
+                "error": str(e)[:200],
+            })
+
+    logger.info(
+        f"Job {job['id']}: Ralph self-repair complete — "
+        f"{sum(1 for r in repair_results if r.get('status') == 'done')}/{len(repair_results)} repairs succeeded"
+    )
+    return repair_results
+
+
+# ---------------------------------------------------------------------------
 # Phase 3.5: TRIPLE AI CODE REVIEW
 # ---------------------------------------------------------------------------
 async def _code_review_phase(
@@ -2520,7 +2696,34 @@ async def _code_review_phase(
     else:
         verdict = "PASSED"
 
-    summary = f"{len(reviews)} reviews, {len(all_issues)} issues, {verdict}"
+    # Confidence scoring (Tier 4B): aggregate confidence from all reviews
+    # Score = 1.0 (perfect) down to 0.0 (all critical)
+    # Weights: critical=-0.4, major=-0.25, minor=-0.1, pass=0
+    confidence_score = 1.0
+    for review in reviews:
+        text = review.get("response", "")
+        parsed_r = None
+        try:
+            parsed_r = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            try:
+                s = text.index("{")
+                e = text.rindex("}") + 1
+                parsed_r = json.loads(text[s:e])
+            except (ValueError, json.JSONDecodeError, TypeError):
+                pass
+        if parsed_r and isinstance(parsed_r, dict):
+            sev = parsed_r.get("severity", "pass").lower()
+            issue_count = len(parsed_r.get("issues", []))
+            if sev == "critical":
+                confidence_score -= 0.4
+            elif sev == "major":
+                confidence_score -= 0.25
+            elif sev == "minor":
+                confidence_score -= 0.05 * min(issue_count, 5)
+    confidence_score = max(0.0, min(1.0, confidence_score))
+
+    summary = f"{len(reviews)} reviews, {len(all_issues)} issues, {verdict}, confidence={confidence_score:.0%}"
     logger.info(f"Job {job_id}: code review complete — {summary}, cost ${total_cost:.4f}")
 
     return {
@@ -2530,6 +2733,7 @@ async def _code_review_phase(
         "has_critical": has_critical,
         "has_major": has_major,
         "passed": passed,
+        "confidence_score": round(confidence_score, 2),
         "cost_usd": total_cost,
         "summary": summary,
         "changed_files": changed_files,
@@ -3890,6 +4094,48 @@ class AutonomousRunner:
                 logger.warning(f"Job {job_id}: Execute schema errors: {_ev['errors']}")
             if isinstance(result["phases"].get("execute"), dict):
                 result["phases"]["execute"]["validation"] = _ev
+
+            if progress.cancelled:
+                raise CancelledError(job_id)
+
+            # ---- Ralph Loop: Dual-condition exit gate (4A) ----
+            # After execute completes, run a quick confidence check.
+            # If confidence < threshold, do ONE self-repair iteration.
+            # Inspired by frankbria/ralph-claude-code's dual-condition exit gate.
+            try:
+                exec_confidence = await _ralph_confidence_check(
+                    job, exec_results, plan, progress, guardrails=guardrails,
+                    department=department,
+                )
+                result["phases"]["execute"]["confidence"] = exec_confidence
+                if ide_session:
+                    ide_session.add_context(
+                        "confidence_check", json.dumps(exec_confidence)[:500],
+                        source="ralph_gate", relevance=0.9, phase="execute",
+                    )
+
+                if not exec_confidence.get("passed", True) and exec_confidence.get("repair_plan"):
+                    logger.info(
+                        f"Job {job_id}: Ralph gate FAILED (confidence={exec_confidence.get('score', 0):.0%}) "
+                        f"— running self-repair iteration"
+                    )
+                    repair_results = await _ralph_self_repair(
+                        job, agent_key, exec_confidence, plan, research,
+                        progress, guardrails=guardrails, department=department,
+                    )
+                    exec_results.extend(repair_results)
+                    result["phases"]["execute"]["repair_steps"] = len(repair_results)
+                    result["phases"]["execute"]["steps_done"] += sum(
+                        1 for r in repair_results if r.get("status") == "done"
+                    )
+                else:
+                    logger.info(
+                        f"Job {job_id}: Ralph gate PASSED "
+                        f"(confidence={exec_confidence.get('score', 1):.0%})"
+                    )
+            except Exception as ralph_err:
+                logger.warning(f"Job {job_id}: Ralph confidence check failed (non-fatal): {ralph_err}")
+                result["phases"]["execute"]["confidence"] = {"error": str(ralph_err)[:200]}
 
             if progress.cancelled:
                 raise CancelledError(job_id)
