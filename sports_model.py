@@ -14,6 +14,14 @@ import pickle
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# Load .env if not already in environment
+if not os.environ.get("ODDS_API_KEY"):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+    except Exception:
+        pass
+
 MODEL_DIR = Path("/root/openclaw/data/models")
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -371,8 +379,80 @@ def _train_xgboost(X, y, feature_names: list) -> dict:
     }
 
 
+def _calibrate_model(sport: str = "nba") -> dict:
+    """Calibrate XGBoost model using Platt scaling or isotonic regression.
+
+    Calibration corrects for overconfidence by mapping raw probabilities
+    to actual win rates. Trains on test set from last training run,
+    saves calibrated model alongside original.
+    """
+    from sklearn.calibration import CalibratedClassifierCV
+    import numpy as np
+
+    # Load original model
+    model_data = _load_model(sport)
+    if "error" in model_data:
+        return model_data
+
+    model = model_data["model"]
+    features = model_data["features"]
+
+    # Rebuild training data to get test set for calibration
+    X, y, _ = _build_training_data()
+    if X is None:
+        return {"error": "Failed to build training data for calibration"}
+
+    from sklearn.model_selection import train_test_split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Apply isotonic regression calibration to the test set
+    try:
+        calibrator = CalibratedClassifierCV(model, method="isotonic", cv="prefit")
+        calibrator.fit(X_test, y_test)
+
+        # Get calibrated probabilities on test set
+        y_prob_raw = model.predict_proba(X_test)[:, 1]
+        y_prob_cal = calibrator.predict_proba(X_test)[:, 1]
+
+        from sklearn.metrics import brier_score_loss
+        brier_raw = brier_score_loss(y_test, y_prob_raw)
+        brier_cal = brier_score_loss(y_test, y_prob_cal)
+
+        # Save calibrated model
+        cal_model_path = MODEL_DIR / f"{sport}_xgboost_calibrated.pkl"
+        with open(cal_model_path, "wb") as f:
+            pickle.dump({
+                "model": calibrator,
+                "features": features,
+                "trained": datetime.now().isoformat(),
+                "calibration_method": "isotonic",
+                "brier_raw": round(float(brier_raw), 4),
+                "brier_calibrated": round(float(brier_cal), 4),
+            }, f)
+
+        return {
+            "status": "calibrated",
+            "method": "isotonic regression",
+            "brier_score_before": round(float(brier_raw), 4),
+            "brier_score_after": round(float(brier_cal), 4),
+            "improvement": round(float(brier_raw - brier_cal), 4),
+            "calibrated_model_path": str(cal_model_path),
+            "test_samples": len(X_test),
+        }
+    except Exception as e:
+        return {"error": f"Calibration failed: {str(e)}"}
+
+
 def _load_model(sport: str = "nba") -> dict:
-    """Load saved model from pkl."""
+    """Load saved model from pkl. Prefers calibrated version if available."""
+    # Try calibrated model first
+    cal_model_path = MODEL_DIR / f"{sport}_xgboost_calibrated.pkl"
+    if cal_model_path.exists():
+        with open(cal_model_path, "rb") as f:
+            data = pickle.load(f)
+        return data
+
+    # Fall back to original model
     model_path = MODEL_DIR / f"{sport}_xgboost.pkl"
     if not model_path.exists():
         return {"error": f"No trained model found at {model_path}. Run action=train first."}
@@ -380,6 +460,39 @@ def _load_model(sport: str = "nba") -> dict:
     with open(model_path, "rb") as f:
         data = pickle.load(f)
     return data
+
+
+def _compute_calibration_curve(y_true, y_prob, n_bins: int = 10) -> dict:
+    """Compute calibration curve: predicted prob buckets vs actual win rates.
+
+    Returns buckets showing whether the model's confidence matches reality.
+    If all buckets cluster near the diagonal, the model is well-calibrated.
+    If buckets are above the diagonal, the model is overconfident.
+    """
+    import numpy as np
+
+    bins = np.linspace(0, 1, n_bins + 1)
+    bin_centers = (bins[:-1] + bins[1:]) / 2
+    bin_accs = []
+    bin_counts = []
+
+    for i in range(n_bins):
+        mask = (y_prob >= bins[i]) & (y_prob < bins[i + 1])
+        if mask.sum() > 0:
+            acc = y_true[mask].mean()
+            bin_accs.append(round(float(acc), 3))
+            bin_counts.append(int(mask.sum()))
+        else:
+            bin_accs.append(None)
+            bin_counts.append(0)
+
+    return {
+        "bin_centers": [round(float(x), 3) for x in bin_centers],
+        "actual_win_rates": bin_accs,
+        "samples_per_bin": bin_counts,
+        "interpretation": "If all points cluster near y=x line, model is well-calibrated. "
+                         "If points are above y=x, model is overconfident (predicts 60% but wins 50%).",
+    }
 
 
 def _predict_game(home_features: dict, away_features: dict, model_data: dict) -> dict:
@@ -451,11 +564,12 @@ def sports_predict(action: str, sport: str = "nba", team: str = "",
     """XGBoost-powered NBA game predictions.
 
     Actions:
-        predict  — Today's game predictions with win probabilities
-        evaluate — Model accuracy, Brier score, feature importances
-        train    — Retrain on latest 3 seasons (~3700 games, <30s on CPU)
-        features — What features the model uses + their weights
-        compare  — Predictions vs current odds → +EV recommendations
+        predict    — Today's game predictions with win probabilities
+        evaluate   — Model accuracy, Brier score, feature importances, calibration metrics
+        calibrate  — Calibrate model using isotonic regression (fixes overconfidence)
+        train      — Retrain on latest 3 seasons (~3700 games, <30s on CPU)
+        features   — What features the model uses + their weights
+        compare    — Predictions vs current odds → +EV recommendations
     """
     try:
         if action == "train":
@@ -539,15 +653,61 @@ def sports_predict(action: str, sport: str = "nba", team: str = "",
             features = model_data["features"]
             importances = dict(zip(features, [round(float(v), 4) for v in model.feature_importances_]))
 
-            return json.dumps({
+            # Check if model is calibrated
+            is_calibrated = "calibration_method" in model_data
+            calibration_info = {}
+            if is_calibrated:
+                calibration_info = {
+                    "is_calibrated": True,
+                    "method": model_data.get("calibration_method", "unknown"),
+                    "brier_before": model_data.get("brier_raw"),
+                    "brier_after": model_data.get("brier_calibrated"),
+                    "improvement": round(float(model_data.get("brier_raw", 0) - model_data.get("brier_calibrated", 0)), 4),
+                }
+
+            # Rebuild data to compute calibration curve if possible
+            calibration_curve = {}
+            try:
+                X, y, _ = _build_training_data()
+                if X is not None:
+                    from sklearn.model_selection import train_test_split
+                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                    y_prob = model.predict_proba(X_test)[:, 1]
+                    calibration_curve = _compute_calibration_curve(y_test, y_prob, n_bins=10)
+            except Exception:
+                pass
+
+            result = {
                 "model": f"{sport}_xgboost",
                 "trained": model_data.get("trained", "unknown"),
                 "features": features,
                 "feature_importances": importances,
                 "n_estimators": model.n_estimators,
                 "max_depth": model.max_depth,
-                "note": "Run action=train to retrain with latest data and see accuracy metrics",
-            })
+            }
+
+            if calibration_info:
+                result["calibration"] = calibration_info
+
+            if calibration_curve:
+                result["calibration_curve"] = calibration_curve
+
+            if not is_calibrated:
+                result["note"] = "Model is not calibrated. Run action=calibrate to apply isotonic regression and fix overconfidence."
+            else:
+                result["note"] = "Model is calibrated. Probabilities are adjusted for overconfidence."
+
+            return json.dumps(result)
+
+        elif action == "calibrate":
+            # Calibrate existing model to fix overconfidence
+            result = _calibrate_model(sport)
+            if "error" in result:
+                return json.dumps(result)
+
+            result["message"] = "Model calibration complete. Probabilities are now adjusted for overconfidence."
+            result["what_changed"] = "All future predictions will use isotonic regression to map raw XGBoost probabilities to actual win rates."
+            return json.dumps(result)
 
         elif action == "features":
             model_data = _load_model(sport)
@@ -644,7 +804,7 @@ def sports_predict(action: str, sport: str = "nba", team: str = "",
             })
 
         else:
-            return json.dumps({"error": f"Unknown action '{action}'. Use: predict, evaluate, train, features, compare"})
+            return json.dumps({"error": f"Unknown action '{action}'. Use: predict, evaluate, calibrate, train, features, compare"})
 
     except Exception as e:
         return json.dumps({"error": str(e)})

@@ -146,6 +146,20 @@ def _get_pinnacle_odds(bookmakers: list) -> Optional[dict]:
     return None
 
 
+def _parse_prop_type(market_key: str) -> Optional[str]:
+    """Parse Odds API player prop market key to readable format."""
+    prop_map = {
+        "player_points": "Points",
+        "player_rebounds": "Rebounds",
+        "player_assists": "Assists",
+        "player_threes": "Three Pointers",
+        "player_blocks": "Blocks",
+        "player_steals": "Steals",
+        "player_points_rebounds_assists": "Points+Rebounds+Assists",
+    }
+    return prop_map.get(market_key)
+
+
 # ═══════════════════════════════════════════════════════════════
 # TOOL 1: sportsbook_odds — Live odds from 200+ bookmakers
 # ═══════════════════════════════════════════════════════════════
@@ -156,11 +170,14 @@ def sportsbook_odds(action: str, sport: str = "", market: str = "h2h",
     """Get live sportsbook odds from The Odds API.
 
     Actions:
-        sports   — List available sports (in-season and upcoming)
-        odds     — Live odds from all US bookmakers for a sport
-        event    — All markets for one specific game
-        compare  — Side-by-side bookmaker comparison
-        best_odds — Best line for each outcome across all books
+        sports     — List available sports (in-season and upcoming)
+        odds       — Live odds from all US bookmakers for a sport
+        event      — All markets for one specific game
+        compare    — Side-by-side bookmaker comparison
+        best_odds  — Best line for each outcome across all books
+        player_props — Player prop odds (pts, reb, ast, etc.) for today's games
+
+    Note: Player props use 2-3x more API quota than moneyline. Free tier = 500 req/mo.
     """
     try:
         if action == "sports":
@@ -271,8 +288,155 @@ def sportsbook_odds(action: str, sport: str = "", market: str = "h2h",
                 })
             return json.dumps({"best_lines": best_lines, "quota": _quota})
 
+        elif action == "player_props":
+            if not event_id:
+                # Get all games first, then fetch props for each
+                params = {"regions": "us", "oddsFormat": "decimal"}
+                data = _odds_api_get(f"/sports/{sport}/odds", params)
+                if isinstance(data, dict) and "error" in data:
+                    return json.dumps(data)
+
+                all_props = []
+                prop_limit = min(limit, 8)  # Fetch props for only first N games to conserve quota
+                for game in (data[:prop_limit] if isinstance(data, list) else []):
+                    game_id = game.get("id")
+                    home = game.get("home_team", "")
+                    away = game.get("away_team", "")
+                    commence = game.get("commence_time", "")
+
+                    # Fetch player props for this game
+                    prop_params = {
+                        "regions": "us,us2",
+                        "markets": "player_points,player_rebounds,player_assists,player_threes,player_blocks,player_steals,player_points_rebounds_assists",
+                        "oddsFormat": "decimal",
+                    }
+                    props_data = _odds_api_get(f"/sports/{sport}/events/{game_id}/odds", prop_params)
+                    if isinstance(props_data, dict) and "error" in props_data:
+                        continue
+
+                    # Parse player props from bookmakers
+                    for bm in props_data.get("bookmakers", []):
+                        for market in bm.get("markets", []):
+                            market_key = market.get("key", "")
+                            prop_type = _parse_prop_type(market_key)
+                            if not prop_type:
+                                continue
+
+                            for outcome in market.get("outcomes", []):
+                                player = outcome.get("name", "").split(" Over")[0].split(" Under")[0].strip()
+                                price = outcome.get("price", 0)
+                                point = outcome.get("point", None)
+                                side = "Over" if "Over" in outcome.get("name", "") else "Under"
+
+                                if price <= 1 or not point:
+                                    continue
+
+                                all_props.append({
+                                    "game": f"{away} @ {home}",
+                                    "commence": commence,
+                                    "player": player,
+                                    "prop_type": prop_type,
+                                    "line": point,
+                                    "side": side,
+                                    "odds": price,
+                                    "implied_prob": round(_decimal_to_implied(price), 4),
+                                    "book": bm.get("title", ""),
+                                    "book_key": bm.get("key", ""),
+                                })
+
+                # Find best odds for each player/prop combination
+                best_props = {}
+                for prop in all_props:
+                    key = (prop["player"], prop["prop_type"], prop["line"])
+                    if key not in best_props:
+                        best_props[key] = {"over": [], "under": []}
+                    if prop["side"] == "Over":
+                        best_props[key]["over"].append(prop)
+                    else:
+                        best_props[key]["under"].append(prop)
+
+                # Format response with best prices
+                formatted_props = []
+                for (player, prop_type, line), sides in best_props.items():
+                    over_best = max(sides["over"], key=lambda x: x["odds"], default=None)
+                    under_best = max(sides["under"], key=lambda x: x["odds"], default=None)
+
+                    prop_entry = {
+                        "player": player,
+                        "prop_type": prop_type,
+                        "line": line,
+                    }
+                    if over_best:
+                        prop_entry["over"] = {
+                            "odds": over_best["odds"],
+                            "implied_prob": over_best["implied_prob"],
+                            "best_book": over_best["book"],
+                        }
+                    if under_best:
+                        prop_entry["under"] = {
+                            "odds": under_best["odds"],
+                            "implied_prob": under_best["implied_prob"],
+                            "best_book": under_best["book"],
+                        }
+
+                    formatted_props.append(prop_entry)
+
+                return json.dumps({
+                    "sport": sport,
+                    "player_props": formatted_props[:limit],
+                    "total_props": len(formatted_props),
+                    "note": "Player props markets are less efficient than moneyline/spreads — higher edge potential. 2-3x quota usage vs regular odds.",
+                    "quota": _quota,
+                })
+
+            else:
+                # Specific event player props
+                prop_params = {
+                    "regions": "us,us2",
+                    "markets": "player_points,player_rebounds,player_assists,player_threes,player_blocks,player_steals,player_points_rebounds_assists",
+                    "oddsFormat": "decimal",
+                }
+                props_data = _odds_api_get(f"/sports/{sport}/events/{event_id}/odds", prop_params)
+                if isinstance(props_data, dict) and "error" in props_data:
+                    return json.dumps(props_data)
+
+                # Parse and structure
+                all_props = []
+                for bm in props_data.get("bookmakers", []):
+                    for market in bm.get("markets", []):
+                        market_key = market.get("key", "")
+                        prop_type = _parse_prop_type(market_key)
+                        if not prop_type:
+                            continue
+
+                        for outcome in market.get("outcomes", []):
+                            player = outcome.get("name", "").split(" Over")[0].split(" Under")[0].strip()
+                            price = outcome.get("price", 0)
+                            point = outcome.get("point", None)
+                            side = "Over" if "Over" in outcome.get("name", "") else "Under"
+
+                            if price <= 1 or not point:
+                                continue
+
+                            all_props.append({
+                                "player": player,
+                                "prop_type": prop_type,
+                                "line": point,
+                                "side": side,
+                                "odds": price,
+                                "implied_prob": round(_decimal_to_implied(price), 4),
+                                "book": bm.get("title", ""),
+                            })
+
+                return json.dumps({
+                    "event_id": event_id,
+                    "player_props": all_props[:limit],
+                    "total_available": len(all_props),
+                    "quota": _quota,
+                })
+
         else:
-            return json.dumps({"error": f"Unknown action '{action}'. Use: sports, odds, event, compare, best_odds"})
+            return json.dumps({"error": f"Unknown action '{action}'. Use: sports, odds, event, compare, best_odds, player_props"})
 
     except Exception as e:
         return json.dumps({"error": str(e)})

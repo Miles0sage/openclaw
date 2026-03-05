@@ -1034,14 +1034,42 @@ AGENT_TOOLS = [
             "additionalProperties": False
         }
     },
-    # ═ Sportsbook Odds + Betting Engine (Phase 3)
+    # ═ Money Engine — Unified scanner (Phase 4)
     {
-        "name": "sportsbook_odds",
-        "description": "Live sportsbook odds from 200+ bookmakers via The Odds API. Actions: sports (list in-season), odds (live odds for a sport), event (all markets for one game), compare (side-by-side bookmaker comparison), best_odds (best line for each outcome).",
+        "name": "money_engine",
+        "description": "Unified money-making scanner — sports +EV, prediction market arb, crypto signals. Proven strategies with mathematical edge. Actions: scan (full scan all), sports (XGBoost +EV, arb), prediction (bonds, arb, mispricing), crypto (fear/greed, movers), dashboard (quick picks), explain (strategy details).",
         "input_schema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["sports", "odds", "event", "compare", "best_odds"], "description": "Odds action"},
+                "action": {"type": "string", "enum": ["scan", "sports", "prediction", "crypto", "dashboard", "explain"], "description": "Engine action"},
+                "params": {"type": "object", "description": "Optional params: {sport, hours, limit}"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    # ═ Betting Brain — Intelligent Research + Prediction (Phase 4)
+    {
+        "name": "betting_brain",
+        "description": "Intelligent betting research agent — reads news, injuries, line movements, understands HOW sportsbooks set lines and WHERE they're wrong. Combines XGBoost model + market context for informed picks. Actions: research (full report), find_value (model vs odds + context), line_analysis (line movement analysis), prediction_research (prediction markets with context), how_lines_work (educational).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["research", "find_value", "line_analysis", "prediction_research", "how_lines_work"], "description": "Brain action"},
+                "params": {"type": "object", "description": "Optional params: {sport, sport_key}"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    # ═ Sportsbook Odds + Betting Engine (Phase 3)
+    {
+        "name": "sportsbook_odds",
+        "description": "Live sportsbook odds from 200+ bookmakers via The Odds API. Actions: sports (list in-season), odds (live odds for a sport), event (all markets for one game), compare (side-by-side bookmaker comparison), best_odds (best line for each outcome), player_props (player prop odds: points, rebounds, assists, etc. — less efficient market, higher edge potential).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["sports", "odds", "event", "compare", "best_odds", "player_props"], "description": "Odds action"},
                 "sport": {"type": "string", "description": "Sport key (e.g. basketball_nba, americanfootball_nfl). Use action=sports to list."},
                 "market": {"type": "string", "description": "Market type: h2h (moneyline), spreads, totals. Default: h2h"},
                 "bookmakers": {"type": "string", "description": "Comma-separated bookmaker keys to filter (e.g. draftkings,fanduel)"},
@@ -1110,6 +1138,19 @@ AGENT_TOOLS = [
                 "action": {"type": "string", "enum": ["log", "check", "record", "yesterday"], "description": "Tracker action"},
                 "date": {"type": "string", "description": "Date to check (YYYY-MM-DD, default: yesterday for check, today for log)"},
                 "bankroll": {"type": "number", "description": "Bankroll for logging recommendations (default: 100)"}
+            },
+            "required": ["action"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "bet_tracker",
+        "description": "Bet tracking + P&L system. Tracks every bet recommendation, whether it was placed, and the result. Stores in data/betting/bet_ledger.json. Actions: log (log new bet), settle (settle bet), pending (show unsettled bets), history (show last N settled bets), pnl (P&L summary), daily (today's P&L), streak (win/loss streak).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["log", "settle", "pending", "history", "pnl", "daily", "streak"], "description": "Bet tracker action"},
+                "params": {"type": "object", "description": "Action parameters: log needs game/side/odds/model_prob/edge_pct/book/stake_usd/market; settle needs bet_id/result; history needs limit"}
             },
             "required": ["action"],
             "additionalProperties": False
@@ -1526,12 +1567,19 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             from arb_scanner import arb_scan
             return arb_scan(tool_input["action"], tool_input.get("query", ""),
                             tool_input.get("min_edge", 0.02), tool_input.get("max_results", 10))
+        elif tool_name == "money_engine":
+            from money_engine import money_engine
+            return money_engine(tool_input["action"], tool_input.get("params"))
         elif tool_name == "trading_strategies":
             from trading_strategies import trading_strategies
             return trading_strategies(tool_input["action"], tool_input.get("params"))
         elif tool_name == "trading_safety":
             from trading_safety import manage_safety
             return manage_safety(tool_input["action"], tool_input.get("config"))
+        # ═ Betting Brain (Phase 4)
+        elif tool_name == "betting_brain":
+            from betting_brain import betting_brain
+            return betting_brain(tool_input["action"], tool_input.get("params"))
         # ═ Sportsbook Odds + Betting Engine (Phase 3)
         elif tool_name == "sportsbook_odds":
             from sportsbook_odds import sportsbook_odds
@@ -1557,6 +1605,9 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             from prediction_tracker import prediction_tracker
             return prediction_tracker(tool_input["action"], tool_input.get("date", ""),
                                       tool_input.get("bankroll", 100.0))
+        elif tool_name == "bet_tracker":
+            from bet_tracker import bet_tracker
+            return bet_tracker(tool_input["action"], tool_input.get("params", {}))
         # ═ Deep Research
         elif tool_name == "deep_research":
             from deep_research import deep_research

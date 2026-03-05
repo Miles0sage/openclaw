@@ -472,6 +472,252 @@ provider_cooldowns = ProviderCooldownTracker()
 
 
 # ---------------------------------------------------------------------------
+# Modular Error Handlers — per-domain recovery strategies
+# ---------------------------------------------------------------------------
+
+class ErrorHandler:
+    """Base class for domain-specific error handlers."""
+    domain: str = "generic"
+
+    def can_handle(self, error: Exception, error_type: ErrorType) -> bool:
+        return True
+
+    def get_policy(self, error: Exception, error_type: ErrorType) -> RetryPolicy:
+        return RetryPolicy()
+
+    def get_recovery_strategy(self, error: Exception, error_type: ErrorType, attempt: int) -> dict:
+        """Return recovery action: retry, skip, escalate, or degrade."""
+        return {"action": "retry", "reason": "generic retry"}
+
+
+class CodeErrorHandler(ErrorHandler):
+    """Handles code execution errors (syntax, runtime, import)."""
+    domain = "code"
+
+    _CODE_SIGNALS = ["syntaxerror", "nameerror", "typeerror", "importerror",
+                     "attributeerror", "indentation", "modulenotfound"]
+
+    def can_handle(self, error: Exception, error_type: ErrorType) -> bool:
+        err_str = str(error).lower()
+        err_type = type(error).__name__.lower()
+        return any(sig in err_str or sig in err_type for sig in self._CODE_SIGNALS)
+
+    def get_policy(self, error: Exception, error_type: ErrorType) -> RetryPolicy:
+        # Code errors need prompt modification, not just retry
+        return RetryPolicy(max_retries=2, base_delay=1.0, max_delay=10.0)
+
+    def get_recovery_strategy(self, error: Exception, error_type: ErrorType, attempt: int) -> dict:
+        if attempt == 0:
+            return {"action": "retry", "reason": "Modify prompt with error context", "modify_prompt": True}
+        elif attempt == 1:
+            return {"action": "escalate", "reason": "Code error persists — escalate to stronger model"}
+        return {"action": "skip", "reason": "Code error unresolvable after 2 attempts"}
+
+
+class APIErrorHandler(ErrorHandler):
+    """Handles API/network errors (rate limits, timeouts, auth)."""
+    domain = "api"
+
+    def can_handle(self, error: Exception, error_type: ErrorType) -> bool:
+        return error_type in (ErrorType.RATE_LIMIT, ErrorType.SERVER_ERROR,
+                              ErrorType.AUTH_ERROR, ErrorType.CONNECTION_ERROR,
+                              ErrorType.BILLING)
+
+    def get_policy(self, error: Exception, error_type: ErrorType) -> RetryPolicy:
+        if error_type == ErrorType.RATE_LIMIT:
+            return RetryPolicy(max_retries=3, base_delay=5.0, max_delay=120.0)
+        elif error_type == ErrorType.SERVER_ERROR:
+            return RetryPolicy(max_retries=3, base_delay=2.0, max_delay=60.0)
+        elif error_type in (ErrorType.AUTH_ERROR, ErrorType.BILLING):
+            return RetryPolicy(max_retries=0)  # Don't retry auth/billing
+        return RetryPolicy(max_retries=2, base_delay=3.0, max_delay=30.0)
+
+    def get_recovery_strategy(self, error: Exception, error_type: ErrorType, attempt: int) -> dict:
+        if error_type == ErrorType.BILLING:
+            return {"action": "degrade", "reason": "Billing error — switch to cheaper provider", "switch_provider": True}
+        if error_type == ErrorType.AUTH_ERROR:
+            return {"action": "skip", "reason": "Auth error — cannot retry without new credentials"}
+        if error_type == ErrorType.RATE_LIMIT:
+            return {"action": "retry", "reason": f"Rate limited — backoff attempt {attempt + 1}"}
+        return {"action": "retry", "reason": f"API error — retry with backoff"}
+
+
+class TimeoutErrorHandler(ErrorHandler):
+    """Handles timeout errors with progressive strategies."""
+    domain = "timeout"
+
+    def can_handle(self, error: Exception, error_type: ErrorType) -> bool:
+        return error_type == ErrorType.TIMEOUT
+
+    def get_policy(self, error: Exception, error_type: ErrorType) -> RetryPolicy:
+        return RetryPolicy(max_retries=2, base_delay=5.0, max_delay=30.0)
+
+    def get_recovery_strategy(self, error: Exception, error_type: ErrorType, attempt: int) -> dict:
+        if attempt == 0:
+            return {"action": "retry", "reason": "Timeout — retry with extended timeout", "extend_timeout": True}
+        elif attempt == 1:
+            return {"action": "retry", "reason": "Timeout persists — simplify request", "simplify": True}
+        return {"action": "skip", "reason": "Timeout unresolvable — skip step"}
+
+
+class DataErrorHandler(ErrorHandler):
+    """Handles data/validation errors."""
+    domain = "data"
+
+    def can_handle(self, error: Exception, error_type: ErrorType) -> bool:
+        return error_type in (ErrorType.VALIDATION_ERROR, ErrorType.NOT_FOUND)
+
+    def get_policy(self, error: Exception, error_type: ErrorType) -> RetryPolicy:
+        if error_type == ErrorType.NOT_FOUND:
+            return RetryPolicy(max_retries=0)  # Don't retry 404s
+        return RetryPolicy(max_retries=1, base_delay=1.0, max_delay=5.0)
+
+    def get_recovery_strategy(self, error: Exception, error_type: ErrorType, attempt: int) -> dict:
+        if error_type == ErrorType.NOT_FOUND:
+            return {"action": "skip", "reason": "Resource not found — cannot retry"}
+        return {"action": "retry", "reason": "Validation error — modify input and retry", "modify_prompt": True}
+
+
+# Handler registry — order matters (first match wins)
+_ERROR_HANDLERS: list[ErrorHandler] = [
+    CodeErrorHandler(),
+    APIErrorHandler(),
+    TimeoutErrorHandler(),
+    DataErrorHandler(),
+    ErrorHandler(),  # Generic fallback
+]
+
+
+def get_handler_for_error(error: Exception, error_type: Optional[ErrorType] = None) -> ErrorHandler:
+    """Find the best handler for a given error."""
+    if error_type is None:
+        error_type = _classify_error(error)
+    for handler in _ERROR_HANDLERS:
+        if handler.can_handle(error, error_type):
+            return handler
+    return _ERROR_HANDLERS[-1]  # Generic fallback
+
+
+# ---------------------------------------------------------------------------
+# Partial Result — return what worked instead of binary success/fail
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PartialResult:
+    """Captures what succeeded, what failed, and actionable error context."""
+    success: bool
+    completed_steps: list = field(default_factory=list)
+    failed_step: Optional[dict] = None
+    error_context: Optional[dict] = None
+    recovery_suggestion: Optional[str] = None
+    partial_output: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "success": self.success,
+            "completed_steps": self.completed_steps,
+            "failed_step": self.failed_step,
+            "error_context": self.error_context,
+            "recovery_suggestion": self.recovery_suggestion,
+            "partial_output": self.partial_output,
+            "completion_ratio": len(self.completed_steps) / max(1, len(self.completed_steps) + (1 if self.failed_step else 0)),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Root Cause Analysis — distinguish symptom vs cause
+# ---------------------------------------------------------------------------
+
+def analyze_root_cause(error: Exception, error_type: ErrorType, context: dict = None) -> dict:
+    """
+    Analyze an error to distinguish root cause from symptoms.
+
+    Returns:
+        {
+            "symptom": str,          # What we see (the exception)
+            "root_cause": str,       # What actually went wrong
+            "category": str,         # infrastructure|code|data|external
+            "is_transient": bool,    # Will retrying help?
+            "fix_suggestion": str,   # Actionable fix
+        }
+    """
+    error_str = str(error).lower()
+    context = context or {}
+
+    # Infrastructure issues (usually transient)
+    if error_type in (ErrorType.SERVER_ERROR, ErrorType.CONNECTION_ERROR):
+        return {
+            "symptom": f"{type(error).__name__}: {str(error)[:200]}",
+            "root_cause": "External service unavailable or network issue",
+            "category": "infrastructure",
+            "is_transient": True,
+            "fix_suggestion": "Retry with backoff, or switch to alternative provider",
+        }
+
+    # Billing (NOT transient — won't fix itself)
+    if error_type == ErrorType.BILLING:
+        return {
+            "symptom": f"Billing/credit error: {str(error)[:200]}",
+            "root_cause": "API credits exhausted or payment method invalid",
+            "category": "external",
+            "is_transient": False,
+            "fix_suggestion": "Switch to alternative provider (cheaper model) or add credits",
+        }
+
+    # Rate limiting (transient with proper backoff)
+    if error_type == ErrorType.RATE_LIMIT:
+        return {
+            "symptom": f"Rate limited: {str(error)[:200]}",
+            "root_cause": "Too many requests to provider within time window",
+            "category": "infrastructure",
+            "is_transient": True,
+            "fix_suggestion": "Exponential backoff with jitter, respect Retry-After header",
+        }
+
+    # Auth errors (NOT transient)
+    if error_type == ErrorType.AUTH_ERROR:
+        return {
+            "symptom": f"Auth error: {str(error)[:200]}",
+            "root_cause": "Invalid, expired, or insufficient API credentials",
+            "category": "external",
+            "is_transient": False,
+            "fix_suggestion": "Check API key validity and permissions, rotate if expired",
+        }
+
+    # Code errors — dig deeper
+    if any(sig in error_str for sig in ["syntaxerror", "nameerror", "typeerror", "importerror"]):
+        # Try to extract the actual error location
+        import traceback as _tb
+        tb_str = "".join(_tb.format_exception(type(error), error, error.__traceback__))
+        return {
+            "symptom": f"Code error: {type(error).__name__}: {str(error)[:200]}",
+            "root_cause": f"Bug in generated code — {type(error).__name__} indicates {'missing import' if 'import' in error_str else 'logic error' if 'type' in error_str else 'undefined variable' if 'name' in error_str else 'syntax issue'}",
+            "category": "code",
+            "is_transient": False,
+            "fix_suggestion": "Re-generate code with error context included in prompt. Specific error: " + str(error)[:300],
+        }
+
+    # Timeout
+    if error_type == ErrorType.TIMEOUT:
+        return {
+            "symptom": f"Timeout: {str(error)[:200]}",
+            "root_cause": "Operation took too long — possibly due to large input, complex query, or slow external service",
+            "category": "infrastructure",
+            "is_transient": True,
+            "fix_suggestion": "Increase timeout, simplify request, or break into smaller operations",
+        }
+
+    # Default
+    return {
+        "symptom": f"{type(error).__name__}: {str(error)[:200]}",
+        "root_cause": "Unknown — needs manual investigation",
+        "category": "unknown",
+        "is_transient": False,
+        "fix_suggestion": "Check logs for full traceback, investigate error context",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Circuit Breaker
 # ---------------------------------------------------------------------------
 
