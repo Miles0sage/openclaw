@@ -378,7 +378,7 @@ USE_SDK = os.environ.get("OPENCLAW_USE_SDK", "1") == "1"
 # Oz executor — uses Warp Oz CLI for multi-model orchestration (GPT-5.2, Claude 4.6, Gemini 3 Pro).
 # Auto-selects best model per task. Falls back to OpenCode/SDK on failure.
 # Toggle off with OPENCLAW_USE_OZ=0.
-USE_OZ = os.environ.get("OPENCLAW_USE_OZ", "1") == "1"  # Warp cloud agents (run-cloud)
+USE_OZ = False  # DISABLED permanently — burned 900 Warp credits in 8h (2026-03-05). Use OpenCode/Grok/SDK chain instead.
 
 # OpenCode executor — uses Go-based OpenCode CLI for ~90% cost savings.
 # Falls back to Agent SDK on failure. Toggle off with OPENCLAW_USE_OPENCODE=0.
