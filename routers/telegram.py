@@ -2,10 +2,13 @@
 Telegram webhook router for OpenClaw gateway.
 
 Provides two Telegram bots:
-1. Main Telegram bot — Routes to Claude Code agents
+1. Main Telegram bot — Personal Assistant for Miles (schedule, projects, betting, tools)
 2. CoderClaw bot — Dedicated Claude Code controller with persistent sessions
 
 Features:
+- PA mode: concise, knows Miles's schedule/projects, proactive
+- Daily digest (noon) + pre-shift brief (4:30pm) via cron
+- Quick commands: /plan, /picks, /brief, /costs, /projects
 - Webhook deduplication (persistent, survives restarts)
 - Session management for conversation continuity
 - Direct Claude Code execution with --resume
@@ -86,6 +89,37 @@ _TASK_PATTERNS = [
     r'^create task[:\s]+(.+)', r'^todo[:\s]+(.+)', r'^add task[:\s]+(.+)',
     r'^remind me to[:\s]+(.+)', r'^new task[:\s]+(.+)',
 ]
+
+# PA system prompt — replaces generic agent prompt for Telegram
+PA_SYSTEM_PROMPT = """You are Miles's personal assistant, running on the OpenClaw platform.
+
+PERSONALITY: Concise, direct, action-oriented. No emojis unless asked. No fluff.
+RESPONSE STYLE: 1-3 sentences for simple questions. Bullet points for lists. Never verbose.
+
+MILES'S CONTEXT:
+- Schedule: Work 5pm-10pm Tue-Sun, Monday OFF. Soccer Thursdays ~9:20pm.
+- Projects: OpenClaw (this platform), Delhi Palace (restaurant site), Barber CRM, PrestressCalc, Concrete Canoe 2026
+- Runs Cybershield Agency from VPS 152.53.55.207
+- Betting: NBA XGBoost model, +EV identification, Quarter-Kelly sizing
+- Prefers: ship fast, iterate, cost-aware, parallel execution
+
+WHAT YOU CAN DO (use tools proactively):
+- Plan days, create events, check calendar
+- Check/create jobs, monitor agents
+- Search memory for past decisions
+- Run betting analysis, check odds
+- Send Slack messages, search the web
+- Check project status via GitHub
+- Run cost reports
+
+RULES:
+- If Miles asks something you can answer from context, answer immediately
+- If you need live data, use tools — never guess
+- Keep responses under 500 chars for Telegram readability
+- When asked to "plan my day" or similar, gather schedule + jobs + picks and summarize
+- Don't identify yourself as an "AI" or "assistant" — just help
+- Sign off with -- PA (not Cybershield PM)
+"""
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -682,9 +716,215 @@ async def coderclaw_webhook(request: Request):
         return {"ok": False, "error": str(e)}
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PA HELPER FUNCTIONS — Quick commands that bypass LLM calls
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def _pa_plan_day(chat_id, msg_id):
+    """Send today's plan: schedule + pending jobs + priorities."""
+    try:
+        await _tg_typing(chat_id)
+        from datetime import datetime
+        now = datetime.now()
+        day = now.strftime("%A")
+        date = now.strftime("%Y-%m-%d")
+
+        lines = [f"<b>{day} {date}</b>"]
+
+        if day == "Monday":
+            lines.append("Day OFF — planning, Claude sessions, big tasks")
+        else:
+            lines.append("Work: 5pm-10pm")
+            if day == "Thursday":
+                lines.append("Soccer: 9:20pm")
+
+        # Jobs
+        try:
+            import requests as req
+            r = req.get("http://localhost:18789/api/jobs?limit=10", timeout=5)
+            if r.ok:
+                jobs = r.json().get("jobs", [])
+                pending = [j for j in jobs if j.get("status") in ("pending", "analyzing")]
+                running = [j for j in jobs if j.get("status") in ("running", "in_progress")]
+                if pending:
+                    lines.append(f"\n<b>{len(pending)} pending jobs</b>")
+                    for j in pending[:3]:
+                        lines.append(f"  {j.get('title', j.get('task', '?'))[:60]}")
+                if running:
+                    lines.append(f"\n<b>{len(running)} running</b>")
+        except Exception:
+            pass
+
+        # Costs
+        try:
+            import requests as req
+            r = req.get("http://localhost:18789/api/costs/summary",
+                        headers={"X-Auth-Token": os.getenv("GATEWAY_AUTH_TOKEN", "")}, timeout=5)
+            if r.ok:
+                c = r.json()
+                lines.append(f"\nCosts: ${c.get('today_usd', 0):.2f} today | ${c.get('month_usd', 0):.2f} month")
+        except Exception:
+            pass
+
+        await _tg_send(chat_id, "\n".join(lines), reply_to=msg_id)
+    except Exception as e:
+        await _tg_send(chat_id, f"Plan failed: {e}", reply_to=msg_id)
+
+
+async def _pa_betting_picks(chat_id, msg_id):
+    """Send today's +EV betting picks."""
+    try:
+        await _tg_typing(chat_id)
+        import sys
+        sys.path.insert(0, "/root/openclaw") if "/root/openclaw" not in sys.path else None
+        from sports_model import sports_betting
+        import json
+
+        result = sports_betting(action="recommend", sport="basketball_nba", bankroll=100, min_ev=0.02, limit=5)
+        if isinstance(result, str):
+            data = json.loads(result)
+        else:
+            data = result
+
+        bets = data.get("recommendations", [])
+        if not bets:
+            await _tg_send(chat_id, "No +EV bets found right now.", reply_to=msg_id)
+            return
+
+        lines = [f"<b>{len(bets)} +EV Picks</b>"]
+        for b in bets[:5]:
+            team = b.get("team", "?")
+            ev = b.get("edge_pct", b.get("ev", 0))
+            book = b.get("best_book", b.get("sportsbook", "?"))
+            odds = b.get("best_odds", b.get("odds", "?"))
+            stake = b.get("kelly_stake", b.get("stake", "?"))
+            lines.append(f"{team} @ {book} ({odds})")
+            lines.append(f"  +{ev:.1f}% EV | Stake: ${stake}")
+
+        await _tg_send(chat_id, "\n".join(lines), reply_to=msg_id)
+    except Exception as e:
+        await _tg_send(chat_id, f"Picks unavailable: {str(e)[:200]}", reply_to=msg_id)
+
+
+async def _pa_daily_brief(chat_id, msg_id):
+    """Full daily brief — schedule + jobs + costs + picks + projects."""
+    try:
+        await _tg_typing(chat_id)
+        # Run the digest script inline
+        import subprocess
+        result = subprocess.run(
+            ["/usr/bin/python3", "/root/openclaw/scripts/daily_digest.py", "preshift"],
+            capture_output=True, text=True, timeout=30,
+            env={**os.environ}
+        )
+        output = result.stdout.strip()
+        if output:
+            # Don't re-send to Telegram (script does that), just show inline
+            # Actually, let's send it directly here
+            await _tg_send(chat_id, output[:4000], reply_to=msg_id)
+        else:
+            await _tg_send(chat_id, f"Brief generation failed: {result.stderr[:200]}", reply_to=msg_id)
+    except Exception as e:
+        await _tg_send(chat_id, f"Brief failed: {e}", reply_to=msg_id)
+
+
+async def _pa_costs(chat_id, msg_id):
+    """Quick cost summary."""
+    try:
+        await _tg_typing(chat_id)
+        import requests as req
+        r = req.get("http://localhost:18789/api/costs/summary",
+                    headers={"X-Auth-Token": os.getenv("GATEWAY_AUTH_TOKEN", "")}, timeout=5)
+        if r.ok:
+            c = r.json()
+            lines = [
+                "<b>Cost Report</b>",
+                f"Today: ${c.get('today_usd', 0):.4f}",
+                f"This month: ${c.get('month_usd', 0):.4f}",
+            ]
+            if c.get("by_model"):
+                lines.append("\nBy model:")
+                for model, cost in sorted(c["by_model"].items(), key=lambda x: x[1], reverse=True)[:5]:
+                    lines.append(f"  {model}: ${cost:.4f}")
+            await _tg_send(chat_id, "\n".join(lines), reply_to=msg_id)
+        else:
+            await _tg_send(chat_id, "Cost data unavailable", reply_to=msg_id)
+    except Exception as e:
+        await _tg_send(chat_id, f"Cost check failed: {e}", reply_to=msg_id)
+
+
+async def _pa_projects(chat_id, msg_id):
+    """Quick project status from git."""
+    try:
+        await _tg_typing(chat_id)
+        import subprocess
+        projects = [
+            ("/root/openclaw", "OpenClaw"),
+            ("/root/Delhi-Palace", "Delhi Palace"),
+            ("/root/Barber-CRM", "Barber CRM"),
+            ("/root/Mathcad-Scripts", "PrestressCalc"),
+        ]
+        lines = ["<b>Projects</b>"]
+        for path, name in projects:
+            if os.path.isdir(path):
+                try:
+                    result = subprocess.run(
+                        ["git", "log", "--oneline", "-1", "--format=%h %s (%cr)"],
+                        cwd=path, capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0:
+                        lines.append(f"<b>{name}:</b> {result.stdout.strip()}")
+                except Exception:
+                    lines.append(f"<b>{name}:</b> exists")
+        await _tg_send(chat_id, "\n".join(lines), reply_to=msg_id)
+    except Exception as e:
+        await _tg_send(chat_id, f"Project check failed: {e}", reply_to=msg_id)
+
+
+async def _pa_jobs(chat_id, msg_id):
+    """Job queue summary."""
+    try:
+        await _tg_typing(chat_id)
+        import requests as req
+        r = req.get("http://localhost:18789/api/jobs?status=all&limit=20", timeout=5)
+        if not r.ok:
+            await _tg_send(chat_id, "Job queue unavailable", reply_to=msg_id)
+            return
+
+        jobs = r.json().get("jobs", [])
+        if not jobs:
+            await _tg_send(chat_id, "Job queue is empty.", reply_to=msg_id)
+            return
+
+        pending = [j for j in jobs if j.get("status") in ("pending", "analyzing")]
+        running = [j for j in jobs if j.get("status") in ("running", "in_progress")]
+        done = [j for j in jobs if j.get("status") == "done"]
+        failed = [j for j in jobs if j.get("status") == "failed"]
+
+        lines = ["<b>Job Queue</b>"]
+        if running:
+            lines.append(f"\n<b>Running ({len(running)}):</b>")
+            for j in running[:3]:
+                lines.append(f"  {j.get('id', '?')[:20]} — {j.get('title', j.get('task', '?'))[:50]}")
+        if pending:
+            lines.append(f"\n<b>Pending ({len(pending)}):</b>")
+            for j in pending[:3]:
+                lines.append(f"  {j.get('id', '?')[:20]} — {j.get('title', j.get('task', '?'))[:50]}")
+        if failed:
+            lines.append(f"\n<b>Failed ({len(failed)}):</b>")
+            for j in failed[:3]:
+                lines.append(f"  {j.get('id', '?')[:20]} — {j.get('title', j.get('task', '?'))[:50]}")
+        if done:
+            lines.append(f"\nDone: {len(done)}")
+
+        await _tg_send(chat_id, "\n".join(lines), reply_to=msg_id)
+    except Exception as e:
+        await _tg_send(chat_id, f"Job check failed: {e}", reply_to=msg_id)
+
+
 @router.post("/webhook")
 async def telegram_webhook(request: Request):
-    """Receive Telegram messages — routes to Claude Code agents for build/fix commands."""
+    """Personal Assistant for Miles — routes commands, quick responses, agent spawning."""
     try:
         update = await request.json()
 
@@ -716,6 +956,50 @@ async def telegram_webhook(request: Request):
 
         # Send typing indicator
         await _tg_typing(chat_id)
+
+        text_lower = text.strip().lower()
+
+        # ═══════════════════════════════════════════════
+        # 0. PA QUICK COMMANDS — Fast responses, no LLM needed
+        # ═══════════════════════════════════════════════
+        if text_lower in ("/plan", "plan my day", "plan", "what's today"):
+            asyncio.create_task(_pa_plan_day(chat_id, msg_id))
+            return {"ok": True}
+
+        if text_lower in ("/picks", "picks", "betting picks", "bets", "bets today"):
+            asyncio.create_task(_pa_betting_picks(chat_id, msg_id))
+            return {"ok": True}
+
+        if text_lower in ("/brief", "brief", "daily brief", "digest"):
+            asyncio.create_task(_pa_daily_brief(chat_id, msg_id))
+            return {"ok": True}
+
+        if text_lower in ("/costs", "costs", "spending", "budget"):
+            asyncio.create_task(_pa_costs(chat_id, msg_id))
+            return {"ok": True}
+
+        if text_lower in ("/projects", "projects", "project status"):
+            asyncio.create_task(_pa_projects(chat_id, msg_id))
+            return {"ok": True}
+
+        if text_lower in ("/jobs", "jobs", "job queue", "queue"):
+            asyncio.create_task(_pa_jobs(chat_id, msg_id))
+            return {"ok": True}
+
+        if text_lower == "/start":
+            await _tg_send(chat_id, (
+                "<b>PA Ready</b>\n\n"
+                "Quick commands:\n"
+                "/plan — Today's schedule + priorities\n"
+                "/picks — Betting picks\n"
+                "/brief — Full daily brief\n"
+                "/costs — Spending report\n"
+                "/projects — Project status\n"
+                "/jobs — Job queue\n"
+                "status — Running agents\n\n"
+                "Or just tell me what you need."
+            ), reply_to=msg_id)
+            return {"ok": True}
 
         # ═══════════════════════════════════════════════
         # 1. AGENT SPAWN — Build/fix/deploy/refactor commands
@@ -851,7 +1135,6 @@ async def telegram_webhook(request: Request):
         # ═══════════════════════════════════════════════
         # 3. STATUS CHECK — "status", "agents", "what's running"
         # ═══════════════════════════════════════════════
-        text_lower = text.strip().lower()
         if text_lower in ("status", "/status", "what's running", "agents", "check agents"):
             try:
                 spawner = get_spawner()
@@ -922,10 +1205,9 @@ async def telegram_webhook(request: Request):
                 ]
                 messages_for_api.append({"role": "user", "content": text})
 
-                route_decision = agent_router.select_agent(text)
-                agent_config = CONFIG.get("agents", {}).get(route_decision["agentId"], {})
-                system_prompt = build_channel_system_prompt(agent_config)
-                model = agent_config.get("model", "claude-opus-4-6")
+                # Use PA system prompt for Telegram (not generic agent routing)
+                system_prompt = PA_SYSTEM_PROMPT
+                model = "gemini-2.5-flash"  # Fast + cheap for PA responses
 
                 assistant_message = await call_model_with_escalation(
                     anthropic_client, model, system_prompt, messages_for_api

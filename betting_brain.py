@@ -1131,6 +1131,30 @@ def betting_brain(action: str, params: Optional[dict] = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Utility Functions
+# ---------------------------------------------------------------------------
+
+def calculate_roi(stake: float, payout: float) -> float:
+    """Calculate Return on Investment (ROI) as a percentage.
+
+    Args:
+        stake: The amount wagered (e.g., 100.0 for $100)
+        payout: The total payout received (e.g., 190.0 for $190 back)
+
+    Returns:
+        ROI as a percentage (e.g., 90.0 means 90% return on stake).
+        Negative values indicate a loss.
+
+    Example:
+        >>> calculate_roi(100, 190)
+        90.0
+        >>> calculate_roi(100, 50)
+        -50.0
+    """
+    return (payout - stake) / stake * 100
+
+
+# ---------------------------------------------------------------------------
 # Register as MCP tool
 # ---------------------------------------------------------------------------
 

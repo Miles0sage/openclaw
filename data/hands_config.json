@@ -5,13 +5,16 @@
     "schedule": "0 9 * * *",
     "enabled": true,
     "max_consecutive_failures": 5,
-    "consecutive_failures": 0,
-    "last_run": "",
-    "last_result": "",
-    "total_runs": 0,
+    "consecutive_failures": 1,
+    "last_run": "2026-03-05T08:00:00.727372+00:00",
+    "last_result": "failure",
+    "total_runs": 1,
     "total_successes": 0,
     "total_cost_usd": 0.0,
-    "tags": ["cost", "reporting"]
+    "tags": [
+      "cost",
+      "reporting"
+    ]
   },
   "eval_regression_check": {
     "name": "eval_regression_check",
@@ -25,7 +28,10 @@
     "total_runs": 0,
     "total_successes": 0,
     "total_cost_usd": 0.0,
-    "tags": ["eval", "quality"]
+    "tags": [
+      "eval",
+      "quality"
+    ]
   },
   "health_check": {
     "name": "health_check",
@@ -34,12 +40,15 @@
     "enabled": true,
     "max_consecutive_failures": 5,
     "consecutive_failures": 0,
-    "last_run": "2026-03-05T06:30:01.151968+00:00",
+    "last_run": "2026-03-05T18:30:01.109224+00:00",
     "last_result": "success",
-    "total_runs": 16,
-    "total_successes": 16,
+    "total_runs": 39,
+    "total_successes": 39,
     "total_cost_usd": 0.0,
-    "tags": ["monitoring", "health"]
+    "tags": [
+      "monitoring",
+      "health"
+    ]
   },
   "stale_job_cleanup": {
     "name": "stale_job_cleanup",
@@ -48,12 +57,15 @@
     "enabled": true,
     "max_consecutive_failures": 5,
     "consecutive_failures": 0,
-    "last_run": "2026-03-05T06:00:01.834106+00:00",
+    "last_run": "2026-03-05T17:00:01.686217+00:00",
     "last_result": "success",
-    "total_runs": 7,
-    "total_successes": 7,
+    "total_runs": 18,
+    "total_successes": 18,
     "total_cost_usd": 0.0,
-    "tags": ["maintenance", "cleanup"]
+    "tags": [
+      "maintenance",
+      "cleanup"
+    ]
   },
   "memory_flush": {
     "name": "memory_flush",
@@ -67,6 +79,9 @@
     "total_runs": 1,
     "total_successes": 0,
     "total_cost_usd": 0.0,
-    "tags": ["memory", "maintenance"]
+    "tags": [
+      "memory",
+      "maintenance"
+    ]
   }
 }

@@ -1,0 +1,1 @@
+{"hand_name": "daily_cost_report", "run_id": "cost-5a6775fa", "success": false, "output": "", "error": "'str' object has no attribute 'get'", "cost_usd": 0.0, "duration_seconds": 0.7254312038421631, "timestamp": "2026-03-05T08:00:00.727320+00:00"}

@@ -38,6 +38,11 @@ CLAUDE_CMD = "/root/.local/bin/claude"  # Claude Code CLI (full path for tmux)
 # --dangerously-skip-permissions doesn't work as root, so we use allowedTools instead.
 CLAUDE_FULL_ACCESS = '--allowedTools "Bash(*)" "Read(*)" "Write(*)" "Edit(*)" "Glob(*)" "Grep(*)" "WebSearch(*)" "WebFetch(*)"'
 
+# Bailian agent — TOS-compliant alternative to Claude CLI for automated agents
+BAILIAN_AGENT = "/usr/bin/python3 /root/openclaw/bailian_agent.py"
+# Set to True to use Bailian for automated agents instead of Claude CLI (Max Plan OAuth)
+USE_BAILIAN_AGENT = True
+
 
 def _log(msg: str):
     """Append to the tmux agents log file."""
@@ -207,72 +212,78 @@ class TmuxSpawner:
         with open(prompt_file, "w") as f:
             f.write(prompt)
 
-        # Build a shell script with continuation loop
-        # When Claude hits --max-turns, it exits with code 1. Instead of
-        # treating this as failure, we continue where it left off (up to
-        # MAX_CONTINUATIONS times). This lets complex tasks run 150+ turns.
+        # Build a shell script for the agent
         script_file = f"{agent_outputs_dir}/openclaw-agent-{job_id}.sh"
         output_file = f"{agent_outputs_dir}/openclaw-output-{job_id}.txt"
-        max_turns = 30  # per continuation chunk
-        max_continuations = 5  # total attempts = max_turns * max_continuations = 150 turns
+        heartbeat_dir = "/root/openclaw/data/agent_outputs/heartbeats"
+        heartbeat_file = f"{heartbeat_dir}/heartbeat-{job_id}"
+        done_marker = f"{heartbeat_dir}/done-{job_id}"
+
         with open(script_file, "w") as sf:
             sf.write("#!/usr/bin/env bash\n")
             sf.write("set -o pipefail\n")
-            sf.write("unset CLAUDECODE\n")
-            sf.write("unset CLAUDE_CODE_SESSION\n")
             sf.write(f"cd {work_dir}\n")
             sf.write(f'echo "[AGENT_START] $(date)" >> {LOG_FILE}\n')
             sf.write(f'echo "Agent {job_id} starting in {work_dir}..."\n')
-            sf.write(f'> {output_file}\n')  # truncate output file
-            # Heartbeat: background subshell writes heartbeat every 30s for watchdog
-            heartbeat_dir = "/root/openclaw/data/agent_outputs/heartbeats"
-            heartbeat_file = f"{heartbeat_dir}/heartbeat-{job_id}"
+            sf.write(f'> {output_file}\n')
             sf.write(f'mkdir -p {heartbeat_dir}\n')
             sf.write(f'( while true; do date +%s > {heartbeat_file}; sleep 30; done ) &\n')
             sf.write(f'HEARTBEAT_PID=$!\n')
             sf.write(f'trap "kill $HEARTBEAT_PID 2>/dev/null; rm -f {heartbeat_file}" EXIT\n')
-            sf.write(f'PROMPT_FILE="{prompt_file}"\n')
-            sf.write(f'MAX_CONTINUATIONS={max_continuations}\n')
-            sf.write(f'ATTEMPT=0\n')
-            sf.write(f'FINAL_EXIT=1\n')
-            sf.write(f'\n')
-            sf.write(f'while [ $ATTEMPT -lt $MAX_CONTINUATIONS ]; do\n')
-            sf.write(f'  ATTEMPT=$((ATTEMPT + 1))\n')
-            sf.write(f'  echo "[CONTINUATION $ATTEMPT/{max_continuations}] $(date)"\n')
-            sf.write(f'  {CLAUDE_CMD} -p {CLAUDE_FULL_ACCESS} --max-turns {max_turns} --output-format text "$(cat $PROMPT_FILE)" {claude_args} 2>&1 | tee -a {output_file}\n')
-            sf.write(f'  FINAL_EXIT=$?\n')
-            sf.write(f'\n')
-            sf.write(f'  # Exit code 0 = task completed successfully\n')
-            sf.write(f'  if [ $FINAL_EXIT -eq 0 ]; then\n')
-            sf.write(f'    echo "[AGENT_COMPLETED] Task finished on attempt $ATTEMPT"\n')
-            sf.write(f'    break\n')
-            sf.write(f'  fi\n')
-            sf.write(f'\n')
-            sf.write(f'  # Exit code 1 = hit max-turns limit, continue with progress\n')
-            sf.write(f'  if [ $FINAL_EXIT -eq 1 ] && [ $ATTEMPT -lt $MAX_CONTINUATIONS ]; then\n')
-            sf.write(f'    echo "[TURN_LIMIT_HIT] Continuing from where we left off..."\n')
-            sf.write(f'    PROGRESS=$(tail -80 {output_file})\n')
-            sf.write(f'    cat > $PROMPT_FILE << CONTINUE_EOF\n')
-            sf.write(f'You were working on a task and hit the turn limit. Continue where you left off.\n')
-            sf.write(f'\n')
-            sf.write(f'Your recent progress:\n')
-            sf.write(f'$PROGRESS\n')
-            sf.write(f'\n')
-            sf.write(f'Continue the task. Do NOT restart from scratch. Pick up exactly where you stopped.\n')
-            sf.write(f'When fully done, output "TASK_COMPLETE" on the last line.\n')
-            sf.write(f'CONTINUE_EOF\n')
-            sf.write(f'  else\n')
-            sf.write(f'    echo "[AGENT_FAILED] Exit code $FINAL_EXIT on attempt $ATTEMPT"\n')
-            sf.write(f'    break\n')
-            sf.write(f'  fi\n')
-            sf.write(f'done\n')
+
+            if USE_BAILIAN_AGENT:
+                # Bailian agent — TOS-compliant, uses Coding Plan ($1.10/mo)
+                sf.write(f'\n')
+                sf.write(f'echo "[USING BAILIAN AGENT]"\n')
+                sf.write(f'{BAILIAN_AGENT} "{prompt_file}" "{output_file}" "{work_dir}" 2>&1 | tee -a {output_file}\n')
+                sf.write(f'FINAL_EXIT=$?\n')
+            else:
+                # Claude CLI — uses Max Plan OAuth (only for interactive/manual use)
+                sf.write(f'unset CLAUDECODE\n')
+                sf.write(f'unset CLAUDE_CODE_SESSION\n')
+                max_turns = 30
+                max_continuations = 5
+                sf.write(f'PROMPT_FILE="{prompt_file}"\n')
+                sf.write(f'MAX_CONTINUATIONS={max_continuations}\n')
+                sf.write(f'ATTEMPT=0\n')
+                sf.write(f'FINAL_EXIT=1\n')
+                sf.write(f'\n')
+                sf.write(f'while [ $ATTEMPT -lt $MAX_CONTINUATIONS ]; do\n')
+                sf.write(f'  ATTEMPT=$((ATTEMPT + 1))\n')
+                sf.write(f'  echo "[CONTINUATION $ATTEMPT/{max_continuations}] $(date)"\n')
+                sf.write(f'  {CLAUDE_CMD} -p {CLAUDE_FULL_ACCESS} --max-turns {max_turns} --output-format text "$(cat $PROMPT_FILE)" {claude_args} 2>&1 | tee -a {output_file}\n')
+                sf.write(f'  FINAL_EXIT=$?\n')
+                sf.write(f'  if [ $FINAL_EXIT -eq 0 ]; then\n')
+                sf.write(f'    echo "[AGENT_COMPLETED] Task finished on attempt $ATTEMPT"\n')
+                sf.write(f'    break\n')
+                sf.write(f'  fi\n')
+                sf.write(f'  if [ $FINAL_EXIT -eq 1 ] && [ $ATTEMPT -lt $MAX_CONTINUATIONS ]; then\n')
+                sf.write(f'    echo "[TURN_LIMIT_HIT] Continuing from where we left off..."\n')
+                sf.write(f'    PROGRESS=$(tail -80 {output_file})\n')
+                sf.write(f'    cat > $PROMPT_FILE << CONTINUE_EOF\n')
+                sf.write(f'You were working on a task and hit the turn limit. Continue where you left off.\n')
+                sf.write(f'Your recent progress:\n')
+                sf.write(f'$PROGRESS\n')
+                sf.write(f'Continue the task. Do NOT restart from scratch. Pick up exactly where you stopped.\n')
+                sf.write(f'When fully done, output "TASK_COMPLETE" on the last line.\n')
+                sf.write(f'CONTINUE_EOF\n')
+                sf.write(f'  else\n')
+                sf.write(f'    echo "[AGENT_FAILED] Exit code $FINAL_EXIT on attempt $ATTEMPT"\n')
+                sf.write(f'    break\n')
+                sf.write(f'  fi\n')
+                sf.write(f'done\n')
+
             sf.write(f'\n')
             sf.write(f'echo ""\n')
-            sf.write(f'echo "[AGENT_EXIT code=$FINAL_EXIT attempts=$ATTEMPT]"\n')
-            sf.write(f'echo "[AGENT_DONE] job={job_id} exit=$FINAL_EXIT attempts=$ATTEMPT $(date)" >> {LOG_FILE}\n')
-            # Keep pane open for 300s so output can be collected
-            sf.write(f'echo "Agent finished. Pane closes in 5min..."\n')
-            sf.write(f'sleep 300\n')
+            sf.write(f'if [ $FINAL_EXIT -eq 0 ]; then\n')
+            sf.write(f'  echo "[AGENT_COMPLETED] Task finished successfully"\n')
+            sf.write(f'else\n')
+            sf.write(f'  echo "[AGENT_FAILED] Exit code $FINAL_EXIT"\n')
+            sf.write(f'fi\n')
+            sf.write(f'echo "[AGENT_DONE] job={job_id} exit=$FINAL_EXIT $(date)" >> {LOG_FILE}\n')
+            sf.write(f'touch {done_marker}\n')
+            sf.write(f'echo "Agent finished. Pane closes in 30s..."\n')
+            sf.write(f'sleep 30\n')
         os.chmod(script_file, 0o755)
 
         # Wrap with timeout if specified

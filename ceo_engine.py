@@ -330,8 +330,13 @@ class CEOEngine:
                         pass
 
             total = len(recent)
-            done = sum(1 for j in recent if j.get("status") == "done")
-            failed = sum(1 for j in recent if j.get("status") == "failed")
+            # Count pr_ready as done; killed_*, credit_exhausted, error as failed
+            success_statuses = {"done", "pr_ready"}
+            fail_statuses = {"failed", "error", "killed_manual", "killed_iteration_limit",
+                             "killed_cost_limit", "killed_phase_iteration_limit",
+                             "credit_exhausted"}
+            done = sum(1 for j in recent if j.get("status") in success_statuses)
+            failed = sum(1 for j in recent if j.get("status") in fail_statuses)
             pending = sum(1 for j in recent if j.get("status") == "pending")
             running = sum(1 for j in recent if j.get("status") in ("analyzing", "code_generated"))
             success_rate = (done / total * 100) if total > 0 else 0
@@ -541,8 +546,12 @@ class CEOEngine:
                         pass
 
             total = len(week_jobs)
-            done = sum(1 for j in week_jobs if j.get("status") == "done")
-            failed = sum(1 for j in week_jobs if j.get("status") == "failed")
+            success_statuses = {"done", "pr_ready"}
+            fail_statuses = {"failed", "error", "killed_manual", "killed_iteration_limit",
+                             "killed_cost_limit", "killed_phase_iteration_limit",
+                             "credit_exhausted"}
+            done = sum(1 for j in week_jobs if j.get("status") in success_statuses)
+            failed = sum(1 for j in week_jobs if j.get("status") in fail_statuses)
 
             # Cost for the week
             week_cost = 0.0

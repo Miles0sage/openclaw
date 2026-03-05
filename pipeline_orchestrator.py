@@ -70,9 +70,16 @@ class PipelineOrchestrator:
         for path in glob(pattern):
             try:
                 with open(path) as f:
-                    lead = json.load(f)
-                    lead["_file"] = path
-                    leads.append(lead)
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        data["_file"] = path
+                        leads.append(data)
+                    elif isinstance(data, list):
+                        # Some lead files contain arrays of leads
+                        for item in data:
+                            if isinstance(item, dict):
+                                item["_file"] = path
+                                leads.append(item)
             except (json.JSONDecodeError, OSError):
                 continue
         return leads

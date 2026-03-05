@@ -255,8 +255,8 @@ async def execute_with_fallback(
     """
     Execute via cheap LLM backends, falling back to expensive SDK only as last resort.
 
-    Fallback chain: OpenCode (Gemini 2.5 Flash, ~$0.001) → Grok (xAI, ~$0.0004)
-                    → MiniMax (M2.5, ~$0.003) → Agent SDK (Anthropic, ~$0.02-0.50/job)
+    Fallback chain: OpenCode (Gemini 2.5 Flash, ~$0.001) → Bailian (Alibaba, ~$0.001)
+                    → Grok (xAI, ~$0.0004) → MiniMax (M2.5, ~$0.003) → SDK (~$0.02-0.50)
 
     Returns: Standard result dict with "text", "tokens", "tool_calls", "cost_usd"
     """
@@ -279,7 +279,31 @@ async def execute_with_fallback(
     except Exception as oc_err:
         logger.warning(f"OpenCode unexpected error for {job_id}/{phase}: {oc_err} — trying Grok")
 
-    # Secondary: Grok (xAI API, ~$0.0004/job via grok-3-mini)
+    # Secondary: Bailian (Alibaba Cloud, ~$0.001/job via qwen3-coder-next)
+    try:
+        from bailian_executor import execute_with_bailian, is_available as bailian_available
+
+        if bailian_available():
+            logger.info(f"Executing via Bailian for {job_id}/{phase}")
+            bl_result = await execute_with_bailian(
+                prompt=prompt,
+                job_id=job_id,
+                phase=phase,
+                priority=priority,
+                system_prompt=system_prompt or "",
+            )
+            if bl_result and bl_result.get("text"):
+                logger.info(f"Bailian completed {job_id}/{phase} for ${bl_result.get('cost_usd', 0):.4f}")
+                return bl_result
+            logger.warning(f"Bailian returned empty response for {job_id}/{phase} — trying Grok")
+        else:
+            logger.debug("Bailian not configured (no BAILIAN_API_KEY) — trying Grok")
+    except ImportError:
+        logger.warning("bailian_executor not available — trying Grok")
+    except Exception as bl_err:
+        logger.warning(f"Bailian failed for {job_id}/{phase}: {bl_err} — trying Grok")
+
+    # Tertiary: Grok (xAI API, ~$0.0004/job via grok-3-mini)
     try:
         from grok_executor import execute_with_grok
 

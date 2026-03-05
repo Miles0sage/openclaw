@@ -59,6 +59,22 @@ class GeminiClient:
             "description": "Gemini 2.5 Flash — balanced, native tool calling",
             "use_case": "Tool execution, coding, multi-step reasoning",
         },
+        "gemini-2.5-pro": {
+            "api_name": "gemini-2.5-pro",
+            "pricing": {"input": 1.25, "output": 10.00},
+            "context_window": 1048576,
+            "max_output_tokens": 65536,
+            "description": "Gemini 2.5 Pro — strongest reasoning, native tool calling",
+            "use_case": "Complex coding, architecture, deep analysis",
+        },
+        "gemini-3-pro-preview": {
+            "api_name": "gemini-3-pro-preview",
+            "pricing": {"input": 0.0, "output": 0.0},
+            "context_window": 1048576,
+            "max_output_tokens": 65536,
+            "description": "Gemini 3 Pro Preview — FREE during preview, strongest",
+            "use_case": "Complex reasoning, coding, research (free!)",
+        },
         "gemini-3-flash-preview": {
             "api_name": "gemini-3-flash-preview",
             "pricing": {"input": 0.0, "output": 0.0},
