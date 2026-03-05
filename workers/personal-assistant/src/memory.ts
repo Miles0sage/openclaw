@@ -277,19 +277,19 @@ export async function searchMemories(
     params.push(request.category);
   }
 
-  // FTS5 query with relevance scoring
+  // Search using LIKE with keyword matching (FTS5 in D1 can have JOIN issues)
+  // Fall back to LIKE-based search on the data column
+  whereClause += ` AND m.data LIKE ?`;
+
   const query = `
-    SELECT m.*, COUNT(*) as hit_count
+    SELECT m.*
     FROM memories m
-    JOIN memories_fts fts ON m.id = fts.rowid
     ${whereClause}
-    AND fts.data MATCH ?
-    GROUP BY m.id
-    ORDER BY hit_count DESC, m.updated_at DESC
+    ORDER BY m.updated_at DESC
     LIMIT ?
   `;
 
-  params.push(request.query);
+  params.push(`%${request.query}%`);
   params.push(limit);
 
   try {
