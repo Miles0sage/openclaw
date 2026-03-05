@@ -1185,47 +1185,47 @@ async def _call_agent(agent_key: str, prompt: str, conversation: list = None,
             except Exception as oz_err:
                 logger.warning(f"Oz path failed for {job_id}/{phase}: {oz_err} — trying OpenCode/SDK")
 
-        # --- OpenCode path: cheap execution via OpenCode CLI (~90% savings) ---
-        if USE_OPENCODE:
-            try:
-                from opencode_executor import execute_with_fallback
+        # --- OpenClaw IDE path: native Gemini tool calling with all 81 MCP tools ---
+        try:
+            from openclaw_ide import execute_ide_with_fallback
 
-                # Build system prompt with department context
-                oc_system = ""
-                if department and department in DEPARTMENTS:
-                    dept = DEPARTMENTS[department]
-                    oc_system = dept.system_prompt
-                else:
-                    oc_system = (
-                        "You are an autonomous AI agent executing a task step-by-step. "
-                        "Read/write files, run shell commands, and complete the task."
-                    )
-
-                # Determine workspace
-                oc_workspace = ""
-                ws_match = re.search(r"WORKSPACE DIRECTORY[^:]*:\s*(\S+)", prompt)
-                if ws_match and os.path.isdir(ws_match.group(1)):
-                    oc_workspace = ws_match.group(1)
-                elif job_id:
-                    job_run_dir = JOB_RUNS_DIR / job_id / "workspace"
-                    if job_run_dir.exists():
-                        oc_workspace = str(job_run_dir)
-
-                result = await execute_with_fallback(
-                    prompt=prompt,
-                    workspace=oc_workspace or "/root/openclaw",
-                    job_id=job_id,
-                    phase=phase,
-                    priority=priority,
-                    guardrails=guardrails,
-                    system_prompt=oc_system,
+            # Build system prompt with department context
+            ide_system = ""
+            if department and department in DEPARTMENTS:
+                dept = DEPARTMENTS[department]
+                ide_system = dept.system_prompt
+            else:
+                ide_system = (
+                    "You are an autonomous AI agent executing a task step-by-step. "
+                    "Read/write files, run shell commands, and complete the task."
                 )
-                return result
 
-            except ImportError:
-                logger.warning("opencode_executor not available — falling back to SDK/legacy")
-            except Exception as oc_err:
-                logger.warning(f"OpenCode path failed for {job_id}/{phase}: {oc_err} — trying SDK")
+            # Determine workspace
+            ide_workspace = ""
+            ws_match = re.search(r"WORKSPACE DIRECTORY[^:]*:\s*(\S+)", prompt)
+            if ws_match and os.path.isdir(ws_match.group(1)):
+                ide_workspace = ws_match.group(1)
+            elif job_id:
+                job_run_dir = JOB_RUNS_DIR / job_id / "workspace"
+                if job_run_dir.exists():
+                    ide_workspace = str(job_run_dir)
+
+            result = await execute_ide_with_fallback(
+                prompt=prompt,
+                tools=tools,
+                workspace=ide_workspace or "/root/openclaw",
+                job_id=job_id,
+                phase=phase,
+                priority=priority,
+                guardrails=guardrails,
+                system_prompt=ide_system,
+            )
+            return result
+
+        except ImportError:
+            logger.warning("openclaw_ide not available — falling back to Grok/SDK")
+        except Exception as ide_err:
+            logger.warning(f"IDE path failed for {job_id}/{phase}: {ide_err} — trying Grok/SDK")
 
         # --- Grok path: xAI Grok as cheap fallback (~$0.001 for grok-3-mini) ---
         if USE_SDK:

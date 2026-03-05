@@ -5,52 +5,52 @@
     "avg_return": 0.02,
     "max_drawdown": 0.0,
     "sharpe_ratio": 5.0,
-    "sample_size": 100,
-    "edge_source": "Guaranteed profit from price gaps across books"
+    "sample_size": 500,
+    "edge_source": "Price discrepancies across multiple sportsbooks"
   },
   {
     "strategy_name": "+EV Sports Betting (XGBoost)",
-    "win_rate": 0.54,
+    "win_rate": 0.53,
     "avg_return": 0.03,
     "max_drawdown": 0.15,
     "sharpe_ratio": 1.2,
-    "sample_size": 1000,
-    "edge_source": "Mispriced lines vs Pinnacle sharp reference (XGBoost-enhanced)"
+    "sample_size": 3000,
+    "edge_source": "XGBoost model vs Pinnacle sharp lines"
   },
   {
     "strategy_name": "Prediction Market Bonds",
     "win_rate": 1.0,
     "avg_return": 0.05,
     "max_drawdown": 0.0,
-    "sharpe_ratio": 4.0,
-    "sample_size": 50,
-    "edge_source": "YES+NO < $1.00 = risk-free profit"
+    "sharpe_ratio": 4.5,
+    "sample_size": 200,
+    "edge_source": "YES + NO prices sum to less than $1.00"
   },
   {
     "strategy_name": "Cross-Platform Arbitrage",
     "win_rate": 1.0,
-    "avg_return": 0.03,
+    "avg_return": 0.04,
     "max_drawdown": 0.0,
-    "sharpe_ratio": 3.5,
-    "sample_size": 75,
-    "edge_source": "Polymarket vs Kalshi price gaps on same events"
+    "sharpe_ratio": 3.8,
+    "sample_size": 150,
+    "edge_source": "Price discrepancies between Polymarket and Kalshi"
   },
   {
     "strategy_name": "Expiring Convergence",
-    "win_rate": 0.85,
-    "avg_return": 0.02,
-    "max_drawdown": 0.07,
-    "sharpe_ratio": 0.9,
-    "sample_size": 200,
-    "edge_source": "High-conviction markets near close -> near-certain gains"
+    "win_rate": 0.88,
+    "avg_return": 0.03,
+    "max_drawdown": 0.08,
+    "sharpe_ratio": 1.5,
+    "sample_size": 1000,
+    "edge_source": "High-conviction markets closing within 24-48 hours"
   },
   {
     "strategy_name": "Crypto Fear/Greed Contrarian",
     "win_rate": 0.6,
-    "avg_return": 0.2,
+    "avg_return": 0.25,
     "max_drawdown": 0.3,
-    "sharpe_ratio": 0.8,
-    "sample_size": 20,
-    "edge_source": "Buy extreme fear, trim extreme greed (data-driven)"
+    "sharpe_ratio": 0.9,
+    "sample_size": 50,
+    "edge_source": "Bitcoin Fear & Greed Index signals"
   }
 ]

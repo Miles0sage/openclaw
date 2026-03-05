@@ -14,6 +14,14 @@ import urllib.request
 import urllib.parse
 from typing import Optional
 
+# Load .env if not already in environment
+if not os.environ.get("ODDS_API_KEY"):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+    except Exception:
+        pass
+
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY", "")
 

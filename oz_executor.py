@@ -414,14 +414,13 @@ async def execute_with_oz_fallback(
             f"{'circuit breaker' if oz_failures >= OZ_MAX_FAILURES_PER_JOB else 'verify/deliver needs local file access'}"
         )
 
-    # Fall back to OpenCode
+    # Fall back to OpenClaw IDE (native Gemini tool calling with all MCP tools)
     try:
-        from opencode_executor import execute_with_fallback
-        logger.info(f"Falling back to OpenCode for {job_id}/{phase}")
-        return await execute_with_fallback(
+        from openclaw_ide import execute_ide_with_fallback
+        logger.info(f"Falling back to OpenClaw IDE for {job_id}/{phase}")
+        return await execute_ide_with_fallback(
             prompt=prompt,
             workspace=workspace,
-            timeout=timeout,
             job_id=job_id,
             phase=phase,
             priority=priority,
@@ -429,7 +428,7 @@ async def execute_with_oz_fallback(
             system_prompt=system_prompt,
         )
     except Exception as e:
-        logger.error(f"OpenCode fallback also failed for {job_id}/{phase}: {e}")
+        logger.error(f"OpenClaw IDE fallback also failed for {job_id}/{phase}: {e}")
 
     # Final fallback to SDK
     from autonomous_runner import _call_agent_sdk
