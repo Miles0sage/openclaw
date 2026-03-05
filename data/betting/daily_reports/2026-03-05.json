@@ -1,0 +1,187 @@
+{
+  "date": "2026-03-05",
+  "generated_at": "2026-03-05T07:18:27.022865+00:00",
+  "model_staleness": {
+    "stale": true,
+    "model_age_days": 0.03,
+    "model_path": "/root/openclaw/data/models/nba_xgboost.pkl",
+    "trained_at": "2026-03-05T06:31:11.236071",
+    "reason": "force_retrain"
+  },
+  "retrain_result": {
+    "accuracy": 0.6228,
+    "brier_score": 0.2427,
+    "log_loss": 0.7009,
+    "train_size": 2552,
+    "test_size": 639,
+    "feature_importances": {
+      "home_roll_fg_pct": 0.0412,
+      "home_roll_fg3_pct": 0.0392,
+      "home_roll_reb": 0.0345,
+      "home_roll_ast": 0.0407,
+      "home_roll_tov": 0.039,
+      "home_roll_pts": 0.0339,
+      "home_win_pct": 0.0855,
+      "home_rest_days": 0.044,
+      "home_win_streak": 0.0374,
+      "home_home_wpct": 0.047,
+      "away_roll_fg_pct": 0.0444,
+      "away_roll_fg3_pct": 0.038,
+      "away_roll_reb": 0.0393,
+      "away_roll_ast": 0.0415,
+      "away_roll_tov": 0.0387,
+      "away_roll_pts": 0.0374,
+      "away_win_pct": 0.0811,
+      "away_rest_days": 0.0382,
+      "away_win_streak": 0.0385,
+      "away_away_wpct": 0.0424,
+      "pts_diff": 0.0363,
+      "fg_pct_diff": 0.0406,
+      "reb_diff": 0.0411
+    },
+    "model_path": "/root/openclaw/data/models/nba_xgboost.pkl",
+    "training_time_seconds": 0.5,
+    "total_games": 3191
+  },
+  "predictions": {
+    "predictions": [
+      {
+        "home": "Orlando Magic",
+        "away": "Dallas Mavericks",
+        "home_abbrev": "ORL",
+        "away_abbrev": "DAL",
+        "home_win_prob": 0.237,
+        "away_win_prob": 0.763,
+        "predicted_winner": "Dallas Mavericks",
+        "confidence": 0.763,
+        "status": "7:00 pm ET"
+      },
+      {
+        "home": "Washington Wizards",
+        "away": "Utah Jazz",
+        "home_abbrev": "WAS",
+        "away_abbrev": "UTA",
+        "home_win_prob": 0.7531,
+        "away_win_prob": 0.2469,
+        "predicted_winner": "Washington Wizards",
+        "confidence": 0.753,
+        "status": "7:00 pm ET"
+      },
+      {
+        "home": "Miami Heat",
+        "away": "Brooklyn Nets",
+        "home_abbrev": "MIA",
+        "away_abbrev": "BKN",
+        "home_win_prob": 0.9702,
+        "away_win_prob": 0.0298,
+        "predicted_winner": "Miami Heat",
+        "confidence": 0.97,
+        "status": "7:30 pm ET"
+      },
+      {
+        "home": "Houston Rockets",
+        "away": "Golden State Warriors",
+        "home_abbrev": "HOU",
+        "away_abbrev": "GSW",
+        "home_win_prob": 0.9061,
+        "away_win_prob": 0.0939,
+        "predicted_winner": "Houston Rockets",
+        "confidence": 0.906,
+        "status": "7:30 pm ET"
+      },
+      {
+        "home": "Minnesota Timberwolves",
+        "away": "Toronto Raptors",
+        "home_abbrev": "MIN",
+        "away_abbrev": "TOR",
+        "home_win_prob": 0.4929,
+        "away_win_prob": 0.5071,
+        "predicted_winner": "Toronto Raptors",
+        "confidence": 0.507,
+        "status": "8:00 pm ET"
+      },
+      {
+        "home": "San Antonio Spurs",
+        "away": "Detroit Pistons",
+        "home_abbrev": "SAS",
+        "away_abbrev": "DET",
+        "home_win_prob": 0.6095,
+        "away_win_prob": 0.3905,
+        "predicted_winner": "San Antonio Spurs",
+        "confidence": 0.61,
+        "status": "8:00 pm ET"
+      },
+      {
+        "home": "Phoenix Suns",
+        "away": "Chicago Bulls",
+        "home_abbrev": "PHX",
+        "away_abbrev": "CHI",
+        "home_win_prob": 0.7634,
+        "away_win_prob": 0.2366,
+        "predicted_winner": "Phoenix Suns",
+        "confidence": 0.763,
+        "status": "9:00 pm ET"
+      },
+      {
+        "home": "Denver Nuggets",
+        "away": "Los Angeles Lakers",
+        "home_abbrev": "DEN",
+        "away_abbrev": "LAL",
+        "home_win_prob": 0.6699,
+        "away_win_prob": 0.3301,
+        "predicted_winner": "Denver Nuggets",
+        "confidence": 0.67,
+        "status": "10:00 pm ET"
+      },
+      {
+        "home": "Sacramento Kings",
+        "away": "New Orleans Pelicans",
+        "home_abbrev": "SAC",
+        "away_abbrev": "NOP",
+        "home_win_prob": 0.0791,
+        "away_win_prob": 0.9209,
+        "predicted_winner": "New Orleans Pelicans",
+        "confidence": 0.921,
+        "status": "10:00 pm ET"
+      }
+    ],
+    "model_trained": "2026-03-05T08:18:10.682314",
+    "sport": "nba",
+    "date": "2026-03-05"
+  },
+  "value_bets": {
+    "sport": "nba",
+    "timestamp": "2026-03-05T07:18:25.169153+00:00",
+    "value_plays": [],
+    "methodology": {
+      "step_1": "XGBoost model calculates true win probability from 23 features",
+      "step_2": "Compare vs Pinnacle sharp line (most accurate market)",
+      "step_3": "If model disagrees by >3%, check WHY (injuries, news, rest)",
+      "step_4": "If disagreement is justified, find best price at soft books",
+      "step_5": "Size bet using Quarter-Kelly: stake = 0.25 * (edge/odds - (1-edge)/(odds-1))"
+    },
+    "context": {
+      "news_headlines": [
+        "Utah faces Washington, seeks to end 7-game skid",
+        "Mike Brown points out that SGA is a tough cover",
+        "Leonard scores 29 as the Clippers beat the Pacers 130-107 for a third straight win",
+        "Indiana Pacers vs. LA Clippers: Game Highlights",
+        "Knicks' Brown: SGA tops in convincing refs of fouls"
+      ],
+      "injury_report": [],
+      "games_analyzed": 0,
+      "model_predictions_available": 9
+    },
+    "summary": {
+      "total_value_plays": 0,
+      "high_confidence": 0,
+      "medium_confidence": 0,
+      "avg_edge": 0.0
+    },
+    "scan_time_seconds": 1.7
+  },
+  "ev_scan": {
+    "error": "Odds API 401: {\"message\":\"Usage quota has been reached. See usage plans at https://the-odds-api.com\",\"error_code\":\"OUT_OF_USAGE_CREDITS\",\"details_url\":\"https://the-odds-api.com/liveapi/guides/v4/api-error-codes.html#out-of-usage-credits\"}\n"
+  },
+  "slack_summary": "\ud83c\udfc0 *Daily ML Betting Analysis \u2014 2026-03-05 @ 07:18 UTC*\nDashboard: http://152.53.55.207:8502\n\n*\ud83d\udce6 XGBoost Model Status*\n  \u2705 Model retrained (was 0.03 days old)\n  Trained at: /root/openclaw/data/models/nba_xgboost.pkl\n\n*\ud83d\udd2e Today's NBA Predictions*\n  9 game(s) predicted | Model: 2026-03-05\n  \ud83d\udd25 Dallas Mavericks @ Orlando Magic: *Dallas Mavericks* wins (76%) [high]\n  \ud83d\udd25 Utah Jazz @ Washington Wizards: *Washington Wizards* wins (75%) [high]\n  \ud83d\udd25 Brooklyn Nets @ Miami Heat: *Miami Heat* wins (97%) [high]\n  \ud83d\udd25 Golden State Warriors @ Houston Rockets: *Houston Rockets* wins (91%) [high]\n  \u2022 Toronto Raptors @ Minnesota Timberwolves: *Toronto Raptors* wins (51%) [low]\n  _...and 4 more \u2014 see dashboard_\n\n*\ud83d\udcb0 Value Bets (Betting Brain)*\n  \u2139\ufe0f No value plays identified today\n\n*\u26a1 +EV / Arbitrage Scan*\n  \u274c Error: Odds API 401: {\"message\":\"Usage quota has been reached. See usage plans at https://the-odds-api.com\",\"error_code\":\"OUT_OF_USAGE_CREDITS\",\"details_url\"\n\n_Pipeline completed in 18.2s | Generated 2026-03-05 @ 07:18 UTC_"
+}

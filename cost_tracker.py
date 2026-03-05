@@ -111,7 +111,30 @@ def log_cost_event(
     job_id: str = None,
     **kwargs,          # absorb unknown kwargs for compat
 ) -> float:
-    """Calculate (or accept) cost, write to Supabase + JSONL fallback, return cost."""
+    """Log a cost event to Supabase (primary) with JSONL fallback.
+    
+    Calculates the cost based on model pricing and token counts, then writes
+    the event to Supabase. If Supabase is unavailable, falls back to JSONL file.
+    
+    Args:
+        project: Project name (default: "openclaw")
+        agent: Agent name or identifier (default: "unknown")
+        model: Model name used for API call (default: "unknown")
+        tokens_input: Number of input tokens (default: 0)
+        tokens_output: Number of output tokens (default: 0)
+        cost: Pre-calculated cost in USD; if None, calculated from tokens (default: None)
+        event_type: Type of event being logged, e.g. "api_call" (default: "api_call")
+        metadata: Optional dict of additional metadata to store (default: None)
+        job_id: Optional job ID to associate with this cost event (default: None)
+    
+    Returns:
+        float: The cost in USD that was logged
+    
+    Example:
+        >>> log_cost_event(project="my-project", agent="coder", model="claude-opus-4-6",
+        ...                tokens_input=1000, tokens_output=500)
+        0.0615
+    """
     calculated_cost = cost if cost is not None else _calc_cost(model, tokens_input, tokens_output)
 
     # Try Supabase first

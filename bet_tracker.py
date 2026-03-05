@@ -67,6 +67,9 @@ def _save_ledger(ledger: List[Dict[str, Any]]) -> None:
 
 def _log_bet(game: str, side: str, odds: float, model_prob: float, edge_pct: float,
              book: str, stake_usd: float, market: str = "h2h") -> Dict[str, Any]:
+    if odds <= 0:
+        raise ValueError('odds must be positive')
+             book: str, stake_usd: float, market: str = "h2h") -> Dict[str, Any]:
     """Log a new bet recommendation."""
     ledger = _load_ledger()
 

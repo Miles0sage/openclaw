@@ -1,0 +1,1206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ember & Brew | Artisan Coffee Roasters</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #3E2723; /* Dark Coffee */
+            --secondary: #D7CCC8; /* Light Cream */
+            --accent: #FFB300; /* Gold */
+            --accent-hover: #FFA000;
+            --text-dark: #212121;
+            --text-light: #E0E0E0;
+            --bg-dark: #1A120B;
+            --bg-light: #F5F5F5;
+            --shadow: 0 10px 30px rgba(62, 39, 35, 0.2);
+            --transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            color: var(--text-dark);
+            background-color: var(--bg-light);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        h1, h2, h3, h4, h5, h6 {
+            font-family: 'Playfair Display', serif;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        a {
+            text-decoration: none;
+            color: inherit;
+            transition: var(--transition);
+        }
+
+        ul {
+            list-style: none;
+        }
+
+        section {
+            padding: 8rem 0;
+            position: relative;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        .text-center { text-align: center; }
+        .text-gold { color: var(--accent); }
+        .btn {
+            display: inline-block;
+            padding: 1rem 2.5rem;
+            border-radius: 50px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .btn-primary {
+            background-color: var(--accent);
+            color: var(--primary);
+            box-shadow: 0 4px 15px rgba(255, 179, 0, 0.3);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--accent-hover);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(255, 179, 0, 0.5);
+        }
+
+        .btn-outline {
+            border: 2px solid var(--primary);
+            color: var(--primary);
+            background: transparent;
+        }
+
+        .btn-outline:hover {
+            background-color: var(--primary);
+            color: var(--secondary);
+        }
+
+        /* Navigation */
+        nav {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            z-index: 1000;
+            padding: 1.5rem 0;
+            transition: var(--transition);
+        }
+
+        nav.scrolled {
+            background-color: rgba(26, 18, 11, 0.95);
+            padding: 1rem 0;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+
+        .nav-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-family: 'Playfair Display', serif;
+            font-size: 2rem;
+            font-weight: 900;
+            color: var(--secondary);
+            letter-spacing: 2px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2.5rem;
+        }
+
+        .nav-links a {
+            color: var(--secondary);
+            font-size: 0.9rem;
+            font-weight: 500;
+            position: relative;
+        }
+
+        .nav-links a::after {
+            content: '';
+            position: absolute;
+            bottom: -5px;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background-color: var(--accent);
+            transition: var(--transition);
+        }
+
+        .nav-links a:hover::after {
+            width: 100%;
+        }
+
+        .hamburger {
+            display: none;
+            cursor: pointer;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .hamburger span {
+            width: 25px;
+            height: 3px;
+            background-color: var(--secondary);
+            transition: var(--transition);
+        }
+
+        /* Hero Section */
+        #hero {
+            height: 100vh;
+            min-height: 600px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+            background: linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.7)), url('https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?q=80&w=1920&auto=format&fit=crop') no-repeat center center/cover;
+            color: var(--secondary);
+        }
+
+        .hero-content {
+            max-width: 800px;
+            text-align: center;
+            z-index: 2;
+            opacity: 0;
+            animation: fadeInUp 1s ease forwards;
+        }
+
+        .hero-content h1 {
+            font-size: clamp(3rem, 8vw, 6rem);
+            margin-bottom: 1.5rem;
+            line-height: 1.1;
+        }
+
+        .hero-content p {
+            font-size: clamp(1rem, 2vw, 1.5rem);
+            margin-bottom: 3rem;
+            font-weight: 300;
+            opacity: 0.9;
+        }
+
+        /* Section Headers */
+        .section-header {
+            text-align: center;
+            margin-bottom: 5rem;
+        }
+
+        .section-header h2 {
+            font-size: clamp(2.5rem, 5vw, 4rem);
+            margin-bottom: 1rem;
+            color: var(--primary);
+        }
+
+        .section-header .line {
+            width: 80px;
+            height: 4px;
+            background-color: var(--accent);
+            margin: 0 auto;
+        }
+
+        /* About Section */
+        #about {
+            background-color: var(--primary);
+            color: var(--secondary);
+        }
+
+        .about-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4rem;
+            align-items: center;
+        }
+
+        .about-text h3 {
+            font-size: 2.5rem;
+            margin-bottom: 1.5rem;
+            color: var(--accent);
+        }
+
+        .about-text p {
+            margin-bottom: 1.5rem;
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .about-image {
+            position: relative;
+        }
+
+        .about-image img {
+            width: 100%;
+            height: 500px;
+            object-fit: cover;
+            border-radius: 4px;
+            box-shadow: var(--shadow);
+        }
+
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            margin-top: 3rem;
+        }
+
+        .stat-number {
+            font-family: 'Playfair Display', serif;
+            font-size: 3rem;
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .stat-label {
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        /* Menu Section */
+        #menu {
+            background-color: #FDFBF7;
+        }
+
+        .menu-filters {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-bottom: 4rem;
+            flex-wrap: wrap;
+        }
+
+        .filter-btn {
+            padding: 0.5rem 1.5rem;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 30px;
+            cursor: pointer;
+            font-family: 'Inter', sans-serif;
+            font-weight: 500;
+            transition: var(--transition);
+        }
+
+        .filter-btn.active, .filter-btn:hover {
+            background-color: var(--primary);
+            color: var(--secondary);
+            border-color: var(--primary);
+        }
+
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 3rem;
+        }
+
+        .menu-item {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+            transition: var(--transition);
+            opacity: 0;
+            transform: translateY(30px);
+        }
+
+        .menu-item.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .menu-item:hover {
+            transform: translateY(-10px);
+            box-shadow: var(--shadow);
+        }
+
+        .menu-img {
+            height: 250px;
+            overflow: hidden;
+        }
+
+        .menu-img img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.6s ease;
+        }
+
+        .menu-item:hover .menu-img img {
+            transform: scale(1.1);
+        }
+
+        .menu-details {
+            padding: 2rem;
+        }
+
+        .menu-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 1rem;
+        }
+
+        .menu-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 1.75rem;
+            color: var(--primary);
+        }
+
+        .menu-price {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .menu-desc {
+            color: #666;
+            font-size: 0.95rem;
+        }
+
+        /* Gallery Section */
+        #gallery {
+            background-color: var(--bg-dark);
+            color: var(--secondary);
+        }
+
+        .gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+
+        .gallery-item {
+            height: 300px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .gallery-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.6s ease;
+        }
+
+        .gallery-item:hover img {
+            transform: scale(1.1);
+        }
+
+        .gallery-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: var(--transition);
+        }
+
+        .gallery-item:hover .gallery-overlay {
+            opacity: 1;
+        }
+
+        .gallery-overlay span {
+            font-family: 'Playfair Display', serif;
+            font-size: 2rem;
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        /* Contact & Location */
+        #contact {
+            background-color: #ECEFF1;
+        }
+
+        .contact-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4rem;
+        }
+
+        .contact-info h3 {
+            font-size: 2.5rem;
+            margin-bottom: 2rem;
+            color: var(--primary);
+        }
+
+        .info-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .icon-box {
+            width: 50px;
+            height: 50px;
+            background-color: var(--primary);
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .info-text h4 {
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .info-text p {
+            color: #666;
+        }
+
+        .map-container {
+            height: 450px;
+            background-color: #ccc;
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: var(--shadow);
+        }
+
+        .map-placeholder {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, #3E2723 25%, #4E342E 25%, #4E342E 50%, #3E2723 50%, #3E2723 75%, #4E342E 75%, #4E342E 100%);
+            background-size: 40px 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255,255,255,0.5);
+            font-size: 2rem;
+            font-weight: 900;
+            text-transform: uppercase;
+        }
+        
+        .map-marker {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 40px;
+            background-color: var(--accent);
+            border-radius: 50%;
+            border: 4px solid var(--primary);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            animation: pulse 2s infinite;
+        }
+
+        /* Form */
+        .contact-form {
+            background: white;
+            padding: 3rem;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--primary);
+            font-weight: 500;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 1rem;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
+            transition: var(--transition);
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(255, 179, 0, 0.1);
+        }
+
+        textarea.form-control {
+            resize: vertical;
+            min-height: 150px;
+        }
+
+        /* Footer */
+        footer {
+            background-color: var(--primary);
+            color: var(--secondary);
+            padding: 5rem 0 2rem;
+        }
+
+        .footer-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr;
+            gap: 3rem;
+            margin-bottom: 4rem;
+        }
+
+        .footer-brand h2 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            color: var(--secondary);
+        }
+
+        .footer-brand p {
+            opacity: 0.7;
+            max-width: 300px;
+        }
+
+        .footer-col h4 {
+            color: var(--accent);
+            margin-bottom: 1.5rem;
+            font-size: 1.2rem;
+        }
+
+        .footer-col ul li {
+            margin-bottom: 0.8rem;
+        }
+
+        .footer-col ul li a {
+            opacity: 0.7;
+            transition: opacity 0.3s;
+        }
+
+        .footer-col ul li a:hover {
+            opacity: 1;
+            color: var(--accent);
+        }
+
+        .social-links {
+            display: flex;
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .social-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+        }
+
+        .social-icon:hover {
+            background-color: var(--accent);
+            color: var(--primary);
+        }
+
+        .copyright {
+            text-align: center;
+            padding-top: 2rem;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            font-size: 0.9rem;
+            opacity: 0.5;
+        }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes pulse {
+            0% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 0 rgba(255, 179, 0, 0.7); }
+            70% { transform: translate(-50%, -50%) scale(1.3); box-shadow: 0 0 0 15px rgba(255, 179, 0, 0); }
+            100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 0 rgba(255, 179, 0, 0); }
+        }
+
+        /* Responsive */
+        @media (max-width: 992px) {
+            .about-grid {
+                grid-template-columns: 1fr;
+            }
+            .contact-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .nav-links {
+                position: fixed;
+                top: 0;
+                right: -100%;
+                height: 100vh;
+                width: 70%;
+                background-color: var(--primary);
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                transition: 0.4s ease;
+                box-shadow: -5px 0 20px rgba(0,0,0,0.5);
+            }
+
+            .nav-links.active {
+                right: 0;
+            }
+
+            .nav-links a {
+                color: var(--secondary);
+                font-size: 1.5rem;
+            }
+
+            .hamburger {
+                display: flex;
+                z-index: 1001;
+            }
+
+            .hamburger.active span:nth-child(1) {
+                transform: rotate(45deg) translate(8px, 8px);
+            }
+            .hamburger.active span:nth-child(2) {
+                opacity: 0;
+            }
+            .hamburger.active span:nth-child(3) {
+                transform: rotate(-45deg) translate(7px, -7px);
+            }
+
+            .footer-grid {
+                grid-template-columns: 1fr;
+                text-align: center;
+            }
+            
+            .footer-brand, .footer-col {
+                margin: 0 auto;
+            }
+            
+            .social-links {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Navigation -->
+    <nav id="navbar">
+        <div class="container nav-container">
+            <a href="#" class="logo">EMBER & BREW</a>
+            <ul class="nav-links">
+                <li><a href="#hero">Home</a></li>
+                <li><a href="#about">About</a></li>
+                <li><a href="#menu">Menu</a></li>
+                <li><a href="#gallery">Gallery</a></li>
+                <li><a href="#contact">Contact</a></li>
+                <li><a href="#menu" class="btn btn-primary" style="padding: 0.5rem 1.5rem; margin-left: 1rem;">Order Online</a></li>
+            </ul>
+            <div class="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="hero">
+        <div class="hero-content">
+            <h1>Awaken Your Senses</h1>
+            <p>Artisan roasted beans, handcrafted with passion, and served in an atmosphere of warmth. Experience the perfect cup at Ember & Brew.</p>
+            <div style="display: flex; gap: 1.5rem; justify-content: center; flex-wrap: wrap;">
+                <a href="#menu" class="btn btn-primary">View Our Menu</a>
+                <a href="#about" class="btn btn-outline" style="border-color: var(--secondary); color: var(--secondary);">Our Story</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- About Section -->
+    <section id="about">
+        <div class="container">
+            <div class="about-grid">
+                <div class="about-text">
+                    <div class="section-header" style="text-align: left; margin-bottom: 2rem;">
+                        <div class="line" style="margin: 0;"></div>
+                    </div>
+                    <h3>The Art of Coffee, Since 2015</h3>
+                    <p>At Ember & Brew, we believe coffee is more than just a drink—it's a ritual. Our journey began in a small garage where we roasted beans over weekend fires, seeking the perfect balance of flavor and aroma.</p>
+                    <p>Today, we source our beans directly from sustainable farms across the equator, ensuring fair trade practices and exceptional quality. Every cup we serve is a testament to our commitment to the craft.</p>
+                    <p>We don't just serve coffee; we serve community. Whether you're here to work, relax, or catch up with friends, our doors are open wide.</p>
+                    
+                    <div class="stat">
+                        <div class="stat-number">8</div>
+                        <div class="stat-label">Years of Roasting</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-number">50+</div>
+                        <div class="stat-label">Local Partners</div>
+                    </div>
+                </div>
+                <div class="about-image">
+                    <img src="https://images.unsplash.com/photo-1541102563829-621f99672846?q=80&w=1000&auto=format&fit=crop" alt="Barista pouring latte art">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Menu Section -->
+    <section id="menu">
+        <div class="container">
+            <div class="section-header">
+                <h2>Handcrafted Delights</h2>
+                <div class="line"></div>
+                <p style="margin-top: 1rem; max-width: 600px; margin-left: auto; margin-right: auto;">
+                    Explore our seasonal menu featuring small-batch roasts, signature espresso drinks, and freshly baked pastries made in-house daily.
+                </p>
+            </div>
+
+            <div class="menu-filters">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="espresso">Espresso</button>
+                <button class="filter-btn" data-filter="drip">Drip & Pour Over</button>
+                <button class="filter-btn" data-filter="cold">Cold Brew</button>
+                <button class="filter-btn" data-filter="pastry">Pastries</button>
+            </div>
+
+            <div class="menu-grid">
+                <!-- Espresso Items -->
+                <div class="menu-item" data-category="espresso">
+                    <div class="menu-img">
+                        <img src="https://images.unsplash.com/photo-1579871494447-9811cf80d66c?q=80&w=600&auto=format&fit=crop" alt="Double Espresso">
+                    </div>
+                    <div class="menu-details">
+                        <div class="menu-header">
+                            <h3 class="menu-title">Double Espresso</h3>
+                            <span class="menu-price">$3.50</span>
+                        </div>
+                        <p class="menu-desc">Rich, intense, and full-bodied. A classic shot of our signature dark roast blend.</p>
+                    </div>
+                </div>
+                <div class="menu-item" data-category="espresso">
+                    <div class="menu-img">
+                        <img src="https://images.unsplash.com/photo-1510591509098-f4fdc6d0ff04?q=80&w=600&auto=format&fit=crop" alt="Cappuccino">
+                    </div>
+                    <div class="menu-details">
+                        <div class="menu-header">
+                            <h3 class="menu-title">Classic Cappuccino</h3>
+                            <span class="menu-price">$4.75</span>
+                        </div>
+                        <p class="menu-desc">Equal parts espresso, steamed milk, and foam. Topped with cocoa or cinnamon.</p>
+                    </div>
+                </div>
+                <div class="menu-item" data-category="espresso">
+                    <div class="menu-img">
+                        <img src="https://images.unsplash.com/photo-1517741608966-814484229586?q=80&w=600&auto=format&fit=crop" alt="Flat White">
+                    </div>
+                    <div class="menu-details">
+                        <div class="menu-header">
+                            <h3 class="menu-title">Velvet Flat White</h3>
+                            <span class="menu-price">$4.50</span>
+                        </div>
+                        <p class="menu-desc">Double shot espresso with micro-foam milk. Smooth, creamy, and strong.</p>
+                    </div>
+                </div>
+
+                <!-- Drip Items -->
+                <div class="menu-item" data-category="drip">
+                    <div class="menu-img">
+                        <img src="https://images.unsplash.com/photo-1541167760496-1628856ab772?q=80&w=600&auto=format&fit=crop" alt="Pour Over">
+                    </div>
+                    <div class="menu-details">
+                        <div class="menu-header">
+                            <h3 class="menu-title">Ethiopian Pour Over</h3>
+                            <span class="menu-price">$5.00</span>
+                        </div>
+                        <p class="menu-desc">Floral and wine-like notes. Served in a ceramic carafe for the full experience.</p>
+                    </div>
+                </div>
+                <div class="menu-item" data-category="drip">
+                    <div class="menu-img">
+                        <img src="https://images.unsplash.com/photo-1513558161213-306c76568f96?q=80&w=600&auto=format&fit=crop" alt="Americano">
+                    </div>
+                    <div class="menu-details">
+                        <div class="menu-header">
+                            <h3 class="menu-title">Smoked Americano</h3>
+                            <span class="menu-price">$4.25</span>
+                        </div>
+                        <p class="menu-desc">Our dark roast espresso diluted with hot water for a bold, smooth taste.</p>
+                    </div>
+                </div>
+
+                <!-- Cold Brew Items -->
+                <div class="menu-item" data-category="cold">
+                    <div class="menu-img">
+                        <img src="https://images.unsplash.com/photo-1517232655245-287c76851f7c?q=80&w=600&auto=format&fit=crop" alt="Cold Brew">
+                    </div>
+                    <div class="menu-details">
+                        <div class="menu-header">
+                            <h3 class="menu-title">Nitro Cold Brew</h3>
+                            <span class="menu-price">$5.50</span>
+                        </div>
+                        <p class="menu-desc">Infused with nitrogen for a creamy texture without milk. 20-hour steep.</p>
+                    </div>
+                </div>
+                <div class="menu-item" data-category="cold">
+                    <div class="menu-img">
+                        <img src="https://images.unsplash.com/photo-1531980526839-68131243597d?q=80&w=600&auto=format&fit=crop" alt="Iced Latte">
+                    </div>
+                    <div class="menu-details">
+                        <div class="menu-header">
+                            <h3 class="menu-title">Vanilla Bean Iced Latte</h3>
+                            <span class="menu-price">$5.25</span>
+                        </div>
+                        <p class="menu-desc">Smooth espresso with cold milk, vanilla syrup, and a mountain of ice.</p>
+                    </div>
+                </div>
+
+                <!-- Pastries Items -->
+                <div class="menu-item" data-category="pastry">
+                    <div class="menu-img">
+                        <img src="https://images.unsplash.com/photo-1555507036-ab1f40388085?q=80&w=600&auto=format&fit=crop" alt="Croissant">
+                    </div>
+                    <div class="menu-details">
+                        <div class="menu-header">
+                            <h3 class="menu-title">Butter Croissant</h3>
+                            <span class="menu-price">$3.75</span>
+                        </div>
+                        <p class="menu-desc">Freshly baked daily. Light, flaky, and filled with rich French butter.</p>
+                    </div>
+                </div>
+                <div class="menu-item" data-category="pastry">
+                    <div class="menu-img">
+                        <img src="https://images.unsplash.com/photo-1529333166437-7750a6dd5a70?q=80&w=600&auto=format&fit=crop" alt="Breakfast Bagel">
+                    </div>
+                    <div class="menu-details">
+                        <div class="menu-header">
+                            <h3 class="menu-title">Artisan Bagel & Cream Cheese</h3>
+                            <span class="menu-price">$4.50</span>
+                        </div>
+                        <p class="menu-desc">Toasted to perfection with our house-made herb cream cheese.</p>
+                    </div>
+                </div>
+                <div class="menu-item" data-category="pastry">
+                    <div class="menu-img">
+                        <img src="https://images.unsplash.com/photo-1566879796366-233298d938b6?q=80&w=600&auto=format&fit=crop" alt="Coffee Cake">
+                    </div>
+                    <div class="menu-details">
+                        <div class="menu-header">
+                            <h3 class="menu-title">Caramel Pecan Scone</h3>
+                            <span class="menu-price">$4.25</span>
+                        </div>
+                        <p class="menu-desc">Moist, buttery scone loaded with caramel drizzle and toasted pecans.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Gallery Section -->
+    <section id="gallery">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="text-center" style="color: var(--secondary);">The Ember Experience</h2>
+                <div class="line" style="background-color: var(--accent);"></div>
+            </div>
+            <div class="gallery-grid">
+                <div class="gallery-item">
+                    <img src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?q=80&w=800&auto=format&fit=crop" alt="Coffee Shop Interior">
+                    <div class="gallery-overlay"><span>Atmosphere</span></div>
+                </div>
+                <div class="gallery-item">
+                    <img src="https://images.unsplash.com/photo-1509365465985-25d11c17e812?q=80&w=800&auto=format&fit=crop" alt="Coffee Beans">
+                    <div class="gallery-overlay"><span>The Beans</span></div>
+                </div>
+                <div class="gallery-item">
+                    <img src="https://images.unsplash.com/photo-1578985545062-69928b1d9587?q=80&w=800&auto=format&fit=crop" alt="Barista at work">
+                    <div class="gallery-overlay"><span>The Craft</span></div>
+                </div>
+                <div class="gallery-item">
+                    <img src="https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?q=80&w=800&auto=format&fit=crop" alt="Cozy Interior">
+                    <div class="gallery-overlay"><span>Cozy Vibes</span></div>
+                </div>
+                <div class="gallery-item">
+                    <img src="https://images.unsplash.com/photo-1510591509098-f4fdc6d0ff04?q=80&w=800&auto=format&fit=crop" alt="Latte Art">
+                    <div class="gallery-overlay"><span>Artistry</span></div>
+                </div>
+                <div class="gallery-item">
+                    <img src="https://images.unsplash.com/photo-1507679799987-c73779587ccf?q=80&w=800&auto=format&fit=crop" alt="Customer Reading">
+                    <div class="gallery-overlay"><span>Community</span></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Contact & Location Section -->
+    <section id="contact">
+        <div class="container">
+            <div class="section-header">
+                <h2>Visit Our Roastery</h2>
+                <div class="line"></div>
+                <p style="margin-top: 1rem;">Stop by for a cup, or reach out for wholesale inquiries and event bookings.</p>
+            </div>
+
+            <div class="contact-container">
+                <div class="contact-info">
+                    <h3>Find Us</h3>
+                    <p style="margin-bottom: 2rem; color: #555;">Located in the heart of the arts district, Ember & Brew is your neighborhood haven for exceptional coffee and warm company.</p>
+
+                    <div class="info-item">
+                        <div class="icon-box">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                        </div>
+                        <div class="info-text">
+                            <h4>Address</h4>
+                            <p>742 Roast Avenue<br>Arts District, Portland OR 97205</p>
+                        </div>
+                    </div>
+
+                    <div class="info-item">
+                        <div class="icon-box">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+                        </div>
+                        <div class="info-text">
+                            <h4>Phone</h4>
+                            <p>(503) 555-BREW</p>
+                        </div>
+                    </div>
+
+                    <div class="info-item">
+                        <div class="icon-box">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        </div>
+                        <div class="info-text">
+                            <h4>Hours</h4>
+                            <p>Mon - Fri: 6:00 AM - 8:00 PM<br>Sat - Sun: 7:00 AM - 9:00 PM</p>
+                        </div>
+                    </div>
+
+                    <div class="info-item">
+                        <div class="icon-box">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                        </div>
+                        <div class="info-text">
+                            <h4>Email</h4>
+                            <p>hello@emberandbrew.com</p>
+                        </div>
+                    </div>
+
+                    <div class="map-container">
+                        <div class="map-placeholder">
+                            <div class="map-marker"></div>
+                            Ember & Brew
+                        </div>
+                    </div>
+                </div>
+
+                <div class="contact-form">
+                    <h3 style="font-size: 2rem; color: var(--primary); margin-bottom: 2rem;">Send Us a Message</h3>
+                    <form id="contactForm">
+                        <div class="form-group">
+                            <label for="name">Your Name</label>
+                            <input type="text" id="name" class="form-control" placeholder="Jane Doe" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="email">Email Address</label>
+                            <input type="email" id="email" class="form-control" placeholder="jane@example.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="subject">Subject</label>
+                            <select id="subject" class="form-control">
+                                <option value="">Select a topic</option>
+                                <option value="general">General Inquiry</option>
+                                <option value="wholesale">Wholesale</option>
+                                <option value="events">Event Booking</option>
+                                <option value="feedback">Feedback</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="message">Message</label>
+                            <textarea id="message" class="form-control" placeholder="Tell us what's on your mind..." required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="width: 100%; border: none; font-size: 1rem;">Send Message</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-brand">
+                    <h2>EMBER & BREW</h2>
+                    <p>Artisan roasted beans, handcrafted with passion. Serving the Portland arts district since 2015.</p>
+                    <div class="social-links">
+                        <a href="#" class="social-icon" aria-label="Instagram">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1112.63 8 4 4 0 0116 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+                        </a>
+                        <a href="#" class="social-icon" aria-label="Twitter">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 3a10.9 10.9 0 01-3.14 1.53 4.48 4.48 0 00-7.86 3v1A10.66 10.66 0 013 4s-4 9 5 13a11.64 11.64 0 01-7 2c9 5 20 0 20-11.5a4.5 4.5 0 00-.08-.83A7.72 7.72 0 0023 3z"/></svg>
+                        </a>
+                        <a href="#" class="social-icon" aria-label="Facebook">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/></svg>
+                        </a>
+                    </div>
+                </div>
+                <div class="footer-col">
+                    <h4>Quick Links</h4>
+                    <ul>
+                        <li><a href="#hero">Home</a></li>
+                        <li><a href="#about">Our Story</a></li>
+                        <li><a href="#menu">Menu</a></li>
+                        <li><a href="#gallery">Gallery</a></li>
+                        <li><a href="#contact">Contact</a></li>
+                    </ul>
+                </div>
+                <div class="footer-col">
+                    <h4>Open Hours</h4>
+                    <ul>
+                        <li>Monday - Friday</li>
+                        <li style="opacity: 0.7; margin-bottom: 1.5rem;">6:00 AM - 8:00 PM</li>
+                        <li>Saturday - Sunday</li>
+                        <li style="opacity: 0.7;">7:00 AM - 9:00 PM</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="copyright">
+                <p>&copy; 2026 Ember & Brew. All rights reserved. Crafted with warmth.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- JavaScript -->
+    <script>
+        // Navbar scroll effect
+        const navbar = document.getElementById('navbar');
+        window.addEventListener('scroll', () => {
+            navbar.classList.toggle('scrolled', window.scrollY > 50);
+        });
+
+        // Mobile hamburger menu
+        const hamburger = document.querySelector('.hamburger');
+        const navLinks = document.querySelector('.nav-links');
+        hamburger.addEventListener('click', () => {
+            hamburger.classList.toggle('active');
+            navLinks.classList.toggle('active');
+        });
+
+        // Close mobile menu on link click
+        document.querySelectorAll('.nav-links a').forEach(link => {
+            link.addEventListener('click', () => {
+                hamburger.classList.remove('active');
+                navLinks.classList.remove('active');
+            });
+        });
+
+        // Menu filter
+        const filterBtns = document.querySelectorAll('.filter-btn');
+        const menuItems = document.querySelectorAll('.menu-item');
+
+        filterBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                filterBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const filter = btn.dataset.filter;
+
+                menuItems.forEach(item => {
+                    if (filter === 'all' || item.dataset.category === filter) {
+                        item.style.display = 'block';
+                        setTimeout(() => item.classList.add('visible'), 50);
+                    } else {
+                        item.classList.remove('visible');
+                        setTimeout(() => { item.style.display = 'none'; }, 400);
+                    }
+                });
+            });
+        });
+
+        // Intersection Observer for scroll animations
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, observerOptions);
+
+        menuItems.forEach(item => observer.observe(item));
+
+        // Parallax effect on hero
+        window.addEventListener('scroll', () => {
+            const hero = document.getElementById('hero');
+            const scrolled = window.scrollY;
+            hero.style.backgroundPositionY = scrolled * 0.5 + 'px';
+        });
+
+        // Contact form handler
+        document.getElementById('contactForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const btn = e.target.querySelector('button[type="submit"]');
+            btn.textContent = 'Message Sent!';
+            btn.style.backgroundColor = '#4CAF50';
+            setTimeout(() => {
+                btn.textContent = 'Send Message';
+                btn.style.backgroundColor = '';
+                e.target.reset();
+            }, 3000);
+        });
+
+        // Smooth scroll for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function(e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
+    </script>
+
+</body>
+</html>

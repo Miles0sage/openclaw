@@ -1,0 +1,49 @@
+{
+  "name": "ember-and-brew",
+  "version": "1.0.0",
+  "description": "A beautiful, open-source coffee shop website template built with Next.js 15, Tailwind CSS 4, and TypeScript. Dark warm theme, parallax hero, animated menu, gallery grid, and contact form.",
+  "private": false,
+  "license": "MIT",
+  "author": "Cybershield Agency",
+  "homepage": "https://cybershieldagency.github.io/ember-and-brew",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cybershieldagency/ember-and-brew.git"
+  },
+  "keywords": [
+    "coffee-shop",
+    "restaurant-template",
+    "website-template",
+    "nextjs",
+    "tailwindcss",
+    "typescript",
+    "landing-page",
+    "open-source",
+    "responsive",
+    "dark-theme"
+  ],
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "preview": "npx serve out -l 8080",
+    "export": "next build"
+  },
+  "dependencies": {
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}

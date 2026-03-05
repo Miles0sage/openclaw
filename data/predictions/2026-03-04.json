@@ -88,5 +88,108 @@
       "bet_size": 3.29,
       "expected_profit": 0.69
     }
-  ]
+  ],
+  "results": {
+    "graded_at": "2026-03-05T17:45:48.341314+00:00Z",
+    "predictions": [
+      {
+        "home": "New York Knicks",
+        "away": "Oklahoma City Thunder",
+        "predicted_winner": "Oklahoma City Thunder",
+        "actual_winner": "Oklahoma City Thunder",
+        "home_score": 100,
+        "away_score": 103,
+        "correct": true
+      },
+      {
+        "home": "Boston Celtics",
+        "away": "Charlotte Hornets",
+        "predicted_winner": "Boston Celtics",
+        "actual_winner": "Charlotte Hornets",
+        "home_score": 89,
+        "away_score": 118,
+        "correct": false
+      },
+      {
+        "home": "Philadelphia 76ers",
+        "away": "Utah Jazz",
+        "predicted_winner": "Philadelphia 76ers",
+        "actual_winner": "Philadelphia 76ers",
+        "home_score": 106,
+        "away_score": 102,
+        "correct": true
+      },
+      {
+        "home": "Memphis Grizzlies",
+        "away": "Portland Trail Blazers",
+        "predicted_winner": "Portland Trail Blazers",
+        "actual_winner": "Portland Trail Blazers",
+        "home_score": 114,
+        "away_score": 122,
+        "correct": true
+      },
+      {
+        "home": "Milwaukee Bucks",
+        "away": "Atlanta Hawks",
+        "predicted_winner": "Milwaukee Bucks",
+        "actual_winner": "Atlanta Hawks",
+        "home_score": 113,
+        "away_score": 131,
+        "correct": false
+      },
+      {
+        "home": "Los Angeles Clippers",
+        "away": "Indiana Pacers",
+        "predicted_winner": "Los Angeles Clippers",
+        "actual_winner": "UNMATCHED",
+        "home_score": 0,
+        "away_score": 0,
+        "correct": null
+      }
+    ],
+    "bets": [
+      {
+        "game": "Indiana Pacers @ Los Angeles Clippers",
+        "bet_on": "Indiana Pacers",
+        "odds": 7.4,
+        "bet_size": 10.04,
+        "won": false,
+        "profit": -10.04
+      },
+      {
+        "game": "Utah Jazz @ Philadelphia 76ers",
+        "bet_on": "Philadelphia 76ers",
+        "odds": 1.32,
+        "bet_size": 17.94,
+        "won": true,
+        "profit": 5.74
+      },
+      {
+        "game": "Atlanta Hawks @ Milwaukee Bucks",
+        "bet_on": "Milwaukee Bucks",
+        "odds": 1.95,
+        "bet_size": 5.98,
+        "won": false,
+        "profit": -5.98
+      },
+      {
+        "game": "Oklahoma City Thunder @ New York Knicks",
+        "bet_on": "New York Knicks",
+        "odds": 2.6,
+        "bet_size": 3.29,
+        "won": false,
+        "profit": -3.29
+      }
+    ],
+    "summary": {
+      "picks_correct": 3,
+      "picks_total": 5,
+      "picks_pct": 60.0,
+      "bets_won": 1,
+      "bets_total": 4,
+      "total_wagered": 37.25,
+      "total_profit": -13.57,
+      "roi_pct": -36.4
+    }
+  }
 }
