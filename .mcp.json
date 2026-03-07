@@ -4,16 +4,30 @@
       "command": "mcp-server-tree-sitter",
       "args": []
     },
-    "firecrawl": {
-      "command": "firecrawl-mcp",
-      "args": [],
-      "env": {
-        "FIRECRAWL_API_KEY": ""
-      }
-    },
     "chrome-devtools": {
       "command": "chrome-devtools-mcp",
       "args": ["--autoConnect"]
+    },
+    "mem0": {
+      "command": "npx",
+      "args": ["-y", "@mem0/mcp-server"],
+      "env": {
+        "MEM0_API_KEY": "m0-BN1oF7rH720Y2JmmSbGxj9cncZy4cdnS8m3UPoKyh"
+      }
+    },
+    "firecrawl": {
+      "command": "npx",
+      "args": ["-y", "firecrawl-mcp"],
+      "env": {
+        "FIRECRAWL_API_KEY": "fc-aac4b5382aff41a080c103a2f1477701"
+      }
+    },
+    "deep-research-mcp": {
+      "command": "node",
+      "args": ["/root/openclaw/mcp-servers/deep-research-mcp/dist/index.js"],
+      "env": {
+        "PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}"
+      }
     }
   }
 }
